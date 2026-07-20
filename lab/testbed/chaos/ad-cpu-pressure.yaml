@@ -1,0 +1,27 @@
+# CPU pressure on the ad service.
+#
+# The shape this produces is the one the product has to tell apart from an
+# attack: latency and saturation deform while request rate and behavioural
+# ratios do not. It is the "operational fault hiding inside normal traffic"
+# case in miniature.
+#
+# Containment: the stressor runs inside the target pod's own cgroup, so it can
+# only consume what that pod was already allowed. It cannot pressure the host,
+# and it expires on its own.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: ad-cpu-pressure
+  namespace: otel-demo
+spec:
+  mode: one
+  duration: 3m
+  selector:
+    namespaces:
+      - otel-demo
+    labelSelectors:
+      app.kubernetes.io/component: ad
+  stressors:
+    cpu:
+      workers: 1
+      load: 80

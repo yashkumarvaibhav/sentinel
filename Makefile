@@ -104,6 +104,14 @@ lab-deploy: ## Deploy the instrumented mesh into the testbed
 lab-undeploy: ## Remove the instrumented mesh, keeping the cluster
 	helm --kube-context k3d-sentinel-lab -n otel-demo uninstall astronomy
 
+.PHONY: lab-chaos
+lab-chaos: ## Run a chaos experiment (EXPERIMENT=name)
+	./lab/testbed/lab-chaos.sh
+
+.PHONY: lab-load
+lab-load: ## Run a load profile against the testbed (PROFILE=, RATE=, DURATION=)
+	./lab/loadgen/lab-load.sh
+
 .PHONY: lab-status
 lab-status: ## Show testbed nodes and workloads
 	kubectl --context k3d-sentinel-lab get nodes -o wide

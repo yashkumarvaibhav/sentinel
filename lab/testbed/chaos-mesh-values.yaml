@@ -1,0 +1,37 @@
+# Chaos Mesh — real fault injection for the testbed.
+#
+# Chaos is how we produce the incidents the product is graded on: CPU pressure,
+# pod kills, network latency and loss, in the same shapes a real outage takes.
+# It runs entirely inside the cluster and, like everything else on this shared
+# host, inside hard limits.
+
+chaosDaemon:
+  # k3s ships its own containerd at a non-default socket path; the daemon
+  # cannot attach to container namespaces without this.
+  runtime: containerd
+  socketPath: /run/k3s/containerd/containerd.sock
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+
+controllerManager:
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+
+# No dashboard: it is another web app wanting a port we have not been
+# allocated, and experiments are driven as CRDs from version control anyway.
+dashboard:
+  create: false
+
+dnsServer:
+  create: false
