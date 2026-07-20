@@ -4,6 +4,7 @@ SHELL := /bin/bash
 # Every Python gate runs from platform/ so that tool config, the import root and
 # the uv environment all resolve to the same place.
 PY := cd platform && uv run
+WEB := cd web && npm run --silent
 
 # Targets that are planned but not yet built fail loudly rather than pretending
 # to succeed — a green stub is worse than a missing one.
@@ -19,7 +20,7 @@ help: ## Show available targets
 # --- verification -----------------------------------------------------------
 
 .PHONY: verify
-verify: verify-py ## Run every lint, typecheck and test gate
+verify: verify-py verify-web ## Run every lint, typecheck and test gate
 
 .PHONY: verify-py
 verify-py: ## Lint, typecheck and test the Python planes
@@ -28,14 +29,22 @@ verify-py: ## Lint, typecheck and test the Python planes
 	$(PY) mypy .
 	$(PY) pytest
 
+.PHONY: verify-web
+verify-web: ## Typecheck, lint, test and build the web app
+	$(WEB) typecheck
+	$(WEB) lint
+	$(WEB) test
+	$(WEB) build
+
 .PHONY: fmt
 fmt: ## Autoformat the Python planes
 	$(PY) ruff format .
 	$(PY) ruff check --fix .
 
 .PHONY: install
-install: ## Sync the Python environment
+install: ## Sync both toolchains
 	cd platform && uv sync --all-extras
+	cd web && npm install
 
 # --- stack ------------------------------------------------------------------
 

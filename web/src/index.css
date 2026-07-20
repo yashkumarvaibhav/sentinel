@@ -1,0 +1,21 @@
+@import 'tailwindcss';
+
+/* Domain tokens. The three colours below are the product's core vocabulary:
+   what the baseline explains, what the event explains, and what nothing
+   explains. They stay stable wherever a decomposition is drawn. */
+@theme {
+  --color-base: oklch(0.72 0.04 240);
+  --color-event: oklch(0.78 0.13 85);
+  --color-residual: oklch(0.65 0.21 25);
+
+  --color-surface: oklch(0.21 0.015 260);
+  --color-surface-raised: oklch(0.26 0.018 260);
+  --color-ink: oklch(0.96 0.005 260);
+  --color-ink-muted: oklch(0.72 0.012 260);
+}
+
+body {
+  background-color: var(--color-surface);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
