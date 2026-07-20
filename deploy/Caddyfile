@@ -1,0 +1,44 @@
+{
+	admin off
+	# TLS is terminated by the tunnel in front of us; this is a plain HTTP
+	# front door bound to loopback.
+	auto_https off
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+:8041 {
+	encode zstd gzip
+
+	handle /api/* {
+		reverse_proxy gateway:8040
+	}
+
+	# Live streams. Buffering an SSE response would defeat the point, so this
+	# route flushes immediately.
+	handle /stream/* {
+		reverse_proxy gateway:8040 {
+			flush_interval -1
+		}
+	}
+
+	# Reserved: the product streams over SSE, and this route stays parked until
+	# a workflow genuinely needs a bidirectional transport.
+	handle /ws/* {
+		respond "websocket transport is not enabled" 501
+	}
+
+	# Single-page app: unknown paths are routes, not missing files.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+
+	log {
+		output stderr
+		format console
+		level WARN
+	}
+}

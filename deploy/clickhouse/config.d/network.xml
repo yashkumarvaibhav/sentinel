@@ -1,0 +1,7 @@
+<clickhouse>
+    <!-- The stock config listens on loopback only, which makes the server
+         unreachable from the rest of the compose network. This is safe because
+         the container publishes no host port: "0.0.0.0" here means the
+         isolated sentinel_net and nothing else. -->
+    <listen_host>0.0.0.0</listen_host>
+</clickhouse>

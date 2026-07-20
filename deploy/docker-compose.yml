@@ -28,6 +28,78 @@ volumes:
   grafana_data:
 
 services:
+  # --- the product ------------------------------------------------------------
+  gateway:
+    <<: *restart
+    build:
+      context: .
+      dockerfile: deploy/gateway.Dockerfile
+      args:
+        SENTINEL_GIT_SHA: ${SENTINEL_GIT_SHA:-unknown}
+        SENTINEL_BUILT_AT: ${SENTINEL_BUILT_AT:-unknown}
+    networks: [sentinel_net]
+    environment:
+      SENTINEL_ENV: ${SENTINEL_ENV:-dev}
+      POSTGRES_HOST: postgres
+      CLICKHOUSE_URL: http://clickhouse:8123
+      REDPANDA_BROKERS: redpanda:9092
+      VICTORIAMETRICS_URL: http://victoriametrics:8428
+      LOKI_URL: http://loki:3100
+      TEMPO_URL: http://tempo:3200
+      COLLECTOR_URL: http://otel-collector:13133
+    ports:
+      # Published so the dev server and local checks can reach it directly;
+      # public traffic always arrives through the front door on 8041.
+      - '127.0.0.1:8040:8040'
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
+    depends_on:
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      # /api/version, not /api/health: the gateway is up and honest even while
+      # a dependency beneath it is degraded, and restarting it would not help.
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8040/api/version')"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  web:
+    <<: *restart
+    build:
+      context: .
+      dockerfile: deploy/web.Dockerfile
+      args:
+        SENTINEL_GIT_SHA: ${SENTINEL_GIT_SHA:-unknown}
+    networks: [sentinel_net]
+    depends_on:
+      gateway:
+        condition: service_healthy
+    ports:
+      - '127.0.0.1:8041:8041'
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', 'http://127.0.0.1:8041/']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
   # --- metadata, incidents, audit chain -------------------------------------
   postgres:
     <<: *restart

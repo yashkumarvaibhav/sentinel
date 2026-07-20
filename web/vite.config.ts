@@ -19,6 +19,12 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 8048,
     strictPort: true,
+    // In development the app talks to the gateway directly; in production
+    // Caddy does the same proxying at the front door.
+    proxy: {
+      '/api': 'http://127.0.0.1:8040',
+      '/stream': { target: 'http://127.0.0.1:8040', changeOrigin: false },
+    },
   },
   preview: {
     host: '127.0.0.1',

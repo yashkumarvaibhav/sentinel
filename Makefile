@@ -8,7 +8,13 @@ WEB := cd web && npm run --silent
 
 # The project directory is pinned to the repo root so that relative paths in the
 # compose file and the root .env resolve the same way from anywhere.
-COMPOSE := docker compose --project-name sentinel --project-directory . -f deploy/docker-compose.yml
+# Stamped into the images so /api/version and the web footer name the commit
+# that is actually serving.
+GIT_SHA := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+BUILT_AT := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+
+COMPOSE := SENTINEL_GIT_SHA=$(GIT_SHA) SENTINEL_BUILT_AT=$(BUILT_AT) \
+	docker compose --project-name sentinel --project-directory . -f deploy/docker-compose.yml
 
 # Targets that are planned but not yet built fail loudly rather than pretending
 # to succeed — a green stub is worse than a missing one.
@@ -54,7 +60,7 @@ install: ## Sync both toolchains
 
 .PHONY: up
 up: ## Bring the local stack up and wait for it to be healthy
-	$(COMPOSE) up -d --wait
+	$(COMPOSE) up -d --build --wait
 
 .PHONY: down
 down: ## Stop the local stack (volumes are kept)

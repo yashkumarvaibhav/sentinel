@@ -13,3 +13,8 @@ const measuringContext = {
 
 HTMLCanvasElement.prototype.getContext = (() =>
   measuringContext) as unknown as HTMLCanvasElement['getContext'];
+
+// Tests never reach the network. Anything that wants to must say so by
+// stubbing fetch itself, so an accidental real request fails loudly instead of
+// making the suite depend on a running stack.
+globalThis.fetch = () => Promise.reject(new Error('network access is disabled in tests'));

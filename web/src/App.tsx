@@ -1,4 +1,5 @@
 import { DecompositionPreview } from '@/components/DecompositionPreview';
+import { PlatformStatus } from '@/components/PlatformStatus';
 
 const LEGEND = [
   { label: 'explained base', className: 'bg-base' },
@@ -39,6 +40,8 @@ export function App() {
           ))}
         </ul>
       </section>
+
+      <PlatformStatus />
 
       <footer className="text-ink-muted mt-auto text-xs">
         Foundation build — the pipeline, testbed and command center are not wired up yet.
