@@ -1,0 +1,21 @@
+<clickhouse>
+    <!-- ClickHouse sizes its caches from host RAM, which on a shared box means
+         it would happily claim far more than its container limit. Everything
+         here keeps it inside the 2 GB budget in docs/resource-budget.md. -->
+    <max_server_memory_usage>1500000000</max_server_memory_usage>
+    <mark_cache_size>268435456</mark_cache_size>
+    <uncompressed_cache_size>0</uncompressed_cache_size>
+
+    <!-- Telemetry tables carry their own TTLs; ClickHouse's own system logs
+         need bounding too, or they outgrow the data they describe. -->
+    <query_log>
+        <database>system</database>
+        <table>query_log</table>
+        <ttl>event_date + INTERVAL 7 DAY DELETE</ttl>
+        <flush_interval_milliseconds>15000</flush_interval_milliseconds>
+    </query_log>
+    <trace_log remove="1"/>
+    <metric_log remove="1"/>
+    <asynchronous_metric_log remove="1"/>
+    <session_log remove="1"/>
+</clickhouse>

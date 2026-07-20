@@ -1,0 +1,242 @@
+# Sentinel local stack.
+#
+# Run it through the Makefile (`make up` / `make down`), which sets the project
+# name and pins the project directory to the repository root — so every relative
+# path below is repo-root relative, and the root `.env` is picked up.
+#
+# Two house rules, both because this host is shared:
+#   * only ports 8042–8049 are published, and only on 127.0.0.1 (docs/ports.md);
+#   * every service has a hard memory limit and a retention policy from day one
+#     (docs/resource-budget.md). Unbounded growth on a shared box is a bug.
+
+name: sentinel
+
+x-restart: &restart
+  restart: unless-stopped
+
+networks:
+  sentinel_net:
+    name: sentinel_net
+
+volumes:
+  postgres_data:
+  clickhouse_data:
+  redpanda_data:
+  victoriametrics_data:
+  loki_data:
+  tempo_data:
+  grafana_data:
+
+services:
+  # --- metadata, incidents, audit chain -------------------------------------
+  postgres:
+    <<: *restart
+    image: pgvector/pgvector:pg16
+    networks: [sentinel_net]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sentinel}
+      POSTGRES_USER: ${POSTGRES_USER:-sentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentinel}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./deploy/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-sentinel} -d ${POSTGRES_DB:-sentinel}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  # --- observations, decomposition frames, flows ----------------------------
+  clickhouse:
+    <<: *restart
+    image: clickhouse/clickhouse-server:24.8-alpine
+    networks: [sentinel_net]
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-sentinel}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-sentinel}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-sentinel}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: '1'
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./deploy/clickhouse/config.d:/etc/clickhouse-server/config.d:ro
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', 'http://127.0.0.1:8123/ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+
+  # --- the bus between planes -----------------------------------------------
+  redpanda:
+    <<: *restart
+    image: redpandadata/redpanda:v24.2.18
+    networks: [sentinel_net]
+    command:
+      - redpanda
+      - start
+      - --node-id=0
+      - --mode=dev-container
+      - --smp=1
+      - --memory=1G
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
+      - --rpc-addr=redpanda:33145
+      - --advertise-rpc-addr=redpanda:33145
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ['CMD-SHELL', 'rpk cluster health | grep -q "Healthy:.*true"']
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 1500m
+
+  redpanda-console:
+    <<: *restart
+    image: redpandadata/console:v2.7.2
+    networks: [sentinel_net]
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+    ports:
+      - '127.0.0.1:8045:8080'
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+  # --- metrics ---------------------------------------------------------------
+  victoriametrics:
+    <<: *restart
+    image: victoriametrics/victoria-metrics:v1.106.1
+    networks: [sentinel_net]
+    command:
+      - -storageDataPath=/victoria-metrics-data
+      - -httpListenAddr=:8428
+      - -retentionPeriod=${VM_RETENTION:-15d}
+      - -memory.allowedBytes=768MB
+    volumes:
+      - victoriametrics_data:/victoria-metrics-data
+    ports:
+      - '127.0.0.1:8042:8428'
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', 'http://127.0.0.1:8428/health']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  # --- logs ------------------------------------------------------------------
+  loki:
+    <<: *restart
+    image: grafana/loki:3.3.2
+    networks: [sentinel_net]
+    command: ['-config.file=/etc/loki/loki.yaml']
+    user: '0:0'
+    volumes:
+      - loki_data:/loki
+      - ./deploy/loki/loki.yaml:/etc/loki/loki.yaml:ro
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', 'http://127.0.0.1:3100/ready']
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  # --- traces ----------------------------------------------------------------
+  tempo:
+    <<: *restart
+    image: grafana/tempo:2.6.1
+    networks: [sentinel_net]
+    command: ['-config.file=/etc/tempo/tempo.yaml']
+    user: '0:0'
+    volumes:
+      - tempo_data:/var/tempo
+      - ./deploy/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', 'http://127.0.0.1:3200/ready']
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  # --- telemetry front door --------------------------------------------------
+  otel-collector:
+    <<: *restart
+    # 0.116.0 is skipped deliberately: its published image ships a dynamically
+    # linked binary on a distroless base, so the container cannot exec.
+    image: otel/opentelemetry-collector-contrib:0.156.0
+    networks: [sentinel_net]
+    command: ['--config=/etc/otel/config.yaml']
+    volumes:
+      - ./deploy/otel-collector/config.yaml:/etc/otel/config.yaml:ro
+    depends_on:
+      victoriametrics:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', '/otelcol-contrib', 'components']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  # --- dashboards ------------------------------------------------------------
+  grafana:
+    <<: *restart
+    image: grafana/grafana:11.4.0
+    networks: [sentinel_net]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - '127.0.0.1:8043:3000'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --spider -q http://127.0.0.1:3000/api/health']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 512m

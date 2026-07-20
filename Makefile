@@ -6,6 +6,10 @@ SHELL := /bin/bash
 PY := cd platform && uv run
 WEB := cd web && npm run --silent
 
+# The project directory is pinned to the repo root so that relative paths in the
+# compose file and the root .env resolve the same way from anywhere.
+COMPOSE := docker compose --project-name sentinel --project-directory . -f deploy/docker-compose.yml
+
 # Targets that are planned but not yet built fail loudly rather than pretending
 # to succeed — a green stub is worse than a missing one.
 define todo
@@ -49,12 +53,24 @@ install: ## Sync both toolchains
 # --- stack ------------------------------------------------------------------
 
 .PHONY: up
-up: ## Bring the local stack up (docker compose)
-	$(call todo,up,0.4)
+up: ## Bring the local stack up and wait for it to be healthy
+	$(COMPOSE) up -d --wait
 
 .PHONY: down
-down: ## Tear the local stack down
-	$(call todo,down,0.4)
+down: ## Stop the local stack (volumes are kept)
+	$(COMPOSE) down
+
+.PHONY: nuke
+nuke: ## Stop the local stack and delete its data volumes
+	$(COMPOSE) down -v
+
+.PHONY: ps
+ps: ## Show stack status
+	$(COMPOSE) ps
+
+.PHONY: logs
+logs: ## Follow stack logs (SVC=name to narrow)
+	$(COMPOSE) logs -f --tail=100 $(SVC)
 
 .PHONY: seed
 seed: ## Load config and seed the datastores
