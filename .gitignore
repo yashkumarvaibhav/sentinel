@@ -1,0 +1,50 @@
+# --- Python -----------------------------------------------------------------
+**/.venv/
+venv/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.coverage
+coverage.xml
+htmlcov/
+
+# --- Node / web -------------------------------------------------------------
+**/node_modules/
+**/dist/
+**/.next/
+**/.vite/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+
+# --- Runtime state, data, artifacts -----------------------------------------
+var/
+data/telemetry/
+captures/
+mlruns/
+.dvc/cache/
+
+# Model binaries are never committed — track them with DVC/LFS pointers.
+*.pt
+*.pth
+*.onnx
+*.bin
+*.safetensors
+*.gguf
+*.joblib
+*.pkl
+
+# --- Secrets ----------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# --- Editor / OS ------------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
+*.swp
