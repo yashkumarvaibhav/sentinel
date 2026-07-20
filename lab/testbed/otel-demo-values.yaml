@@ -1,0 +1,74 @@
+# OpenTelemetry Demo (Astronomy Shop) — the instrumented mesh we score against.
+#
+# Two edits matter, and both follow from the same idea: the demo supplies the
+# *application*, we supply the *observability*. Its bundled backends are turned
+# off, and its collector forwards everything to ours instead.
+
+# --- the demo's own observability stack, all off -----------------------------
+# We are the observability stack. Running theirs too would double the memory
+# footprint on a shared box and split the telemetry across two sets of stores.
+jaeger:
+  enabled: false
+prometheus:
+  enabled: false
+grafana:
+  enabled: false
+opensearch:
+  enabled: false
+
+components:
+  # A local model server is out of scope for this project and would be the
+  # single heaviest pod in the mesh. product-reviews depends on it.
+  llm:
+    enabled: false
+  product-reviews:
+    enabled: false
+
+  flagd:
+    # flagd itself is essential — it is how faults get injected and what the
+    # flag actuator will drive. Its browser UI is not: it OOMs at the chart's
+    # 250Mi limit, and we drive flags through the API, not a second web app.
+    sidecarContainers: []
+
+# --- the demo's in-cluster collector ----------------------------------------
+opentelemetry-collector:
+  presets:
+    # Host metrics read the *host's* /proc through the node container, which on
+    # a shared machine describes other people's workloads, not the testbed.
+    hostMetrics:
+      enabled: false
+    kubernetesAttributes:
+      enabled: true
+    kubeletMetrics:
+      enabled: true
+    clusterMetrics:
+      enabled: true
+  config:
+    exporters:
+      # Removed: they point at the backends we just disabled. Left defined,
+      # their configs fail validation.
+      otlp/jaeger: null
+      otlphttp/prometheus: null
+      opensearch: null
+      # Everything goes to our gateway collector, reachable by container name
+      # because the cluster shares the stack's docker network.
+      otlp/sentinel:
+        endpoint: sentinel-otel-collector-1:4317
+        tls:
+          insecure: true
+        retry_on_failure:
+          enabled: true
+        sending_queue:
+          enabled: true
+          queue_size: 2000
+    service:
+      pipelines:
+        traces:
+          # spanmetrics stays: it is a connector, not a backend — it feeds the
+          # metrics pipeline, and dropping it from here leaves that pipeline
+          # with a receiver nothing produces into, which fails config build.
+          exporters: [otlp/sentinel, spanmetrics]
+        metrics:
+          exporters: [otlp/sentinel]
+        logs:
+          exporters: [otlp/sentinel]

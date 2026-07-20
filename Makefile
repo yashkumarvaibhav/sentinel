@@ -96,6 +96,14 @@ lab-down: ## Stop the testbed cluster, keeping it for the next run
 lab-destroy: ## Delete the testbed cluster entirely
 	./lab/testbed/lab-down.sh delete
 
+.PHONY: lab-deploy
+lab-deploy: ## Deploy the instrumented mesh into the testbed
+	./lab/testbed/lab-deploy.sh
+
+.PHONY: lab-undeploy
+lab-undeploy: ## Remove the instrumented mesh, keeping the cluster
+	helm --kube-context k3d-sentinel-lab -n otel-demo uninstall astronomy
+
 .PHONY: lab-status
 lab-status: ## Show testbed nodes and workloads
 	kubectl --context k3d-sentinel-lab get nodes -o wide
