@@ -20,18 +20,18 @@ processors:
     check_interval: 2s
     limit_mib: 384
     spike_limit_mib: 96
-  resourcedetection:
+  resource_detection:
     detectors: [env, system]
     timeout: 2s
 
 exporters:
-  prometheusremotewrite:
+  prometheus_remote_write:
     endpoint: http://victoriametrics:8428/api/v1/write
     resource_to_telemetry_conversion:
       enabled: true
-  otlphttp/loki:
+  otlp_http/loki:
     endpoint: http://loki:3100/otlp
-  otlp/tempo:
+  otlp_grpc/tempo:
     endpoint: tempo:4317
     tls:
       insecure: true
@@ -48,13 +48,13 @@ service:
   pipelines:
     metrics:
       receivers: [otlp]
-      processors: [memory_limiter, resourcedetection, batch]
-      exporters: [prometheusremotewrite]
+      processors: [memory_limiter, resource_detection, batch]
+      exporters: [prometheus_remote_write]
     logs:
       receivers: [otlp]
-      processors: [memory_limiter, resourcedetection, batch]
-      exporters: [otlphttp/loki]
+      processors: [memory_limiter, resource_detection, batch]
+      exporters: [otlp_http/loki]
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, resourcedetection, batch]
-      exporters: [otlp/tempo]
+      processors: [memory_limiter, resource_detection, batch]
+      exporters: [otlp_grpc/tempo]
