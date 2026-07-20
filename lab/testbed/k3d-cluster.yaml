@@ -1,0 +1,54 @@
+# The evaluation testbed: a real Kubernetes cluster, run as k3s inside docker.
+#
+# k3d rather than a host k3s install for two reasons: this box has no root for
+# us, and a containerised cluster is easier to keep contained — it joins the
+# same isolated docker network as the rest of the stack, so the instrumented
+# mesh can reach our collector without publishing a single extra host port.
+#
+# k3s is pinned to the 1.31 line to match the kubectl client on this host;
+# k3d's default (1.35) is four minors outside the supported skew.
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: sentinel-lab
+
+servers: 1
+agents: 1
+image: rancher/k3s:v1.31.14-k3s1
+network: sentinel_net
+
+kubeAPI:
+  # Loopback only. Nothing about this cluster is reachable from the LAN, and
+  # the port stays inside our allocated 8040–8049 block (docs/ports.md).
+  host: '127.0.0.1'
+  hostIP: '127.0.0.1'
+  hostPort: '8047'
+
+options:
+  runtime:
+    # Hard caps, per the nightly-lab profile in docs/resource-budget.md. Other
+    # people's workloads share this host; an uncapped cluster is an outage
+    # waiting to happen for them.
+    serversMemory: 4g
+    agentsMemory: 8g
+  k3d:
+    wait: true
+    timeout: '300s'
+    disableLoadbalancer: false
+  k3s:
+    extraArgs:
+      # Nothing the testbed runs should be reachable except through us, so the
+      # bundled ingress and load-balancer controllers stay off — they would
+      # want host ports we have not been allocated.
+      - arg: --disable=traefik
+        nodeFilters: [server:*]
+      - arg: --disable=servicelb
+        nodeFilters: [server:*]
+      - arg: --disable=metrics-server
+        nodeFilters: [server:*]
+      # Cluster-internal networking only: no NodePort range on the host.
+      - arg: --kube-apiserver-arg=service-node-port-range=30000-30010
+        nodeFilters: [server:*]
+  kubeconfig:
+    updateDefaultKubeconfig: true
+    switchCurrentContext: false

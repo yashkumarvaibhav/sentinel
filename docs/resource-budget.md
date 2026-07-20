@@ -51,13 +51,23 @@ alongside whatever else the box is doing.
 
 The only profile that starts k3s and the instrumented mesh. Additional caps:
 
-| Component | Cap |
-|---|---|
-| k3s server + agents | 8 GB total reservation |
-| instrumented demo mesh | 6 GB across all pods, per-pod limits set |
-| chaos experiments | stay inside pod limits — no host-level stress |
-| k6 load generation | rate-capped; targets the testbed only, never a public host |
-| **Total addition** | **≤16 GB** |
+| Component | Cap | Where |
+|---|---|---|
+| k3s server node | 4 GB | `lab/testbed/k3d-cluster.yaml` (`serversMemory`) |
+| k3s agent node | 8 GB | `lab/testbed/k3d-cluster.yaml` (`agentsMemory`) |
+| instrumented demo mesh | fits inside the agent's 8 GB, per-pod limits set | helm values |
+| chaos experiments | stay inside pod limits — no host-level stress | experiment specs |
+| k6 load generation | rate-capped; targets the testbed only, never a public host | load profiles |
+| **Total addition** | **12 GB** | |
+
+`make lab-up` re-reads live availability with `free -g` and **refuses to start
+below 14 GB free**, so the cluster can never be the reason another tenant's
+workload starts swapping.
+
+One honest exception: k3d's `serverlb` proxy container is **not** memory-capped
+— k3d applies limits to cluster nodes only. It is an nginx proxy that measures
+around 90 MB in practice; it is listed here because "everything is capped"
+would be a claim we cannot make.
 
 Combined with the `dev` stack this stays under ~24 GB — inside the measured
 headroom with room to spare. Nightly runs are scheduled, bounded in duration,

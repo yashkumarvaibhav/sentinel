@@ -20,7 +20,7 @@ convenience.
 | 8044 | Keycloak (OIDC) | compose | planned |
 | 8045 | Redpanda console (dev only) | compose | live |
 | 8046 | MLflow UI | compose | planned |
-| 8047 | Reserved — ClickHouse HTTP, if it is ever exposed | — | reserved |
+| 8047 | Testbed Kubernetes API (k3s via k3d) | `make lab-up` | live |
 | 8048 | Vite dev server | local dev only | live |
 | 8049 | Vite preview server | local dev only | live |
 
@@ -37,8 +37,11 @@ These are reachable only inside the `sentinel_net` docker network:
 | Tempo | `tempo:3200`, `tempo:4317` (OTLP) |
 | OTel Collector | `otel-collector:4317` / `:4318` (OTLP), `:13133` (health) |
 
-The k3s testbed keeps its API server on loopback and avoids NodePort services,
-so "cluster-internal" is enforced rather than assumed.
+The k3s testbed keeps its API server on loopback (8047, above) and runs no
+NodePort services, no ingress controller and no service load balancer — so
+"cluster-internal" is enforced rather than assumed. ClickHouse HTTP, which
+8047 was previously held for, is never exposed to the host; it is reachable
+only inside `sentinel_net`.
 
 ## Ports belonging to other applications
 

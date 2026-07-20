@@ -85,8 +85,21 @@ seed: ## Load config and seed the datastores
 # --- evaluation lab ---------------------------------------------------------
 
 .PHONY: lab-up
-lab-up: ## Bring up the instrumented testbed (k3s + demo mesh)
-	$(call todo,lab-up,0.7)
+lab-up: ## Bring up the testbed cluster (k3s in docker, on sentinel_net)
+	./lab/testbed/lab-up.sh
+
+.PHONY: lab-down
+lab-down: ## Stop the testbed cluster, keeping it for the next run
+	./lab/testbed/lab-down.sh stop
+
+.PHONY: lab-destroy
+lab-destroy: ## Delete the testbed cluster entirely
+	./lab/testbed/lab-down.sh delete
+
+.PHONY: lab-status
+lab-status: ## Show testbed nodes and workloads
+	kubectl --context k3d-sentinel-lab get nodes -o wide
+	kubectl --context k3d-sentinel-lab get pods -A
 
 .PHONY: score
 score: ## Score the pipeline on held-out seeds (gate)
