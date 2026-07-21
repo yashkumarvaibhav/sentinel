@@ -37,10 +37,12 @@ verify-py: ## Lint, typecheck and test the Python planes
 	$(PY) ruff format --check .
 	$(PY) ruff check .
 	$(PY) mypy .
+	$(PY) python -m contracts export --check
 	$(PY) pytest
 
 .PHONY: verify-web
 verify-web: ## Typecheck, lint, test and build the web app
+	$(WEB) contracts:check
 	$(WEB) typecheck
 	$(WEB) lint
 	$(WEB) test
@@ -55,6 +57,11 @@ fmt: ## Autoformat the Python planes
 install: ## Sync both toolchains
 	cd platform && uv sync --all-extras
 	cd web && npm install
+
+.PHONY: contracts
+contracts: ## Export JSON Schema and regenerate TypeScript contracts
+	$(PY) python -m contracts export
+	$(WEB) contracts:generate
 
 # --- stack ------------------------------------------------------------------
 

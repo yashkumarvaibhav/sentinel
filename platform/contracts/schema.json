@@ -1,0 +1,315 @@
+{
+  "$defs": {
+    "ContextWindow": {
+      "additionalProperties": false,
+      "description": "A trusted external event and the signals whose volume it may explain.",
+      "properties": {
+        "context_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "event_type": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "expected_delta": {
+          "additionalProperties": {
+            "$ref": "#/$defs/FiniteFloat"
+          },
+          "minProperties": 1,
+          "propertyNames": {
+            "$ref": "#/$defs/SignalName"
+          },
+          "title": "Expected Delta",
+          "type": "object"
+        },
+        "name": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "source": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "trust_score": {
+          "$ref": "#/$defs/Probability"
+        },
+        "valid_from": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "valid_to": {
+          "$ref": "#/$defs/UtcDatetime"
+        }
+      },
+      "required": [
+        "context_id",
+        "name",
+        "event_type",
+        "source",
+        "valid_from",
+        "valid_to",
+        "expected_delta",
+        "trust_score"
+      ],
+      "title": "ContextWindow",
+      "type": "object"
+    },
+    "DecompFrame": {
+      "additionalProperties": false,
+      "description": "Full-resolution split of observed telemetry into explained and residual parts.",
+      "properties": {
+        "band_high": {
+          "$ref": "#/$defs/FiniteFloat"
+        },
+        "band_low": {
+          "$ref": "#/$defs/FiniteFloat"
+        },
+        "context_ids": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "title": "Context Ids",
+          "type": "array"
+        },
+        "explained_base": {
+          "$ref": "#/$defs/FiniteFloat"
+        },
+        "explained_event": {
+          "$ref": "#/$defs/FiniteFloat"
+        },
+        "frame_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "observation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "observed": {
+          "$ref": "#/$defs/FiniteFloat"
+        },
+        "residual": {
+          "$ref": "#/$defs/FiniteFloat"
+        },
+        "residual_score": {
+          "$ref": "#/$defs/Probability"
+        },
+        "service": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "signal": {
+          "$ref": "#/$defs/SignalName"
+        },
+        "ts": {
+          "$ref": "#/$defs/UtcDatetime"
+        }
+      },
+      "required": [
+        "frame_id",
+        "observation_id",
+        "ts",
+        "service",
+        "signal",
+        "observed",
+        "explained_base",
+        "explained_event",
+        "residual",
+        "band_low",
+        "band_high",
+        "residual_score"
+      ],
+      "title": "DecompFrame",
+      "type": "object"
+    },
+    "FiniteFloat": {
+      "type": "number"
+    },
+    "HumanText": {
+      "maxLength": 4096,
+      "minLength": 1,
+      "type": "string"
+    },
+    "Identifier": {
+      "maxLength": 255,
+      "minLength": 1,
+      "type": "string"
+    },
+    "Observation": {
+      "additionalProperties": false,
+      "description": "One event-time telemetry value, containing evidence but never answer-key data.",
+      "properties": {
+        "attributes": {
+          "additionalProperties": {
+            "$ref": "#/$defs/TelemetryScalar"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/SignalName"
+          },
+          "title": "Attributes",
+          "type": "object"
+        },
+        "flow_refs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "title": "Flow Refs",
+          "type": "array"
+        },
+        "log_refs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "title": "Log Refs",
+          "type": "array"
+        },
+        "observation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "service": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "signal": {
+          "$ref": "#/$defs/SignalName"
+        },
+        "trace_refs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "title": "Trace Refs",
+          "type": "array"
+        },
+        "ts": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "unit": {
+          "$ref": "#/$defs/UnitName",
+          "default": "1"
+        },
+        "value": {
+          "$ref": "#/$defs/FiniteFloat"
+        }
+      },
+      "required": [
+        "observation_id",
+        "ts",
+        "service",
+        "signal",
+        "value"
+      ],
+      "title": "Observation",
+      "type": "object"
+    },
+    "Probability": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "type": "number"
+    },
+    "SignalName": {
+      "maxLength": 512,
+      "minLength": 1,
+      "type": "string"
+    },
+    "Symptom": {
+      "additionalProperties": false,
+      "description": "One scored, human-legible piece of evidence about abnormal behavior.",
+      "properties": {
+        "evidence_refs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/SymptomKind"
+        },
+        "note": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "onset_ts": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "score": {
+          "$ref": "#/$defs/Probability"
+        },
+        "service": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "signal": {
+          "$ref": "#/$defs/SignalName"
+        },
+        "symptom_id": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "symptom_id",
+        "kind",
+        "service",
+        "signal",
+        "onset_ts",
+        "score",
+        "note"
+      ],
+      "title": "Symptom",
+      "type": "object"
+    },
+    "SymptomKind": {
+      "description": "Deterministic evidence categories understood by the decision plane.",
+      "enum": [
+        "RESIDUAL_EXCEED",
+        "RATIO_DEFORM",
+        "LOG_BURST",
+        "EDGE_DEGRADED",
+        "SATURATION",
+        "DEPLOY_MARKER",
+        "DROP",
+        "SILENCE"
+      ],
+      "title": "SymptomKind",
+      "type": "string"
+    },
+    "TelemetryScalar": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "UnitName": {
+      "maxLength": 128,
+      "minLength": 1,
+      "type": "string"
+    },
+    "UtcDatetime": {
+      "format": "date-time",
+      "type": "string"
+    }
+  },
+  "$id": "urn:sentinel:contracts:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Public contracts exchanged between Sentinel planes.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Observation"
+    },
+    {
+      "$ref": "#/$defs/ContextWindow"
+    },
+    {
+      "$ref": "#/$defs/DecompFrame"
+    },
+    {
+      "$ref": "#/$defs/Symptom"
+    }
+  ],
+  "title": "SentinelContract"
+}
