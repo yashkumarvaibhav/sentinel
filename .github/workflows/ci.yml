@@ -29,13 +29,13 @@ jobs:
         run: uv sync --all-extras --frozen
 
       - name: Format
-        run: uv run ruff format --check .
+        run: uv run ruff format --check . ../lab
 
       - name: Lint
-        run: uv run ruff check .
+        run: uv run ruff check . ../lab
 
       - name: Types
-        run: uv run mypy .
+        run: uv run mypy . ../lab
 
       - name: Tests
         run: uv run pytest
