@@ -15,6 +15,7 @@ export type SignalName = string;
 export type TraceRefs = Identifier[];
 export type UtcDatetime = string;
 export type FiniteFloat = number;
+export type Honesty = "REAL" | "SIMULATED";
 export type HumanText = string;
 export type Probability = number;
 export type ContextIds = Identifier[];
@@ -57,6 +58,7 @@ export interface ContextWindow {
   context_id: Identifier;
   event_type: Identifier;
   expected_delta: ExpectedDelta;
+  honesty: Honesty;
   name: HumanText;
   source: Identifier;
   trust_score: Probability;

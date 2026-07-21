@@ -25,6 +25,9 @@ ingest = [
     "aiokafka[zstd]>=0.12,<1",
     "httpx>=0.28.1",
 ]
+context = [
+    "httpx>=0.28.1",
+]
 
 [dependency-groups]
 dev = [

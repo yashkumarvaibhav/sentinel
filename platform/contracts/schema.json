@@ -21,6 +21,14 @@
           "title": "Expected Delta",
           "type": "object"
         },
+        "honesty": {
+          "enum": [
+            "REAL",
+            "SIMULATED"
+          ],
+          "title": "Honesty",
+          "type": "string"
+        },
         "name": {
           "$ref": "#/$defs/HumanText"
         },
@@ -42,6 +50,7 @@
         "name",
         "event_type",
         "source",
+        "honesty",
         "valid_from",
         "valid_to",
         "expected_delta",

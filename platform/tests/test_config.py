@@ -32,6 +32,9 @@ def test_committed_config_loads_with_cross_file_references_and_stable_fingerprin
     }
     assert first.events.events[0].honesty == "SIMULATED"
     assert first.events.events[0].enabled is False
+    assert first.events.sports_connector is not None
+    assert first.events.sports_connector.enabled is False
+    assert first.events.sports_connector.provider == "football-data.org"
     assert any(cohort.protected for cohort in first.cohorts.cohorts)
     assert {slo.service for slo in first.slos.slos} <= {
         service.service for service in first.topology.services
@@ -59,6 +62,13 @@ def test_config_models_are_immutable() -> None:
                 "valid_to", document["events"][0]["valid_from"]
             ),
             "valid_to",
+        ),
+        (
+            "event-calendar.yml",
+            lambda document: document["sports_connector"]["expected_delta"].__setitem__(
+                "unknown.request_rate", 2.0
+            ),
+            "unknown topology service",
         ),
         (
             "cohorts.yml",

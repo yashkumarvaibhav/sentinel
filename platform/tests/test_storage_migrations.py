@@ -58,6 +58,9 @@ def test_storage_identifiers_and_pool_bounds_are_validated() -> None:
     with pytest.raises(ValidationError):
         Settings(REDPANDA_BROKERS=",")
 
+    with pytest.raises(ValidationError):
+        Settings(FOOTBALL_DATA_BASE_URL="http://api.football-data.org")
+
 
 def test_dev_label_repository_is_not_a_runtime_storage_export() -> None:
     assert "DevLabelRepository" not in runtime_storage_exports

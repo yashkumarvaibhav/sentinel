@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import Field, model_validator
 
@@ -24,6 +24,7 @@ class ContextWindow(ContractModel):
     name: HumanText
     event_type: Identifier
     source: Identifier
+    honesty: Literal["REAL", "SIMULATED"]
     valid_from: UtcDatetime
     valid_to: UtcDatetime
     expected_delta: dict[SignalName, FiniteFloat] = Field(min_length=1)

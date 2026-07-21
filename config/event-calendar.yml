@@ -1,4 +1,13 @@
 version: 1
+sports_connector:
+  enabled: false
+  provider: football-data.org
+  competition_codes: [CL]
+  lead_minutes: 30
+  duration_minutes: 180
+  expected_delta:
+    frontend.request_rate: 2.5
+  trust_score: 0.9
 events:
   - event_id: championship-final-example
     name: Championship final example

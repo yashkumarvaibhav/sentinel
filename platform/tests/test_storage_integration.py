@@ -83,6 +83,7 @@ async def _round_trip_clickhouse(config: Settings, client: httpx.AsyncClient, su
         name="Cup final",
         event_type="sports_fixture",
         source="fixtures-api",
+        honesty="REAL",
         valid_from=ts - timedelta(minutes=30),
         valid_to=ts + timedelta(hours=3),
         expected_delta={"frontend.request_rate": 3.0},

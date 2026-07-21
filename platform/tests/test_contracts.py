@@ -38,6 +38,7 @@ def context_window() -> ContextWindow:
         name="Continental cup final",
         event_type="sports_fixture",
         source="fixtures-api",
+        honesty="REAL",
         valid_from=UTC_TS,
         valid_to=UTC_TS + timedelta(hours=3),
         expected_delta={"frontend.request_rate": 3.0, "checkout.request_rate": 1.5},

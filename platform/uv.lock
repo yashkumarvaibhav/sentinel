@@ -578,6 +578,9 @@ api = [
     { name = "httpx" },
     { name = "uvicorn", extra = ["standard"] },
 ]
+context = [
+    { name = "httpx" },
+]
 ingest = [
     { name = "aiokafka", extra = ["zstd"] },
     { name = "httpx" },
@@ -602,6 +605,7 @@ requires-dist = [
     { name = "aiokafka", extras = ["zstd"], marker = "extra == 'ingest'", specifier = ">=0.12,<1" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115" },
     { name = "httpx", marker = "extra == 'api'", specifier = ">=0.28.1" },
+    { name = "httpx", marker = "extra == 'context'", specifier = ">=0.28.1" },
     { name = "httpx", marker = "extra == 'ingest'", specifier = ">=0.28.1" },
     { name = "httpx", marker = "extra == 'storage'", specifier = ">=0.28.1" },
     { name = "psycopg", extras = ["binary", "pool"], marker = "extra == 'storage'", specifier = ">=3.2,<4" },
@@ -610,7 +614,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.2,<7" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'api'", specifier = ">=0.32" },
 ]
-provides-extras = ["api", "storage", "ingest"]
+provides-extras = ["api", "storage", "ingest", "context"]
 
 [package.metadata.requires-dev]
 dev = [

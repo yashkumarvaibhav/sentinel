@@ -60,6 +60,15 @@ class Settings(BaseSettings):
     ingest_dedup_capacity: int = Field(
         default=100_000, alias="INGEST_DEDUP_CAPACITY", ge=1_000, le=10_000_000
     )
+    football_data_api_key: SecretStr = Field(default=SecretStr(""), alias="FOOTBALL_DATA_API_KEY")
+    football_data_base_url: str = Field(
+        default="https://api.football-data.org",
+        alias="FOOTBALL_DATA_BASE_URL",
+        pattern=r"^https://[^\s/]+(?:/[^\s]*)?$",
+    )
+    context_http_timeout_seconds: float = Field(
+        default=5.0, alias="CONTEXT_HTTP_TIMEOUT_SECONDS", gt=0.0, le=30.0
+    )
 
     @property
     def brokers(self) -> tuple[str, ...]:

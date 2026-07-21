@@ -42,6 +42,10 @@ type Probability = Annotated[float, Field(ge=0.0, le=1.0, allow_inf_nan=False)]
 type PositiveFloat = Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
 type NonNegativeFloat = Annotated[float, Field(ge=0.0, allow_inf_nan=False)]
 type Percentage = Annotated[float, Field(ge=0.0, le=100.0, allow_inf_nan=False)]
+type CompetitionCode = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, pattern=r"^[A-Z0-9]{2,4}$"),
+]
 
 _FORBIDDEN_CONFIG_KEYS = frozenset(
     {
@@ -159,9 +163,28 @@ class CalendarEvent(ConfigModel):
         return self
 
 
+class SportsConnectorConfig(ConfigModel):
+    """Operator-owned mapping from a real fixture feed to expected signal deltas."""
+
+    enabled: bool
+    provider: Literal["football-data.org"]
+    competition_codes: tuple[CompetitionCode, ...] = Field(min_length=1, max_length=5)
+    lead_minutes: int = Field(ge=0, le=1_440)
+    duration_minutes: int = Field(ge=1, le=1_440)
+    expected_delta: dict[SignalName, float] = Field(min_length=1)
+    trust_score: Probability
+
+    @model_validator(mode="after")
+    def unique_competitions(self) -> Self:
+        if len(self.competition_codes) != len(set(self.competition_codes)):
+            raise ValueError("competition_codes must be unique")
+        return self
+
+
 class EventCalendarConfig(ConfigModel):
     version: Literal[1]
     events: tuple[CalendarEvent, ...]
+    sports_connector: SportsConnectorConfig | None = None
 
     @model_validator(mode="after")
     def unique_events(self) -> Self:
@@ -299,11 +322,11 @@ def _validate_references(config: SentinelConfig) -> None:
     for slo in config.slos.slos:
         if slo.service not in services:
             raise ConfigLoadError(f"slo.yml: {slo.service} references an unknown topology service")
+    event_signals = [signal for event in config.events.events for signal in event.expected_delta]
+    if config.events.sports_connector is not None:
+        event_signals.extend(config.events.sports_connector.expected_delta)
     for filename, signals in (
-        (
-            "event-calendar.yml",
-            (signal for event in config.events.events for signal in event.expected_delta),
-        ),
+        ("event-calendar.yml", iter(event_signals)),
         ("detector-params.yml", iter(config.detectors.absolute_noise_floors)),
     ):
         for signal in signals:
