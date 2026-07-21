@@ -25,7 +25,12 @@ _FORBIDDEN_ATTRIBUTE_KEYS = frozenset(
         "expected_verdict",
         "ground_truth",
         "injected_fault_id",
+        "label",
+        "scenario",
+        "scenario_id",
         "scenario_label",
+        "scenario_seed",
+        "seed_purpose",
     }
 )
 

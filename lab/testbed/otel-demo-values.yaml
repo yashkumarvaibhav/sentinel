@@ -24,6 +24,14 @@ components:
   product-reviews:
     enabled: false
 
+  # The chart's 20Mi default repeatedly OOM-kills this instrumented Go service
+  # before a scoring workload can read products. Keep it tightly bounded above
+  # its measured footprint and inside the agent node's existing 8GiB cap.
+  product-catalog:
+    resources:
+      limits:
+        memory: 64Mi
+
   flagd:
     # flagd itself is essential — it is how faults get injected and what the
     # flag actuator will drive. Its browser UI is not: it OOMs at the chart's

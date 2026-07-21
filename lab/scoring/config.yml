@@ -1,0 +1,5 @@
+version: 1
+residual_precision_min: 0.90
+residual_recall_min: 0.90
+quiet_day_false_positive_rate_max: 0.0
+telemetry_completeness_min: 0.95

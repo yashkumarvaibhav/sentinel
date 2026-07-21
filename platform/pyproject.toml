@@ -99,6 +99,7 @@ follow_untyped_imports = true
 # --- tests ------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = [".", ".."]
 addopts = "-q --strict-markers --strict-config"
 markers = [
     "integration: needs a running stack (docker compose or the testbed)",

@@ -4,6 +4,7 @@ SHELL := /bin/bash
 # Every Python gate runs from platform/ so that tool config, the import root and
 # the uv environment all resolve to the same place.
 PY := cd platform && uv run
+PY_PATHS := . ../lab
 WEB := cd web && npm run --silent
 
 # The project directory is pinned to the repo root so that relative paths in the
@@ -34,9 +35,9 @@ verify: verify-py verify-web ## Run every lint, typecheck and test gate
 
 .PHONY: verify-py
 verify-py: ## Lint, typecheck and test the Python planes
-	$(PY) ruff format --check .
-	$(PY) ruff check .
-	$(PY) mypy .
+	$(PY) ruff format --check $(PY_PATHS)
+	$(PY) ruff check $(PY_PATHS)
+	$(PY) mypy $(PY_PATHS)
 	$(PY) python -m contracts export --check
 	$(PY) python -m common.config --path ../config
 	$(PY) pytest
@@ -51,8 +52,8 @@ verify-web: ## Typecheck, lint, test and build the web app
 
 .PHONY: fmt
 fmt: ## Autoformat the Python planes
-	$(PY) ruff format .
-	$(PY) ruff check --fix .
+	$(PY) ruff format $(PY_PATHS)
+	$(PY) ruff check --fix $(PY_PATHS)
 
 .PHONY: install
 install: ## Sync both toolchains
@@ -147,8 +148,9 @@ lab-status: ## Show testbed nodes and workloads
 
 .PHONY: score
 score: ## Score the pipeline on held-out seeds (gate)
-	$(call todo,score,1.8)
+	cd platform && PYTHONPATH=.. uv run python -m lab.scoring \
+		--repo-root .. --report ../docs/reports/phase-1-decomposition-score.md
 
 .PHONY: golden
 golden: ## Replay goldens and diff decision transcripts (gate)
-	$(call todo,golden,1.8)
+	$(call todo,golden,1.9)

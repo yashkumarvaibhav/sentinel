@@ -102,7 +102,17 @@ def test_observation_has_no_ground_truth_fields_and_rejects_unknown_fields(
 
 @pytest.mark.parametrize(
     "ground_truth_key",
-    ["ground_truth", "scenario.label", "attack_flag", "injected-fault-id", "expected_verdict"],
+    [
+        "ground_truth",
+        "scenario.label",
+        "attack_flag",
+        "injected-fault-id",
+        "expected_verdict",
+        "label",
+        "scenario_id",
+        "scenario_seed",
+        "seed_purpose",
+    ],
 )
 def test_observation_rejects_ground_truth_hidden_in_attributes(
     observation: Observation, ground_truth_key: str

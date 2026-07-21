@@ -139,6 +139,12 @@ and the heaviest pod in the mesh) with the `product-reviews` service that
 depends on it, and the `flagd-ui` sidecar (OOM-killed at the chart's 250Mi
 limit; we drive flags through the API, not a second web app).
 
+The chart's 20 MiB limit for `product-catalog` is overridden to 64 MiB. The
+default repeatedly OOM-killed its instrumented Go process during the first live
+scoring preflight. The override remains a hard per-pod limit inside the 8 GB
+agent-node cap and makes the product endpoint stable enough to produce real
+scenario telemetry.
+
 ## Capability matrix
 
 The scenarios we score against need specific things to exist in the mesh. This

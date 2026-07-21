@@ -1,0 +1,38 @@
+version: 1
+scenario_id: match_night
+description: A legitimate 2.5x match surge followed by unexplained load inside the event.
+honesty: SIMULATED
+telemetry:
+  target: astronomy-shop/frontend-proxy
+  source_service: frontend-proxy
+  logical_service: frontend
+  logical_signal: request_rate
+  tick_seconds: 2
+seeds:
+  development: [211, 223]
+  held_out: [8923, 8941]
+load_phases:
+  - name: warmup
+    duration_seconds: 64
+    rate_rps: 4
+  - name: explained_event
+    duration_seconds: 20
+    rate_rps: 10
+  - name: unexplained_offset
+    duration_seconds: 16
+    rate_rps: 16
+contexts:
+  - context_id: simulated_match
+    name: Simulated championship match
+    event_type: sports_fixture
+    source: scenario_compiler
+    honesty: SIMULATED
+    start_offset_seconds: 64
+    duration_seconds: 36
+    expected_delta:
+      frontend.request_rate: 2.5
+    trust_score: 1.0
+residual_labels:
+  - label_id: offset_core
+    start_offset_seconds: 84
+    end_offset_seconds: 100

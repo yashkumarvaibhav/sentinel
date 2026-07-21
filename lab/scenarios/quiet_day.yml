@@ -1,0 +1,22 @@
+version: 1
+scenario_id: quiet_day
+description: Stable contained browse traffic with no event and no injected residual.
+honesty: SIMULATED
+telemetry:
+  target: astronomy-shop/frontend-proxy
+  source_service: frontend-proxy
+  logical_service: frontend
+  logical_signal: request_rate
+  tick_seconds: 2
+seeds:
+  development: [101, 103]
+  held_out: [7901, 7919]
+load_phases:
+  - name: warmup
+    duration_seconds: 64
+    rate_rps: 4
+  - name: observe
+    duration_seconds: 20
+    rate_rps: 4
+contexts: []
+residual_labels: []

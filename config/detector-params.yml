@@ -6,5 +6,5 @@ baseline_warmup_points: 30
 baseline_update_gate_ratio: 0.25
 expected_band_relative_tolerance: 0.1
 absolute_noise_floors:
-  frontend.request_rate: 1.0
+  frontend.request_rate: 1.5
   checkout.error_ratio: 0.005
