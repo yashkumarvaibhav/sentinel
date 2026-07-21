@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -66,6 +67,37 @@ def test_runtime_replay_does_not_open_private_labels(tmp_path: Path) -> None:
     assert len(replay.observations) == 1
     with pytest.raises(ValueError, match="private labels checksum"):
         load_private_labels(root)
+
+
+def test_development_capture_purpose_is_preserved(tmp_path: Path) -> None:
+    root = tmp_path / "development-capture"
+    manifest = write_capture(
+        root,
+        metadata=replace(
+            _metadata(),
+            capture_id="quiet-day-101-golden",
+            seed=101,
+            seed_purpose="development",
+        ),
+        topic_bounds=(
+            TopicBounds(topic="otlp.raw.traces", partition=0, start_offset=30, end_offset=31),
+        ),
+        records=(
+            CaptureSourceRecord(
+                topic="otlp.raw.traces",
+                partition=0,
+                offset=30,
+                value=_trace_payload(),
+            ),
+        ),
+        schedule=b'{"version":1,"phases":[]}\n',
+        context_feed=b'{"version":1,"windows":[]}\n',
+        private_labels=b'{"version":1,"intervals":[]}\n',
+        enrichments={},
+    )
+
+    assert manifest.seed_purpose == "development"
+    assert load_runtime_capture(root).manifest.seed_purpose == "development"
 
 
 def test_corrupt_raw_payload_and_non_contiguous_bounds_fail_closed(tmp_path: Path) -> None:

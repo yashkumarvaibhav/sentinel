@@ -155,12 +155,13 @@ score: ## Score the pipeline on held-out seeds (gate)
 score-live: score ## Run fresh held-out seeds against the contained live testbed
 
 .PHONY: capture
-capture: ## Record one held-out profile at raw-topic boundaries (PROFILE= SEED= CAPTURE_ID=)
+capture: ## Record one committed profile seed (PROFILE= SEED= CAPTURE_ID= [PURPOSE=held_out])
 	@test -n "$(PROFILE)" -a -n "$(SEED)" -a -n "$(CAPTURE_ID)" || \
 		{ echo "PROFILE, SEED and CAPTURE_ID are required" >&2; exit 2; }
 	cd platform && PYTHONPATH=.. uv run python -m lab.captures record \
 		--repo-root .. --profile "$(PROFILE)" \
-		--seed "$(SEED)" --capture-id "$(CAPTURE_ID)" \
+		--seed "$(SEED)" --purpose "$(or $(PURPOSE),held_out)" \
+		--capture-id "$(CAPTURE_ID)" \
 		--output "../var/captures/$(CAPTURE_ID)"
 
 .PHONY: replay-capture

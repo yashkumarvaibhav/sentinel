@@ -32,12 +32,17 @@ offset gaps and null payloads fail closed.
 
 ```bash
 make capture PROFILE=match_night SEED=8923 CAPTURE_ID=phase1-match-8923-v2
+make capture PROFILE=match_night SEED=211 PURPOSE=development \
+  CAPTURE_ID=phase1-match-211-golden-v1
 ```
 
 The ignored runtime object lands in `var/captures/<capture-id>`. Alongside the
 raw payloads it contains checksummed schedule/context inputs, an explicit empty
 Phase-1 enrichment snapshot and private scorer-only labels. DVC publication is
 a separate reviewed step; recording never silently commits large telemetry.
+The default purpose is `held_out`; golden captures must explicitly use a
+committed `development` seed so reviewed regression fixtures never consume the
+held-out scoring set.
 
 `make replay-capture CAPTURE_ID=<capture-id>` verifies every checksum, reruns
 the sole OTLP normalizer, selects the captured correlation and marker spans,

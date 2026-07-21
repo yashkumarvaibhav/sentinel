@@ -11,6 +11,7 @@ from typing import Literal
 
 from lab.captures.models import (
     CaptureManifest,
+    CaptureSeedPurpose,
     CaptureTelemetry,
     PrivateArtifact,
     PublicArtifact,
@@ -27,7 +28,7 @@ class CaptureMetadata:
     capture_id: str
     scenario_id: str
     seed: int
-    seed_purpose: Literal["held_out"]
+    seed_purpose: CaptureSeedPurpose
     telemetry_honesty: Literal["REAL"]
     stimulus_honesty: Literal["SIMULATED"]
     config_fingerprint: str

@@ -23,6 +23,7 @@ type RelativePath = Annotated[
     StringConstraints(strip_whitespace=True, min_length=1, max_length=1024),
 ]
 type RawTopic = Literal["otlp.raw.metrics", "otlp.raw.logs", "otlp.raw.traces"]
+type CaptureSeedPurpose = Literal["development", "held_out"]
 
 
 class CaptureModel(BaseModel):
@@ -83,7 +84,7 @@ class CaptureManifest(CaptureModel):
     capture_id: Identifier
     scenario_id: Identifier
     seed: int
-    seed_purpose: Literal["held_out"]
+    seed_purpose: CaptureSeedPurpose
     telemetry_honesty: Literal["REAL"]
     stimulus_honesty: Literal["SIMULATED"]
     config_fingerprint: Sha256

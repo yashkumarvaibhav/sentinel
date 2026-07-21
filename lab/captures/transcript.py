@@ -36,7 +36,7 @@ class CapturedSchedule(CaptureModel):
     scenario_id: str = Field(min_length=1, max_length=128)
     honesty: Literal["SIMULATED"]
     seed: int
-    seed_purpose: Literal["held_out"]
+    seed_purpose: Literal["development", "held_out"]
     request_mix_seed: int = Field(ge=1)
     target: Literal["astronomy-shop/frontend-proxy"]
     phases: tuple[CapturedLoadPhase, ...] = Field(min_length=2)

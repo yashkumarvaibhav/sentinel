@@ -26,7 +26,7 @@ from lab.captures.broker import (
     read_bounded_records,
     snapshot_offsets,
 )
-from lab.captures.models import CaptureTelemetry
+from lab.captures.models import CaptureSeedPurpose, CaptureTelemetry
 from lab.captures.store import CaptureMetadata, load_runtime_capture, write_capture
 from lab.captures.transcript import replay_decomposition
 from lab.scenarios import SeedPurpose, compile_profile, load_profile, write_artifacts
@@ -39,10 +39,11 @@ _EMPTY_PHASE_ONE_ENRICHMENT = b'{"items":[],"version":1}\n'
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m lab.captures")
     subparsers = parser.add_subparsers(dest="command", required=True)
-    record = subparsers.add_parser("record", help="record one held-out live scenario")
+    record = subparsers.add_parser("record", help="record one committed live scenario seed")
     record.add_argument("--repo-root", type=Path, required=True)
     record.add_argument("--profile", choices=("quiet_day", "match_night"), required=True)
     record.add_argument("--seed", type=int, required=True)
+    record.add_argument("--purpose", choices=("development", "held_out"), default="held_out")
     record.add_argument("--capture-id", required=True)
     record.add_argument("--output", type=Path, required=True)
     replay = subparsers.add_parser("replay", help="write one canonical decomposition transcript")
@@ -61,6 +62,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     collect.add_argument("--capture-id", required=True)
     collect.add_argument("--scenario-id", required=True)
     collect.add_argument("--seed", type=int, required=True)
+    collect.add_argument("--seed-purpose", choices=("development", "held_out"), required=True)
     collect.add_argument("--config-fingerprint", required=True)
     collect.add_argument("--correlation-user-agent", required=True)
     collect.add_argument("--anchor-user-agent", required=True)
@@ -84,7 +86,7 @@ def _record(args: argparse.Namespace) -> int:
     if output.exists() and any(output.iterdir()):
         raise ValueError(f"capture directory is not empty: {output}")
     profile = load_profile(repo_root / "lab" / "scenarios" / f"{args.profile}.yml")
-    artifacts = compile_profile(profile, seed=args.seed, purpose=SeedPurpose.HELD_OUT)
+    artifacts = compile_profile(profile, seed=args.seed, purpose=SeedPurpose(args.purpose))
     invocation = secrets.token_hex(4)
     work = repo_root / "var" / "capture-work" / f"{capture_id}-{invocation}"
     paths = write_artifacts(artifacts, work)
@@ -129,6 +131,8 @@ def _record(args: argparse.Namespace) -> int:
             artifacts.schedule.scenario_id,
             "--seed",
             str(artifacts.schedule.seed),
+            "--seed-purpose",
+            artifacts.schedule.seed_purpose.value,
             "--config-fingerprint",
             config.fingerprint,
             "--correlation-user-agent",
@@ -210,7 +214,7 @@ async def _collect(args: argparse.Namespace) -> int:
             capture_id=_safe_id(args.capture_id, "capture ID"),
             scenario_id=args.scenario_id,
             seed=args.seed,
-            seed_purpose="held_out",
+            seed_purpose=cast(CaptureSeedPurpose, args.seed_purpose),
             telemetry_honesty="REAL",
             stimulus_honesty="SIMULATED",
             config_fingerprint=args.config_fingerprint,
