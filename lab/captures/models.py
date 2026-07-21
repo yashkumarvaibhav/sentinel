@@ -82,6 +82,7 @@ class CaptureManifest(CaptureModel):
     correlation_user_agent: Identifier
     anchor_user_agent: Identifier
     topics: tuple[TopicCapture, ...] = Field(min_length=1)
+    schedule: PublicArtifact
     context_feed: PublicArtifact
     enrichments: tuple[PublicArtifact, ...]
     private_labels: PrivateArtifact

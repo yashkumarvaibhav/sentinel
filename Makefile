@@ -151,6 +151,18 @@ score: ## Score the pipeline on held-out seeds (gate)
 	cd platform && PYTHONPATH=.. uv run python -m lab.scoring \
 		--repo-root .. --report ../docs/reports/phase-1-decomposition-score.md
 
+.PHONY: score-live
+score-live: score ## Run fresh held-out seeds against the contained live testbed
+
+.PHONY: capture
+capture: ## Record one held-out profile at raw-topic boundaries (PROFILE= SEED= CAPTURE_ID=)
+	@test -n "$(PROFILE)" -a -n "$(SEED)" -a -n "$(CAPTURE_ID)" || \
+		{ echo "PROFILE, SEED and CAPTURE_ID are required" >&2; exit 2; }
+	cd platform && PYTHONPATH=.. uv run python -m lab.captures record \
+		--repo-root .. --profile "$(PROFILE)" \
+		--seed "$(SEED)" --capture-id "$(CAPTURE_ID)" \
+		--output "../var/captures/$(CAPTURE_ID)"
+
 .PHONY: golden
 golden: ## Replay goldens and diff decision transcripts (gate)
 	$(call todo,golden,1.9)

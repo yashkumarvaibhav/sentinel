@@ -55,6 +55,7 @@ class RuntimeCapture:
     root: Path
     manifest: CaptureManifest
     records: tuple[CaptureSourceRecord, ...]
+    schedule: bytes
     context_feed: bytes
     enrichments: tuple[tuple[str, bytes], ...]
 
@@ -65,6 +66,7 @@ def write_capture(
     metadata: CaptureMetadata,
     topic_bounds: tuple[TopicBounds, ...],
     records: tuple[CaptureSourceRecord, ...],
+    schedule: bytes,
     context_feed: bytes,
     private_labels: bytes,
     enrichments: dict[str, bytes],
@@ -109,6 +111,7 @@ def write_capture(
                 records=tuple(descriptors),
             )
         )
+    schedule_artifact = _write_public(root, "schedule", "public/schedule.json", schedule)
     context_artifact = _write_public(root, "context-feed", "public/context-feed.json", context_feed)
     public_enrichments = tuple(
         _write_public(root, name, f"public/enrichment/{name}", value)
@@ -121,6 +124,7 @@ def write_capture(
         version=1,
         **metadata.__dict__,
         topics=tuple(topics),
+        schedule=schedule_artifact,
         context_feed=context_artifact,
         enrichments=public_enrichments,
         private_labels=PrivateArtifact(path=labels_path, sha256=_sha256(private_labels)),
@@ -131,6 +135,7 @@ def write_capture(
 
 def load_runtime_capture(root: Path) -> RuntimeCapture:
     manifest = _load_manifest(root)
+    schedule = _verified(root, manifest.schedule.path, manifest.schedule.sha256)
     context_feed = _verified(root, manifest.context_feed.path, manifest.context_feed.sha256)
     enrichments = tuple(
         (artifact.name, _verified(root, artifact.path, artifact.sha256))
@@ -154,6 +159,7 @@ def load_runtime_capture(root: Path) -> RuntimeCapture:
         root=root,
         manifest=manifest,
         records=tuple(records),
+        schedule=schedule,
         context_feed=context_feed,
         enrichments=enrichments,
     )

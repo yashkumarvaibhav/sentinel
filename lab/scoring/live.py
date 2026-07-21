@@ -26,6 +26,8 @@ _CONTEXT = "k3d-sentinel-lab"
 class LiveTelemetry:
     start_at: datetime
     span_timestamps: tuple[datetime, ...]
+    correlation_user_agent: str
+    anchor_user_agent: str
 
 
 def expected_request_count(schedule: CompiledSchedule) -> int:
@@ -128,7 +130,12 @@ def run_live_scenario(
             repo_root=repo_root,
             user_agent=f"sentinel-score-anchor/{run_id}",
         )
-        return LiveTelemetry(start_at=start_at, span_timestamps=timestamps)
+        return LiveTelemetry(
+            start_at=start_at,
+            span_timestamps=timestamps,
+            correlation_user_agent=f"sentinel-score/{run_id}",
+            anchor_user_agent=f"sentinel-score-anchor/{run_id}",
+        )
     finally:
         _delete_owned(job_name)
 

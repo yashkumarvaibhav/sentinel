@@ -39,6 +39,7 @@ def test_two_raw_replays_are_byte_identical_and_preserve_source_coordinates(
                 value=payload,
             ),
         ),
+        schedule=b'{"version":1,"phases":[]}\n',
         context_feed=b'{"version":1,"windows":[]}\n',
         private_labels=b'{"version":1,"intervals":[]}\n',
         enrichments={"display-note.json": b'{"note":"not-scored"}\n'},
@@ -51,6 +52,7 @@ def test_two_raw_replays_are_byte_identical_and_preserve_source_coordinates(
     assert len(first.observations) == 1
     assert first.observations[0].attributes["user_agent"] == "sentinel-score/run-capture"
     assert manifest.topics[2].records[0].offset == 30
+    assert load_runtime_capture(root).schedule == b'{"version":1,"phases":[]}\n'
 
 
 def test_runtime_replay_does_not_open_private_labels(tmp_path: Path) -> None:
@@ -88,6 +90,7 @@ def test_corrupt_raw_payload_and_non_contiguous_bounds_fail_closed(tmp_path: Pat
                     value=_trace_payload(),
                 ),
             ),
+            schedule=b"{}\n",
             context_feed=b"{}\n",
             private_labels=b"{}\n",
             enrichments={},
@@ -110,6 +113,7 @@ def _write_minimal(tmp_path: Path) -> Path:
                 value=_trace_payload(),
             ),
         ),
+        schedule=b'{"version":1,"phases":[]}\n',
         context_feed=b'{"version":1,"windows":[]}\n',
         private_labels=b'{"version":1,"intervals":[]}\n',
         enrichments={},
