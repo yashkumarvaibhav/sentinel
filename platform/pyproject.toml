@@ -6,6 +6,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.5",
+    "pyyaml>=6.0.2,<7",
 ]
 
 # Planes pull heavier stacks as they land. Keeping them as extras means the
@@ -28,6 +29,7 @@ dev = [
     "pytest>=8.3",
     "pytest-cov>=6.0",
     "hypothesis>=6.112",
+    "types-pyyaml>=6.0.12.20250516",
 ]
 
 [build-system]

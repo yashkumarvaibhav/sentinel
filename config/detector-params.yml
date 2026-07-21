@@ -1,0 +1,8 @@
+version: 1
+feature_window_seconds: 60
+watermark_lateness_seconds: 15
+ewma_alpha: 0.15
+baseline_warmup_points: 30
+absolute_noise_floors:
+  frontend.request_rate: 1.0
+  checkout.error_ratio: 0.005

@@ -1,0 +1,14 @@
+version: 1
+cohorts:
+  - cohort_id: checkout-users
+    description: Users submitting checkout requests
+    match:
+      http.route: /api/checkout
+    protected: true
+    max_blast_radius_pct: 0.0
+  - cohort_id: general-traffic
+    description: Traffic outside protected conversion paths
+    match:
+      sentinel.cohort: general
+    protected: false
+    max_blast_radius_pct: 20.0

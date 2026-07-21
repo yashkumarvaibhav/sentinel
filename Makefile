@@ -38,6 +38,7 @@ verify-py: ## Lint, typecheck and test the Python planes
 	$(PY) ruff check .
 	$(PY) mypy .
 	$(PY) python -m contracts export --check
+	$(PY) python -m common.config --path ../config
 	$(PY) pytest
 
 .PHONY: verify-web
@@ -62,6 +63,10 @@ install: ## Sync both toolchains
 contracts: ## Export JSON Schema and regenerate TypeScript contracts
 	$(PY) python -m contracts export
 	$(WEB) contracts:generate
+
+.PHONY: config-check
+config-check: ## Validate all versioned operator configuration
+	$(PY) python -m common.config --path ../config
 
 .PHONY: migrate
 migrate: ## Apply idempotent ClickHouse and Postgres migrations

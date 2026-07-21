@@ -18,6 +18,7 @@ from api.gate import SharedSecretGate
 from api.health import HealthReport, Probe, Readiness, check_health
 from api.probes import platform_probes
 from common.buildinfo import build_info
+from common.config import load_config
 from common.settings import Settings, settings
 
 SERVICE = "sentinel-gateway"
@@ -39,6 +40,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        app.state.runtime_config = load_config(config.config_dir)
         async with httpx.AsyncClient(timeout=config.probe_timeout_seconds) as client:
             app.state.probes = probes if probes is not None else platform_probes(config, client)
             yield

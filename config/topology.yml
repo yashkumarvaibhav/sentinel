@@ -1,0 +1,18 @@
+version: 1
+services:
+  - service: frontend
+    tier: edge
+    criticality: critical
+    dependencies: [checkout, cart]
+  - service: checkout
+    tier: application
+    criticality: critical
+    dependencies: [cart, payment]
+  - service: cart
+    tier: application
+    criticality: high
+    dependencies: []
+  - service: payment
+    tier: application
+    criticality: critical
+    dependencies: []

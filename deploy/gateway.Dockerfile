@@ -15,6 +15,7 @@ COPY platform/pyproject.toml platform/uv.lock ./
 RUN uv sync --extra api --extra storage --no-dev --no-install-project
 
 COPY platform/ ./
+COPY config/ ./config/
 RUN uv sync --extra api --extra storage --no-dev
 
 # Stamped at build time so /api/version can name the commit that is running.

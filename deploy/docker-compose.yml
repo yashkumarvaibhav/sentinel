@@ -40,6 +40,7 @@ services:
     networks: [sentinel_net]
     environment:
       SENTINEL_ENV: ${SENTINEL_ENV:-dev}
+      SENTINEL_CONFIG_DIR: /app/config
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-sentinel}

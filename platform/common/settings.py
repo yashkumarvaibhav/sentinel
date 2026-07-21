@@ -8,12 +8,15 @@ without a `.env` file, and any deployment overrides what it needs.
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated, Literal, Self
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 type DatabaseIdentifier = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
+
+_DEFAULT_CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 
 
 class Settings(BaseSettings):
@@ -23,6 +26,7 @@ class Settings(BaseSettings):
 
     env: Literal["dev", "scoring", "lab", "prod"] = Field(default="dev", alias="SENTINEL_ENV")
     log_level: str = Field(default="info", alias="SENTINEL_LOG_LEVEL")
+    config_dir: Path = Field(default=_DEFAULT_CONFIG_DIR, alias="SENTINEL_CONFIG_DIR")
 
     postgres_host: str = Field(default="postgres", alias="POSTGRES_HOST")
     postgres_port: int = Field(default=5432, alias="POSTGRES_PORT")
