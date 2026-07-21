@@ -29,12 +29,18 @@ through us.
 ```bash
 make up          # the stack first — the cluster joins its network
 make lab-up      # create (or restart) the cluster, wait for nodes Ready
-make lab-deploy  # deploy the instrumented mesh, wired to our collector
+make lab-deploy  # mesh + Chaos Mesh + network containment, wired to our collector
 make lab-status  # nodes and workloads
+make lab-chaos   # inject a fault (EXPERIMENT=name)
+make lab-load    # generate load (PROFILE=, RATE=, DURATION=)
 make lab-undeploy # remove the mesh, keep the cluster
 make lab-down    # stop, keeping the cluster and its images
 make lab-destroy # delete it entirely
 ```
+
+`make lab-deploy` is idempotent and brings up everything the lab needs: the
+instrumented mesh, Chaos Mesh for fault injection, and the network policies that
+contain it.
 
 `make lab-up` refuses to run if `sentinel_net` does not exist, and refuses if
 the host has less than 14 GB of RAM available. Other people's workloads share
@@ -56,14 +62,37 @@ kubectl --context k3d-sentinel-lab run netcheck --rm -i --restart=Never \
 Those records are written when the cluster is created, so recreate the cluster
 after recreating the stack, or the addresses go stale.
 
+## Perturbing it: load and chaos
+
+The lab is only useful if it produces the incidents the product is graded on,
+in the shapes real outages take.
+
+- **Load** (`make lab-load`) runs a k6 profile as an in-cluster Job. It is
+  rate-capped (default 5 rps, hard ceiling 50) and its target is fixed to the
+  in-cluster frontend — a load generator that can be aimed anywhere is one typo
+  from being aimed at something that is not ours. `lab/loadgen/baseline.js` is
+  the starter profile.
+- **Chaos** (`make lab-chaos`) applies a Chaos Mesh experiment from
+  `lab/testbed/chaos/`. The starter, `ad-cpu-pressure`, drives CPU load into one
+  service's own cgroup — it cannot pressure the host, and it self-expires.
+  Experiments are CRDs in version control, not dashboard clicks.
+
+Both were verified to move real telemetry into our stores: a 20 rps k6 run took
+span-metric call volume from ~140 to ~9,800 calls/min, and the CPU experiment
+took the ad service's p95 latency from ~6 ms to over 4,000 ms — read from
+VictoriaMetrics, not from the tools that caused them.
+
 ## Containment
 
 - The API server binds `127.0.0.1:8047` only, inside our allocated block.
 - No NodePort services — the port range is deliberately narrowed and unused.
 - No ingress controller and no service load balancer.
-- Load generation and fault injection target testbed services only; there is no
-  path from a lab job to a public host, and adding one is not a configuration
-  choice we are willing to make.
+- **Egress is default-deny** (`lab/testbed/network-policy.yaml`, applied by
+  `make lab-deploy`): testbed pods reach each other, cluster DNS, and the OTLP
+  ports on our docker network — nothing else. A pod in the mesh cannot reach the
+  public internet by name *or* by raw IP; this was tested, not assumed. So
+  "load and chaos target testbed services only" is enforced by the cluster, not
+  by everyone remembering to be careful.
 
 ## Verifying it is real
 

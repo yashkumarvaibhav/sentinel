@@ -38,8 +38,12 @@ if [[ "${live_ip}" != "${dns_ip}" ]]; then
 	exit 1
 fi
 
+CHAOS_VALUES="${REPO_ROOT}/lab/testbed/chaos-mesh-values.yaml"
+CHAOS_VERSION=2.8.3
+
 helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts >/dev/null 2>&1 || true
-helm repo update open-telemetry >/dev/null
+helm repo add chaos-mesh https://charts.chaos-mesh.org >/dev/null 2>&1 || true
+helm repo update open-telemetry chaos-mesh >/dev/null
 
 echo "deploying ${CHART} ${CHART_VERSION} as ${RELEASE}/${NAMESPACE}"
 helm --kube-context "${CONTEXT}" upgrade --install "${RELEASE}" "${CHART}" \
@@ -48,6 +52,22 @@ helm --kube-context "${CONTEXT}" upgrade --install "${RELEASE}" "${CHART}" \
 	--values "${VALUES}" \
 	--timeout 15m \
 	--wait
+
+# Fault injection is part of the lab, not an optional add-on — the incidents the
+# product is graded on come from here.
+echo "deploying Chaos Mesh ${CHAOS_VERSION}"
+helm --kube-context "${CONTEXT}" upgrade --install chaos-mesh chaos-mesh/chaos-mesh \
+	--version "${CHAOS_VERSION}" \
+	--namespace chaos-mesh --create-namespace \
+	--values "${CHAOS_VALUES}" \
+	--timeout 10m \
+	--wait
+
+# Containment travels with the mesh, not as a separate step someone has to
+# remember: the lab exists to generate attacks and faults, so its blast radius
+# is closed the moment it comes up.
+echo "applying network containment"
+kubectl --context "${CONTEXT}" apply -f "${REPO_ROOT}/lab/testbed/network-policy.yaml"
 
 echo
 kubectl --context "${CONTEXT}" -n "${NAMESPACE}" get pods
