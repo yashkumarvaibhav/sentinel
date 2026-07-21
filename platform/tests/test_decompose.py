@@ -15,7 +15,7 @@ from detection.decompose import (
     DecompositionWorker,
     UnconfiguredSignalError,
 )
-from tests.factories import behavioral_ratio_config
+from tests.factories import behavioral_ratio_config, log_template_config
 
 _START = datetime(2026, 7, 21, 12, 0, tzinfo=UTC)
 
@@ -222,6 +222,7 @@ def _configuration() -> DetectorConfig:
             "frontend.auth_fail_ratio": 0.005,
         },
         behavioral_ratios=behavioral_ratio_config(),
+        log_templates=log_template_config(),
     )
 
 

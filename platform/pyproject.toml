@@ -28,6 +28,9 @@ ingest = [
 context = [
     "httpx>=0.28.1",
 ]
+detection = [
+    "drain3==0.9.11",
+]
 
 [dependency-groups]
 dev = [
@@ -95,6 +98,10 @@ exclude = "^\\.venv/"
 
 [[tool.mypy.overrides]]
 module = ["aiokafka", "aiokafka.*"]
+follow_untyped_imports = true
+
+[[tool.mypy.overrides]]
+module = ["drain3", "drain3.*"]
 follow_untyped_imports = true
 
 # --- tests ------------------------------------------------------------------

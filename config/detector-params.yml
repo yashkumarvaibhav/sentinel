@@ -45,3 +45,13 @@ behavioral_ratios:
     trigger_relative_deformation: 0.4
     full_score_relative_deformation: 0.8
     minimum_points: 5
+log_templates:
+  similarity_threshold: 0.4
+  max_depth: 4
+  max_children: 100
+  max_clusters: 10000
+  parameterize_numeric_tokens: true
+  minimum_template_count: 5
+  baseline_rate_floor: 0.01
+  trigger_relative_deformation: 2.0
+  full_score_relative_deformation: 10.0

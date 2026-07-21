@@ -26,7 +26,7 @@ from common.storage.dev_labels import DevLabelRecord, DevLabelRepository
 from common.storage.migrations import migrate_storage
 from contracts import ContextWindow, DecompFrame, Observation, Symptom, SymptomKind
 from detection.decompose import DecompositionEngine, DecompositionWorker
-from tests.factories import behavioral_ratio_config
+from tests.factories import behavioral_ratio_config, log_template_config
 
 pytestmark = [
     pytest.mark.integration,
@@ -143,6 +143,7 @@ async def _round_trip_clickhouse(config: Settings, client: httpx.AsyncClient, su
         expected_band_relative_tolerance=0.1,
         absolute_noise_floors={"frontend.request_rate": 1.0},
         behavioral_ratios=behavioral_ratio_config(),
+        log_templates=log_template_config(),
     )
     engine = DecompositionEngine(configuration=detector, dedup_capacity=100)
     worker = DecompositionWorker(engine=engine, sink=repository)

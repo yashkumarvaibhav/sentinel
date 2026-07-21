@@ -3,6 +3,7 @@
 from common.config import (
     BehavioralRatioConfig,
     BehavioralRatioRuleConfig,
+    LogTemplateConfig,
     SequenceRatioRuleConfig,
 )
 
@@ -53,4 +54,18 @@ def behavioral_ratio_config() -> BehavioralRatioConfig:
             full_score_relative_deformation=0.8,
             minimum_points=5,
         ),
+    )
+
+
+def log_template_config() -> LogTemplateConfig:
+    return LogTemplateConfig(
+        similarity_threshold=0.4,
+        max_depth=4,
+        max_children=100,
+        max_clusters=10_000,
+        parameterize_numeric_tokens=True,
+        minimum_template_count=5,
+        baseline_rate_floor=0.01,
+        trigger_relative_deformation=2.0,
+        full_score_relative_deformation=10.0,
     )

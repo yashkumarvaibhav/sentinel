@@ -249,6 +249,31 @@ class BehavioralRatioConfig(ConfigModel):
         return self
 
 
+class LogTemplateConfig(ConfigModel):
+    """Deterministic Drain3 structure and template-frequency burst policy."""
+
+    similarity_threshold: Probability
+    max_depth: int = Field(ge=3, le=32)
+    max_children: int = Field(ge=2, le=100_000)
+    max_clusters: int = Field(ge=1, le=1_000_000)
+    parameterize_numeric_tokens: bool
+    minimum_template_count: int = Field(ge=1, le=1_000_000)
+    baseline_rate_floor: PositiveFloat
+    trigger_relative_deformation: PositiveFloat
+    full_score_relative_deformation: PositiveFloat
+
+    @model_validator(mode="after")
+    def validate_log_policy(self) -> Self:
+        if self.similarity_threshold == 0.0:
+            raise ValueError("similarity_threshold must be greater than zero")
+        if self.full_score_relative_deformation < self.trigger_relative_deformation:
+            raise ValueError(
+                "full_score_relative_deformation must be greater than or equal to "
+                "trigger_relative_deformation"
+            )
+        return self
+
+
 class DetectorConfig(ConfigModel):
     version: Literal[1]
     feature_window_seconds: int = Field(ge=1, le=3600)
@@ -259,6 +284,7 @@ class DetectorConfig(ConfigModel):
     expected_band_relative_tolerance: BoundedRatio
     absolute_noise_floors: dict[SignalName, NonNegativeFloat] = Field(min_length=1)
     behavioral_ratios: BehavioralRatioConfig
+    log_templates: LogTemplateConfig
 
     @model_validator(mode="after")
     def validate_watermark(self) -> Self:
