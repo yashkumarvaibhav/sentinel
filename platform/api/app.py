@@ -14,12 +14,17 @@ from typing import Any
 import httpx
 from fastapi import FastAPI, Response
 
+from api.gate import SharedSecretGate
 from api.health import HealthReport, Probe, Readiness, check_health
 from api.probes import platform_probes
 from common.buildinfo import build_info
 from common.settings import Settings, settings
 
 SERVICE = "sentinel-gateway"
+
+# Routes that expose more than the command centre needs and so ride the gate
+# even for reads. Grows as sensitive surfaces (audit, config) are added.
+_SENSITIVE_PREFIXES = ("/api/lab",)
 
 
 def create_app(
@@ -43,6 +48,13 @@ def create_app(
         summary="Context-aware autonomous observability",
         version=build_info().version,
         lifespan=lifespan,
+    )
+
+    # Interim gate: inert until a secret is configured (see api/gate.py).
+    app.add_middleware(
+        SharedSecretGate,
+        secret=config.shared_secret,
+        sensitive_prefixes=_SENSITIVE_PREFIXES,
     )
 
     @app.get("/api/version", tags=["meta"])

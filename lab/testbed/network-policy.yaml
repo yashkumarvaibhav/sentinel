@@ -1,0 +1,78 @@
+# Containment for the testbed namespace.
+#
+# The lab exists to generate attacks, floods and faults. That is only safe if
+# the blast radius is a property of the cluster rather than of everyone
+# remembering to be careful — a load profile with the wrong URL in it, or an
+# attack script copied from somewhere, must simply fail to reach anything that
+# is not ours.
+#
+# Egress is default-deny, then opened to exactly three things:
+#   1. other pods in this namespace  — the mesh talking to itself
+#   2. cluster DNS                   — without it nothing resolves
+#   3. our own docker network        — the OTLP path to the collector
+#
+# Everything else, including the public internet, is dropped.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: testbed-egress-containment
+  namespace: otel-demo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    # 1. within the cluster. Expressed as CIDRs, not podSelectors, on purpose:
+    #    most in-mesh traffic is addressed to a ClusterIP (10.43.0.0/16), and a
+    #    podSelector rule does not cover the pre-DNAT destination — a policy
+    #    written that way silently severs the mesh from itself.
+    - to:
+        - ipBlock:
+            cidr: 10.42.0.0/16 # pods
+        - ipBlock:
+            cidr: 10.43.0.0/16 # services
+
+    # 2. cluster DNS
+    - to:
+        - ipBlock:
+            cidr: 10.43.0.0/16
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # 3. the stack's docker network — where our collector lives. Narrowed to
+    #    the OTLP ports so this is a telemetry path, not general egress.
+    - to:
+        - ipBlock:
+            cidr: 172.22.0.0/16
+      ports:
+        - protocol: TCP
+          port: 4317
+        - protocol: TCP
+          port: 4318
+
+---
+# Ingress is namespace-local: nothing outside the testbed initiates a
+# connection into it. We observe the mesh through telemetry it sends us, not by
+# reaching into it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: testbed-ingress-containment
+  namespace: otel-demo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: chaos-mesh

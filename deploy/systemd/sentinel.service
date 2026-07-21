@@ -1,0 +1,45 @@
+# Sentinel — user systemd unit.
+#
+# A *user* unit, matching the other apps on this host (coexist, gwiz,
+# tradevault, placeprep, …). It never touches system units, and with lingering
+# enabled it survives logout. It runs the compose stack; the testbed cluster is
+# started on demand (make lab-up) and is deliberately not managed here.
+#
+# Install (owner-executed):
+#   cp deploy/systemd/sentinel.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now sentinel.service
+#
+# The WorkingDirectory below must be this checkout. Adjust if the repo lives
+# elsewhere.
+
+[Unit]
+Description=Sentinel — context-aware autonomous observability (compose stack, :8041)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/siddhartha/cisco-incampus/mega-project/repo
+Environment=PATH=/home/siddhartha/bin:/home/siddhartha/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+# Optional. The stack starts and passes every score gate with none of these
+# set; the file only supplies reasoner keys and the interim shared secret.
+EnvironmentFile=-/home/siddhartha/cisco-incampus/mega-project/repo/.env
+
+# Build changed images and wait for health before reporting started, so the
+# public URL never points at a half-up stack. --build keeps the served commit
+# in step with the checkout.
+ExecStart=/usr/bin/make up
+ExecStop=/usr/bin/make down
+
+# A compose stack that came up once should be brought back after a reboot or a
+# manual `make down`; restarting a completed oneshot re-runs `make up`, which is
+# idempotent.
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=600
+
+[Install]
+WantedBy=default.target

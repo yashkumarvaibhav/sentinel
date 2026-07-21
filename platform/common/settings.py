@@ -37,6 +37,10 @@ class Settings(BaseSettings):
 
     probe_timeout_seconds: float = Field(default=2.0, alias="SENTINEL_PROBE_TIMEOUT")
 
+    # Interim access gate. Empty = inert (local/dev). Set before public exposure
+    # so mutating and sensitive routes require the secret until OIDC replaces it.
+    shared_secret: str = Field(default="", alias="SENTINEL_SHARED_SECRET")
+
     @property
     def first_broker(self) -> tuple[str, int]:
         """Host and port of the first configured bus broker."""
