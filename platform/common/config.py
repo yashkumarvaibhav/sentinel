@@ -213,6 +213,12 @@ class BehavioralRatioRuleConfig(ConfigModel):
         return self
 
 
+class SequenceRatioRuleConfig(BehavioralRatioRuleConfig):
+    """Ratio rule that also owns the minimum statistically useful sequence."""
+
+    minimum_points: int = Field(ge=3, le=100_000)
+
+
 class BehavioralRatioConfig(ConfigModel):
     """Scale-free behavioral monitors; thresholds remain configuration, not code."""
 
@@ -220,10 +226,21 @@ class BehavioralRatioConfig(ConfigModel):
     auth_failure: BehavioralRatioRuleConfig
     syn_ack: BehavioralRatioRuleConfig
     rpc_amplification: BehavioralRatioRuleConfig
+    path_entropy: BehavioralRatioRuleConfig
+    conversion: BehavioralRatioRuleConfig
+    interarrival_variation: SequenceRatioRuleConfig
+    crowd_coherence: SequenceRatioRuleConfig
 
     @model_validator(mode="after")
     def validate_ceiling_semantics(self) -> Self:
-        for name in ("source_entropy", "auth_failure"):
+        for name in (
+            "source_entropy",
+            "auth_failure",
+            "path_entropy",
+            "conversion",
+            "interarrival_variation",
+            "crowd_coherence",
+        ):
             if getattr(self, name).ratio_ceiling is not None:
                 raise ValueError(f"{name} must not define ratio_ceiling")
         for name in ("syn_ack", "rpc_amplification"):

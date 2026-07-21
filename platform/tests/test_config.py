@@ -39,6 +39,7 @@ def test_committed_config_loads_with_cross_file_references_and_stable_fingerprin
     assert first.detectors.expected_band_relative_tolerance == 0.1
     assert first.detectors.behavioral_ratios.source_entropy.ratio_ceiling is None
     assert first.detectors.behavioral_ratios.syn_ack.ratio_ceiling == 20.0
+    assert first.detectors.behavioral_ratios.interarrival_variation.minimum_points == 5
     assert any(cohort.protected for cohort in first.cohorts.cohorts)
     assert {slo.service for slo in first.slos.slos} <= {
         service.service for service in first.topology.services
@@ -97,6 +98,13 @@ def test_config_models_are_immutable() -> None:
                 "full_score_relative_deformation", 0.5
             ),
             "full_score_relative_deformation",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["behavioral_ratios"]["crowd_coherence"].__setitem__(
+                "minimum_points", 2
+            ),
+            "minimum_points",
         ),
     ],
 )
