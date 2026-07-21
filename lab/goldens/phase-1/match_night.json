@@ -1,0 +1,995 @@
+{
+  "capture": {
+    "actual_span_count": 712,
+    "capture_id": "phase1-match-211-golden-v1",
+    "expected_span_count": 712,
+    "scenario_id": "match_night",
+    "seed": 211,
+    "seed_purpose": "development",
+    "stimulus_honesty": "SIMULATED",
+    "telemetry_completeness": 1.0,
+    "telemetry_honesty": "REAL"
+  },
+  "contexts": [
+    {
+      "context_id": "simulated_match",
+      "end_offset_seconds": 100.0,
+      "event_type": "sports_fixture",
+      "expected_delta": {
+        "frontend.request_rate": 2.5
+      },
+      "honesty": "SIMULATED",
+      "name": "Simulated championship match",
+      "source": "scenario_compiler",
+      "start_offset_seconds": 64.0,
+      "trust_score": 1.0
+    }
+  ],
+  "scope": "phase-1-decomposition",
+  "stats": {
+    "baseline_updates": 2,
+    "context_blocked_warmup": 0,
+    "decomposed": 20,
+    "replays": 0,
+    "warming": 30
+  },
+  "steps": [
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 0,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 1,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 2,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 3,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 4,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 5,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 6,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 7,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 8,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 9,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 10,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 11,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 12,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 13,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 14,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 15,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 16,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 17,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 18,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 19,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 20,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 21,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 22,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 23,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 24,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 25,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 26,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 27,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 28,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": true,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": null,
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "warming",
+      "tick": 29,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": true,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": {
+        "band_high": 5.5,
+        "band_low": 2.5,
+        "context_ids": [],
+        "explained_base": 4.0,
+        "explained_event": 0.0,
+        "observed": 4.0,
+        "residual": 0.0,
+        "residual_score": 0.0,
+        "service": "frontend",
+        "signal": "request_rate"
+      },
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "decomposed",
+      "tick": 30,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": true,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": {
+        "band_high": 5.5,
+        "band_low": 2.5,
+        "context_ids": [],
+        "explained_base": 4.0,
+        "explained_event": 0.0,
+        "observed": 4.0,
+        "residual": 0.0,
+        "residual_score": 0.0,
+        "service": "frontend",
+        "signal": "request_rate"
+      },
+      "observed": 4.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "decomposed",
+      "tick": 31,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": {
+        "band_high": 11.5,
+        "band_low": 8.5,
+        "context_ids": [
+          "simulated_match"
+        ],
+        "explained_base": 4.0,
+        "explained_event": 6.0,
+        "observed": 10.0,
+        "residual": 0.0,
+        "residual_score": 0.0,
+        "service": "frontend",
+        "signal": "request_rate"
+      },
+      "observed": 10.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "decomposed",
+      "tick": 32,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": {
+        "band_high": 11.5,
+        "band_low": 8.5,
+        "context_ids": [
+          "simulated_match"
+        ],
+        "explained_base": 4.0,
+        "explained_event": 6.0,
+        "observed": 10.0,
+        "residual": 0.0,
+        "residual_score": 0.0,
+        "service": "frontend",
+        "signal": "request_rate"
+      },
+      "observed": 10.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "decomposed",
+      "tick": 33,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": {
+        "band_high": 11.5,
+        "band_low": 8.5,
+        "context_ids": [
+          "simulated_match"
+        ],
+        "explained_base": 4.0,
+        "explained_event": 6.0,
+        "observed": 10.0,
+        "residual": 0.0,
+        "residual_score": 0.0,
+        "service": "frontend",
+        "signal": "request_rate"
+      },
+      "observed": 10.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "decomposed",
+      "tick": 34,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": {
+        "band_high": 11.5,
+        "band_low": 8.5,
+        "context_ids": [
+          "simulated_match"
+        ],
+        "explained_base": 4.0,
+        "explained_event": 6.0,
+        "observed": 10.0,
+        "residual": 0.0,
+        "residual_score": 0.0,
+        "service": "frontend",
+        "signal": "request_rate"
+      },
+      "observed": 10.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "decomposed",
+      "tick": 35,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": {
+        "band_high": 11.5,
+        "band_low": 8.5,
+        "context_ids": [
+          "simulated_match"
+        ],
+        "explained_base": 4.0,
+        "explained_event": 6.0,
+        "observed": 10.0,
+        "residual": 0.0,
+        "residual_score": 0.0,
+        "service": "frontend",
+        "signal": "request_rate"
+      },
+      "observed": 10.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "decomposed",
+      "tick": 36,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": {
+        "band_high": 11.5,
+        "band_low": 8.5,
+        "context_ids": [
+          "simulated_match"
+        ],
+        "explained_base": 4.0,
+        "explained_event": 6.0,
+        "observed": 10.0,
+        "residual": 0.0,
+        "residual_score": 0.0,
+        "service": "frontend",
+        "signal": "request_rate"
+      },
+      "observed": 10.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "decomposed",
+      "tick": 37,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": {
+        "band_high": 11.5,
+        "band_low": 8.5,
+        "context_ids": [
+          "simulated_match"
+        ],
+        "explained_base": 4.0,
+        "explained_event": 6.0,
+        "observed": 10.0,
+        "residual": 0.0,
+        "residual_score": 0.0,
+        "service": "frontend",
+        "signal": "request_rate"
+      },
+      "observed": 10.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "decomposed",
+      "tick": 38,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": {
+        "band_high": 11.5,
+        "band_low": 8.5,
+        "context_ids": [
+          "simulated_match"
+        ],
+        "explained_base": 4.0,
+        "explained_event": 6.0,
+        "observed": 10.0,
+        "residual": 0.0,
+        "residual_score": 0.0,
+        "service": "frontend",
+        "signal": "request_rate"
+      },
+      "observed": 10.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "decomposed",
+      "tick": 39,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": {
+        "band_high": 11.5,
+        "band_low": 8.5,
+        "context_ids": [
+          "simulated_match"
+        ],
+        "explained_base": 4.0,
+        "explained_event": 6.0,
+        "observed": 10.0,
+        "residual": 0.0,
+        "residual_score": 0.0,
+        "service": "frontend",
+        "signal": "request_rate"
+      },
+      "observed": 10.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "decomposed",
+      "tick": 40,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": {
+        "band_high": 11.5,
+        "band_low": 8.5,
+        "context_ids": [
+          "simulated_match"
+        ],
+        "explained_base": 4.0,
+        "explained_event": 6.0,
+        "observed": 10.0,
+        "residual": 0.0,
+        "residual_score": 0.0,
+        "service": "frontend",
+        "signal": "request_rate"
+      },
+      "observed": 10.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "decomposed",
+      "tick": 41,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": {
+        "band_high": 11.5,
+        "band_low": 8.5,
+        "context_ids": [
+          "simulated_match"
+        ],
+        "explained_base": 4.0,
+        "explained_event": 6.0,
+        "observed": 16.0,
+        "residual": 6.0,
+        "residual_score": 1.0,
+        "service": "frontend",
+        "signal": "request_rate"
+      },
+      "observed": 16.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "decomposed",
+      "tick": 42,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": {
+        "band_high": 11.5,
+        "band_low": 8.5,
+        "context_ids": [
+          "simulated_match"
+        ],
+        "explained_base": 4.0,
+        "explained_event": 6.0,
+        "observed": 16.0,
+        "residual": 6.0,
+        "residual_score": 1.0,
+        "service": "frontend",
+        "signal": "request_rate"
+      },
+      "observed": 16.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "decomposed",
+      "tick": 43,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": {
+        "band_high": 11.5,
+        "band_low": 8.5,
+        "context_ids": [
+          "simulated_match"
+        ],
+        "explained_base": 4.0,
+        "explained_event": 6.0,
+        "observed": 16.0,
+        "residual": 6.0,
+        "residual_score": 1.0,
+        "service": "frontend",
+        "signal": "request_rate"
+      },
+      "observed": 16.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "decomposed",
+      "tick": 44,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": {
+        "band_high": 11.5,
+        "band_low": 8.5,
+        "context_ids": [
+          "simulated_match"
+        ],
+        "explained_base": 4.0,
+        "explained_event": 6.0,
+        "observed": 16.0,
+        "residual": 6.0,
+        "residual_score": 1.0,
+        "service": "frontend",
+        "signal": "request_rate"
+      },
+      "observed": 16.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "decomposed",
+      "tick": 45,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": {
+        "band_high": 11.5,
+        "band_low": 8.5,
+        "context_ids": [
+          "simulated_match"
+        ],
+        "explained_base": 4.0,
+        "explained_event": 6.0,
+        "observed": 16.0,
+        "residual": 6.0,
+        "residual_score": 1.0,
+        "service": "frontend",
+        "signal": "request_rate"
+      },
+      "observed": 16.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "decomposed",
+      "tick": 46,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": {
+        "band_high": 11.5,
+        "band_low": 8.5,
+        "context_ids": [
+          "simulated_match"
+        ],
+        "explained_base": 4.0,
+        "explained_event": 6.0,
+        "observed": 16.0,
+        "residual": 6.0,
+        "residual_score": 1.0,
+        "service": "frontend",
+        "signal": "request_rate"
+      },
+      "observed": 16.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "decomposed",
+      "tick": 47,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": {
+        "band_high": 11.5,
+        "band_low": 8.5,
+        "context_ids": [
+          "simulated_match"
+        ],
+        "explained_base": 4.0,
+        "explained_event": 6.0,
+        "observed": 16.0,
+        "residual": 6.0,
+        "residual_score": 1.0,
+        "service": "frontend",
+        "signal": "request_rate"
+      },
+      "observed": 16.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "decomposed",
+      "tick": 48,
+      "unit": "requests/s"
+    },
+    {
+      "baseline_updated": false,
+      "evidence_attributes": {
+        "evidence.service": "frontend-proxy",
+        "evidence.source": "captured_real_otel_ingress_spans"
+      },
+      "frame": {
+        "band_high": 11.5,
+        "band_low": 8.5,
+        "context_ids": [
+          "simulated_match"
+        ],
+        "explained_base": 4.0,
+        "explained_event": 6.0,
+        "observed": 16.0,
+        "residual": 6.0,
+        "residual_score": 1.0,
+        "service": "frontend",
+        "signal": "request_rate"
+      },
+      "observed": 16.0,
+      "service": "frontend",
+      "signal": "request_rate",
+      "status": "decomposed",
+      "tick": 49,
+      "unit": "requests/s"
+    }
+  ],
+  "version": 1
+}

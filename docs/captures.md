@@ -62,3 +62,19 @@ event context, 8 residual, and zero raw DLQ outcomes.
 This completes the live-recorder and full-decomposition-transcript parts of
 Phase 1.9. The next part adds DVC object pointers, then switches hosted
 score/golden CI gates to those recorded inputs.
+
+## Golden regression set
+
+`make golden` replays exactly one `development` capture for each Phase 1
+profile and compares a reviewed semantic transcript under
+`lab/goldens/phase-1/`. The transcript removes live timestamps and generated
+observation/frame IDs, but freezes capture identity and honesty, completeness,
+context attribution, every warmup/decomposition status, every numeric
+base/event/residual split and every residual score. It never opens private
+labels. Held-out captures are rejected so golden review cannot leak the score
+set into development.
+
+An intentional behavior change uses `make regen-golden` followed by a reviewed
+JSON diff. Both commands accept `GOLDEN_CAPTURE_ROOT=<directory>`; the default
+is the ignored local matrix `var/capture-matrices/phase1-goldens-v1` until the
+DVC-backed bootstrap object is wired.

@@ -180,4 +180,14 @@ score-captures: ## Gate an exact four-seed capture matrix (CAPTURE_ROOT=)
 
 .PHONY: golden
 golden: ## Replay goldens and diff decision transcripts (gate)
-	$(call todo,golden,1.9)
+	cd platform && PYTHONPATH=.. uv run python -m lab.scoring.golden \
+		--repo-root .. \
+		--captures-root "../$(or $(GOLDEN_CAPTURE_ROOT),var/capture-matrices/phase1-goldens-v1)" \
+		--goldens-root ../lab/goldens/phase-1
+
+.PHONY: regen-golden
+regen-golden: ## Rewrite reviewed Phase 1 goldens from development captures
+	cd platform && PYTHONPATH=.. uv run python -m lab.scoring.golden \
+		--repo-root .. \
+		--captures-root "../$(or $(GOLDEN_CAPTURE_ROOT),var/capture-matrices/phase1-goldens-v1)" \
+		--goldens-root ../lab/goldens/phase-1 --write

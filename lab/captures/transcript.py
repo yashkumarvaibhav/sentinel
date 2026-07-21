@@ -91,6 +91,7 @@ class DecompositionReplay:
     capture_id: str
     scenario_id: str
     seed: int
+    seed_purpose: Literal["development", "held_out"]
     capture_config_fingerprint: str
     replay_config_fingerprint: str
     raw_replay_sha256: str
@@ -145,6 +146,7 @@ def replay_decomposition(
     if (
         schedule.scenario_id != manifest.scenario_id
         or schedule.seed != manifest.seed
+        or schedule.seed_purpose != manifest.seed_purpose
         or context_feed.scenario_id != manifest.scenario_id
     ):
         raise ValueError("captured schedule/context identity does not match manifest")
@@ -188,6 +190,7 @@ def replay_decomposition(
         capture_id=manifest.capture_id,
         scenario_id=manifest.scenario_id,
         seed=manifest.seed,
+        seed_purpose=manifest.seed_purpose,
         capture_config_fingerprint=manifest.config_fingerprint,
         replay_config_fingerprint=replay_config_fingerprint,
         raw_replay_sha256=hashlib.sha256(raw_bytes).hexdigest(),
