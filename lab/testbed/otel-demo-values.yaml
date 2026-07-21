@@ -32,6 +32,15 @@ components:
       limits:
         memory: 64Mi
 
+  # Envoy sits at roughly 62Mi immediately after startup, leaving less than
+  # 3Mi under the chart's 65Mi cap. A contained 16 rps scoring burst proved
+  # that margin insufficient by OOM-killing the proxy. Keep the chart's 65Mi
+  # request, but give valid evaluation traffic a still-hard 128Mi ceiling.
+  frontend-proxy:
+    resources:
+      limits:
+        memory: 128Mi
+
   flagd:
     # flagd itself is essential — it is how faults get injected and what the
     # flag actuator will drive. Its browser UI is not: it OOMs at the chart's
