@@ -78,6 +78,12 @@ verify-storage: ## Run real repository round trips on the compose datastores
 		env UV_CACHE_DIR=/tmp/sentinel-uv-cache \
 		uv run --extra api --extra storage pytest tests/test_storage_integration.py
 
+.PHONY: verify-ingest
+verify-ingest: ## Run the real raw bus to normalized bus/ClickHouse round trip
+	$(COMPOSE) run --rm --build -e SENTINEL_LAB_INGEST_INTEGRATION=1 ingest \
+		env UV_CACHE_DIR=/tmp/sentinel-uv-cache \
+		uv run --extra ingest --extra storage pytest tests/test_ingest_integration.py
+
 # --- stack ------------------------------------------------------------------
 
 .PHONY: up

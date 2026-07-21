@@ -29,6 +29,44 @@ volumes:
 
 services:
   # --- the product ------------------------------------------------------------
+  ingest:
+    <<: *restart
+    build:
+      context: .
+      dockerfile: deploy/ingest.Dockerfile
+    networks: [sentinel_net]
+    environment:
+      SENTINEL_ENV: ${SENTINEL_ENV:-dev}
+      SENTINEL_CONFIG_DIR: /app/config
+      SENTINEL_LOG_LEVEL: ${SENTINEL_LOG_LEVEL:-info}
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-sentinel}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-sentinel}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-sentinel}
+      STORAGE_TIMEOUT_SECONDS: ${STORAGE_TIMEOUT_SECONDS:-10}
+      REDPANDA_BROKERS: redpanda:9092
+      INGEST_GROUP_ID: ${INGEST_GROUP_ID:-sentinel-ingest-v1}
+      INGEST_DEDUP_CAPACITY: ${INGEST_DEDUP_CAPACITY:-100000}
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import pathlib,sys; sys.exit(0 if b'python\\x00-m\\x00ingest' in pathlib.Path('/proc/1/cmdline').read_bytes() else 1)"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 384m
+
   gateway:
     <<: *restart
     build:
@@ -290,6 +328,8 @@ services:
       loki:
         condition: service_healthy
       tempo:
+        condition: service_healthy
+      redpanda:
         condition: service_healthy
     healthcheck:
       test: ['CMD', '/otelcol-contrib', 'components']

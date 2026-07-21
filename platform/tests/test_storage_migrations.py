@@ -55,6 +55,9 @@ def test_storage_identifiers_and_pool_bounds_are_validated() -> None:
     with pytest.raises(ValidationError):
         Settings(STORAGE_POOL_MIN_SIZE=5, STORAGE_POOL_MAX_SIZE=2)
 
+    with pytest.raises(ValidationError):
+        Settings(REDPANDA_BROKERS=",")
+
 
 def test_dev_label_repository_is_not_a_runtime_storage_export() -> None:
     assert "DevLabelRepository" not in runtime_storage_exports

@@ -28,7 +28,7 @@ bus. Processors consume the bus only.**
 
 ```
 testbed ──OTLP──> collector ──┬──> VictoriaMetrics / Loki / Tempo   (sinks, enrichment, humans)
-                              └──> Redpanda: otlp.metrics / otlp.logs / otlp.traces   (raw)
+                              └──> Redpanda: otlp.raw.metrics / .logs / .traces      (raw)
                                         │
                                         └──> ingest normalizer ──> obs.normalized ──> detection …
 ```
@@ -51,8 +51,9 @@ Four consequences, all deliberate:
 Replay is only bit-exact if the bus is deterministic in the ways that matter:
 
 - **At-least-once delivery** with **deterministic event IDs** — `sha256` over
-  (source, signal, event-time, payload digest) — so a redelivery is
-  recognisable rather than a new fact.
+  the canonical normalized evidence (service, signal, event-time, value, unit,
+  attributes and evidence references). The same OTLP point keeps the same ID
+  even if its envelope is rebatched or JSON object keys arrive in another order.
 - **Dedup on event ID** at the consumer boundary, before any stateful window
   update. Duplicates are counted into a meta-metric; silent dedup that nobody
   can see is how a broken producer stays hidden.

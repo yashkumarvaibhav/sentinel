@@ -21,6 +21,10 @@ storage = [
     "httpx>=0.28.1",
     "psycopg[binary,pool]>=3.2,<4",
 ]
+ingest = [
+    "aiokafka[zstd]>=0.12,<1",
+    "httpx>=0.28.1",
+]
 
 [dependency-groups]
 dev = [
@@ -84,6 +88,10 @@ disallow_any_unimported = true
 show_error_codes = true
 files = ["."]
 exclude = "^\\.venv/"
+
+[[tool.mypy.overrides]]
+module = ["aiokafka", "aiokafka.*"]
+follow_untyped_imports = true
 
 # --- tests ------------------------------------------------------------------
 [tool.pytest.ini_options]

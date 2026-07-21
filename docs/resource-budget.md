@@ -35,10 +35,10 @@ file or the job spec — not an intention.
 | tempo | 512 MB | ingestion rate-capped at 15 MB/s |
 | otel-collector | 512 MB | `memory_limiter` sheds load at 384 MiB |
 | grafana | 512 MB | dashboards only |
-| **Total** | **≈7.3 GB** | ~21% of currently available RAM |
-
-The gateway and web front door are added at the same scale (256 MB each) when
-they land.
+| ingest | 384 MB | bounded 100k-ID LRU; no published port |
+| gateway | 512 MB | API and dependency probes |
+| web | 256 MB | Caddy front door and static build |
+| **Total** | **≈8.5 GB** | ~31% of the 27 GB available when ingest landed |
 
 ### `scoring` — capture replay, no live testbed
 
@@ -84,6 +84,7 @@ retention policy configured from the day it is introduced:
 | Loki | 7 days, compactor-enforced | `deploy/loki/loki.yaml` |
 | Tempo | 72 hours block retention | `deploy/tempo/tempo.yaml` |
 | ClickHouse | per-table TTLs; system logs 7 days, verbose logs off | `deploy/clickhouse/config.d/limits.xml` |
+| Redpanda | 7 days (`604800000` ms), verified for raw, normalized and DLQ topics | cluster default `log_retention_ms` |
 | PostgreSQL | no TTL — incidents and the audit chain are the durable record | — |
 
 Disk headroom is watched by meta-monitoring, with an alarm well before the

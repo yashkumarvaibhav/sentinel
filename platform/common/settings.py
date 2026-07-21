@@ -53,7 +53,18 @@ class Settings(BaseSettings):
     storage_timeout_seconds: float = Field(
         default=10.0, alias="STORAGE_TIMEOUT_SECONDS", gt=0.0, le=120.0
     )
-    redpanda_brokers: str = Field(default="redpanda:9092", alias="REDPANDA_BROKERS")
+    redpanda_brokers: str = Field(default="redpanda:9092", alias="REDPANDA_BROKERS", min_length=1)
+    ingest_group_id: str = Field(
+        default="sentinel-ingest-v1", alias="INGEST_GROUP_ID", min_length=1, max_length=255
+    )
+    ingest_dedup_capacity: int = Field(
+        default=100_000, alias="INGEST_DEDUP_CAPACITY", ge=1_000, le=10_000_000
+    )
+
+    @property
+    def brokers(self) -> tuple[str, ...]:
+        """Normalized Kafka bootstrap endpoints."""
+        return tuple(item.strip() for item in self.redpanda_brokers.split(",") if item.strip())
 
     victoriametrics_url: str = Field(
         default="http://victoriametrics:8428", alias="VICTORIAMETRICS_URL"
@@ -81,6 +92,8 @@ class Settings(BaseSettings):
             raise ValueError("STORAGE_POOL_MAX_SIZE must be greater than or equal to the minimum")
         if self.postgres_dev_schema == self.postgres_schema:
             raise ValueError("POSTGRES_DEV_SCHEMA must differ from POSTGRES_SCHEMA")
+        if not self.brokers:
+            raise ValueError("REDPANDA_BROKERS must contain at least one endpoint")
         return self
 
 

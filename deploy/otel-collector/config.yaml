@@ -35,6 +35,29 @@ exporters:
     endpoint: tempo:4317
     tls:
       insecure: true
+  kafka/raw:
+    brokers: [redpanda:9092]
+    client_id: sentinel-otel-collector
+    metrics:
+      topic: otlp.raw.metrics
+      encoding: otlp_json
+    logs:
+      topic: otlp.raw.logs
+      encoding: otlp_json
+    traces:
+      topic: otlp.raw.traces
+      encoding: otlp_json
+    producer:
+      compression: zstd
+      required_acks: 1
+      allow_auto_topic_creation: true
+    sending_queue:
+      enabled: true
+      num_consumers: 1
+      queue_size: 256
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 0s
 
 extensions:
   health_check:
@@ -49,12 +72,12 @@ service:
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, resource_detection, batch]
-      exporters: [prometheus_remote_write]
+      exporters: [prometheus_remote_write, kafka/raw]
     logs:
       receivers: [otlp]
       processors: [memory_limiter, resource_detection, batch]
-      exporters: [otlp_http/loki]
+      exporters: [otlp_http/loki, kafka/raw]
     traces:
       receivers: [otlp]
       processors: [memory_limiter, resource_detection, batch]
-      exporters: [otlp_grpc/tempo]
+      exporters: [otlp_grpc/tempo, kafka/raw]
