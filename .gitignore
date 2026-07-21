@@ -24,7 +24,7 @@ yarn-error.log*
 # --- Runtime state, data, artifacts -----------------------------------------
 var/
 data/telemetry/
-captures/
+/captures/
 mlruns/
 .dvc/cache/
 
