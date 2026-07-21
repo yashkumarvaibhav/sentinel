@@ -31,6 +31,7 @@ context = [
 
 [dependency-groups]
 dev = [
+    "dvc==3.67.1",
     "ruff>=0.8",
     "mypy>=1.13",
     "pytest>=8.3",

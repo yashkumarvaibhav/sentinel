@@ -1,0 +1,5 @@
+[core]
+    analytics = false
+    remote = bootstrap
+['remote "bootstrap"']
+    url = ../var/dvc-remote

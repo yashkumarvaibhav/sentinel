@@ -59,9 +59,8 @@ same transcript SHA-256 (`ad32e4cd86f5ff0547e5cc7250afd5167549431258c657af06ba18
 712/712 correlated ingress spans, 50 ticks, 30 warmup ticks, 20 frames, 18 with
 event context, 8 residual, and zero raw DLQ outcomes.
 
-This completes the live-recorder and full-decomposition-transcript parts of
-Phase 1.9. The next part adds DVC object pointers, then switches hosted
-score/golden CI gates to those recorded inputs.
+The live recorder, full decomposition transcript and DVC-backed hosted gates
+together complete the Phase 1.9 capture/replay boundary.
 
 ## Golden regression set
 
@@ -76,5 +75,16 @@ set into development.
 
 An intentional behavior change uses `make regen-golden` followed by a reviewed
 JSON diff. Both commands accept `GOLDEN_CAPTURE_ROOT=<directory>`; the default
-is the ignored local matrix `var/capture-matrices/phase1-goldens-v1` until the
-DVC-backed bootstrap object is wired.
+is the DVC output at `data/captures/phase-1/goldens`.
+
+## Clone and CI bootstrap
+
+`data/captures/phase-1.dvc` versions the six-capture directory: four held-out
+score inputs and two development-only golden inputs. The default DVC remote is
+an ignored local content-addressed store under `var/`. `make data-pull`
+materializes that remote from the private GitHub Release
+`phase-1-captures-v1`, but only after verifying its committed byte length,
+SHA-256, regular-file-only tar layout, file count, expanded byte bound and DVC
+root-object MD5. It then runs `dvc pull`, which verifies every object before
+checkout. Existing repository authentication supplies access; no storage token
+is committed or logged.

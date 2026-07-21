@@ -1,6 +1,6 @@
 # Scenario scoring
 
-`make score` is the Phase 1 held-out gate. It compiles the committed
+`make score-live` is the Phase 1 live held-out gate. It compiles the committed
 `quiet_day` and `match_night` profiles, runs every held-out seed as a bounded k6
 Job inside the `otel-demo` namespace, waits for the Collector/Redpanda/ingest
 path, and reads the matching real frontend-proxy ingress spans back from
@@ -34,10 +34,16 @@ context are labeled **SIMULATED**; only the instrumented testbed telemetry is
 labeled **REAL**. Phase 1.9 records these live runs at the raw-bus boundary so
 future hosted score and golden gates can replay them bit-exactly without k3s.
 
-The scorer-only capture path is `make score-captures
+The hosted `make score` gate first installs the checksum-locked DVC bootstrap,
+then replays the exact four captures under
+`data/captures/phase-1/held-out`. It requires the same exact committed
+`(profile, seed)` matrix and writes the same report without k3s, live stores or
+private-label access on the runtime path. `make score-live` remains the fresh
+VM/testbed evidence path.
+
+The custom diagnostic path is `make score-captures
 CAPTURE_ROOT=<directory>`. It discovers verified capture directories, requires
 the matrix to match all four committed held-out `(profile, seed)` pairs exactly,
 replays normalization and decomposition without labels, and only then verifies
 and applies `private/labels.json`. Missing, duplicate or extra runs fail before
-gate evaluation. This diagnostic target remains separate from `make score`
-until the DVC-backed matrix is clone-accessible and hosted CI can fetch it.
+gate evaluation.

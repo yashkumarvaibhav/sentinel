@@ -17,6 +17,7 @@
 var/
 captures/
 data/telemetry/
+data/captures/
 mlruns/
 .dvc/cache/
 

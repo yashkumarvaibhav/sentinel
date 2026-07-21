@@ -2,7 +2,7 @@
 
 **Gate: PASS**
 
-- Telemetry evidence: **REAL** OpenTelemetry ingress spans from the contained Astronomy Shop testbed, read back from ClickHouse after Collector -> Redpanda -> ingest normalization.
+- Telemetry evidence: **REAL** OpenTelemetry ingress spans recorded at exact raw-topic offsets from the contained Astronomy Shop testbed, checksum-verified and re-normalized during bit-exact replay.
 - Workload and event context: **SIMULATED**, deterministic, seed-controlled and capped at 50 requests/s inside the testbed namespace.
 - Seed discipline: every row below is from the committed **HELD-OUT** set; development tests use disjoint seeds.
 - Label discipline: the engine receives only `Observation` plus `ContextWindow`; private residual intervals are applied afterward by `lab/scoring`.
@@ -12,10 +12,10 @@
 
 | Profile | Seed | Real spans | Complete | Ticks | TP | FP | FN | TN | Precision | Recall | FP rate | Detect p50/p95 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| quiet_day | 7901 | 336/336 | 1.000 | 12 | 0 | 0 | 0 | 12 | insufficient | insufficient | 0.000 | insufficient |
-| quiet_day | 7919 | 336/336 | 1.000 | 12 | 0 | 0 | 0 | 12 | insufficient | insufficient | 0.000 | insufficient |
 | match_night | 8923 | 712/712 | 1.000 | 20 | 8 | 0 | 0 | 12 | 1.000 | 1.000 | 0.000 | 0.0s/0.0s |
 | match_night | 8941 | 712/712 | 1.000 | 20 | 8 | 0 | 0 | 12 | 1.000 | 1.000 | 0.000 | 0.0s/0.0s |
+| quiet_day | 7901 | 336/336 | 1.000 | 12 | 0 | 0 | 0 | 12 | insufficient | insufficient | 0.000 | insufficient |
+| quiet_day | 7919 | 336/336 | 1.000 | 12 | 0 | 0 | 0 | 12 | insufficient | insufficient | 0.000 | insufficient |
 
 ## Gate summary
 

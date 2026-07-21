@@ -1,0 +1,12 @@
+{
+  "archive_name": "sentinel-phase1-dvc-remote-v1.tar.gz",
+  "archive_sha256": "c9c62b5c4a31d40938fce3f8bec8c028aab9122fde7878be1b1e48bf9b235acc",
+  "archive_size_bytes": 14466915,
+  "dvc_directory_hash": "5a04df64f2688f6eb2204e142a141100.dir",
+  "payload_files": 402,
+  "payload_size_bytes": 117645555,
+  "release_tag": "phase-1-captures-v1",
+  "remote_root": "dvc-remote",
+  "repository": "yashkumarvaibhav/sentinel",
+  "version": 1
+}

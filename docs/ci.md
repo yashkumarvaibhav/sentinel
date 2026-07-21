@@ -54,8 +54,10 @@ direct pushes open.
 When work moves onto branches and pull requests, tighten it: require a pull
 request, require the branch to be up to date, and require these checks by
 name — `python — lint, types, tests`, `web — types, lint, tests, build`,
-`stack — compose smoke`, plus the scoring and golden-replay checks as soon as
-they exist.
+`stack — compose smoke`, plus the capture-backed `scoring — held-out captures
+and goldens` job. The scoring job uses the repository-scoped Actions token to
+download the checksum-locked private Release bootstrap, then DVC verifies and
+checks out the exact Phase 1 dataset before `make score` and `make golden`.
 
 Until then the gate is discipline: never commit red, and never push a commit
 whose gates were not run locally.

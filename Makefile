@@ -3,7 +3,7 @@ SHELL := /bin/bash
 
 # Every Python gate runs from platform/ so that tool config, the import root and
 # the uv environment all resolve to the same place.
-PY := cd platform && uv run
+PY := cd platform && PYTHONPATH=.. uv run
 PY_PATHS := . ../lab
 WEB := cd web && npm run --silent
 
@@ -146,13 +146,22 @@ lab-status: ## Show testbed nodes and workloads
 	kubectl --context k3d-sentinel-lab get nodes -o wide
 	kubectl --context k3d-sentinel-lab get pods -A
 
+.PHONY: data-pull
+data-pull: ## Fetch and verify the DVC-versioned Phase 1 capture store
+	$(PY) python -m lab.captures.bootstrap \
+		--repo-root .. --manifest ../lab/captures/bootstrap.json
+	$(PY) dvc pull ../data/captures/phase-1.dvc -r bootstrap
+
 .PHONY: score
-score: ## Score the pipeline on held-out seeds (gate)
-	cd platform && PYTHONPATH=.. uv run python -m lab.scoring \
-		--repo-root .. --report ../docs/reports/phase-1-decomposition-score.md
+score: data-pull ## Score held-out capture replays (hosted gate)
+	$(PY) python -m lab.scoring.capture \
+		--repo-root .. --captures-root ../data/captures/phase-1/held-out \
+		--report ../docs/reports/phase-1-decomposition-score.md
 
 .PHONY: score-live
-score-live: score ## Run fresh held-out seeds against the contained live testbed
+score-live: ## Run fresh held-out seeds against the contained live testbed
+	cd platform && PYTHONPATH=.. uv run python -m lab.scoring \
+		--repo-root .. --report ../docs/reports/phase-1-decomposition-score.md
 
 .PHONY: capture
 capture: ## Record one committed profile seed (PROFILE= SEED= CAPTURE_ID= [PURPOSE=held_out])
@@ -179,15 +188,15 @@ score-captures: ## Gate an exact four-seed capture matrix (CAPTURE_ROOT=)
 		--report ../var/reports/phase-1-capture-score.md
 
 .PHONY: golden
-golden: ## Replay goldens and diff decision transcripts (gate)
+golden: data-pull ## Replay development goldens and diff semantic transcripts
 	cd platform && PYTHONPATH=.. uv run python -m lab.scoring.golden \
 		--repo-root .. \
-		--captures-root "../$(or $(GOLDEN_CAPTURE_ROOT),var/capture-matrices/phase1-goldens-v1)" \
+		--captures-root "../$(or $(GOLDEN_CAPTURE_ROOT),data/captures/phase-1/goldens)" \
 		--goldens-root ../lab/goldens/phase-1
 
 .PHONY: regen-golden
-regen-golden: ## Rewrite reviewed Phase 1 goldens from development captures
+regen-golden: data-pull ## Rewrite reviewed Phase 1 goldens from development captures
 	cd platform && PYTHONPATH=.. uv run python -m lab.scoring.golden \
 		--repo-root .. \
-		--captures-root "../$(or $(GOLDEN_CAPTURE_ROOT),var/capture-matrices/phase1-goldens-v1)" \
+		--captures-root "../$(or $(GOLDEN_CAPTURE_ROOT),data/captures/phase-1/goldens)" \
 		--goldens-root ../lab/goldens/phase-1 --write
