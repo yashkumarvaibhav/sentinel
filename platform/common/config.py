@@ -42,6 +42,7 @@ type Probability = Annotated[float, Field(ge=0.0, le=1.0, allow_inf_nan=False)]
 type PositiveFloat = Annotated[float, Field(gt=0.0, allow_inf_nan=False)]
 type NonNegativeFloat = Annotated[float, Field(ge=0.0, allow_inf_nan=False)]
 type Percentage = Annotated[float, Field(ge=0.0, le=100.0, allow_inf_nan=False)]
+type BoundedRatio = Annotated[float, Field(ge=0.0, le=10.0, allow_inf_nan=False)]
 type CompetitionCode = Annotated[
     str,
     StringConstraints(strip_whitespace=True, pattern=r"^[A-Z0-9]{2,4}$"),
@@ -200,6 +201,8 @@ class DetectorConfig(ConfigModel):
     watermark_lateness_seconds: int = Field(ge=0, le=3600)
     ewma_alpha: Probability
     baseline_warmup_points: int = Field(ge=2, le=100_000)
+    baseline_update_gate_ratio: BoundedRatio
+    expected_band_relative_tolerance: BoundedRatio
     absolute_noise_floors: dict[SignalName, NonNegativeFloat] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -208,6 +211,8 @@ class DetectorConfig(ConfigModel):
             raise ValueError("watermark lateness cannot exceed the feature window")
         if self.ewma_alpha == 0.0:
             raise ValueError("ewma_alpha must be greater than zero")
+        if self.baseline_update_gate_ratio == 0.0:
+            raise ValueError("baseline_update_gate_ratio must be greater than zero")
         return self
 
 

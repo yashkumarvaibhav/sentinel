@@ -11,6 +11,7 @@ import httpx
 import pytest
 from psycopg import sql
 
+from common.config import DetectorConfig
 from common.settings import Settings
 from common.storage import (
     AuditRecord,
@@ -24,6 +25,7 @@ from common.storage._clickhouse import execute as clickhouse_execute
 from common.storage.dev_labels import DevLabelRecord, DevLabelRepository
 from common.storage.migrations import migrate_storage
 from contracts import ContextWindow, DecompFrame, Observation, Symptom, SymptomKind
+from detection.decompose import DecompositionEngine, DecompositionWorker
 
 pytestmark = [
     pytest.mark.integration,
@@ -129,6 +131,48 @@ async def _round_trip_clickhouse(config: Settings, client: httpx.AsyncClient, su
         end=ts + timedelta(seconds=1),
     )
     assert listed == (observation,)
+
+    detector = DetectorConfig(
+        version=1,
+        feature_window_seconds=60,
+        watermark_lateness_seconds=15,
+        ewma_alpha=0.15,
+        baseline_warmup_points=3,
+        baseline_update_gate_ratio=0.25,
+        expected_band_relative_tolerance=0.1,
+        absolute_noise_floors={"frontend.request_rate": 1.0},
+    )
+    engine = DecompositionEngine(configuration=detector, dedup_capacity=100)
+    worker = DecompositionWorker(engine=engine, sink=repository)
+    for index, value in enumerate((99.0, 100.0, 101.0)):
+        result = engine.decompose(
+            observation.model_copy(
+                update={
+                    "observation_id": f"warm-{suffix}-{index}",
+                    "ts": ts + timedelta(seconds=index + 1),
+                    "value": value,
+                }
+            )
+        )
+        assert result.frame is None
+
+    persisted = []
+    for index, value in enumerate((102.0, 103.0)):
+        result = await worker.handle(
+            observation.model_copy(
+                update={
+                    "observation_id": f"decompose-{suffix}-{index}",
+                    "ts": ts + timedelta(seconds=index + 10),
+                    "value": value,
+                }
+            )
+        )
+        assert result.frame is not None
+        persisted.append(result.frame)
+
+    assert persisted[0].frame_id != persisted[1].frame_id
+    for persisted_frame in persisted:
+        assert await repository.get_decomp_frame(persisted_frame.frame_id) == persisted_frame
 
 
 async def _round_trip_postgres(config: Settings, pool: PostgresPool, suffix: str) -> None:
