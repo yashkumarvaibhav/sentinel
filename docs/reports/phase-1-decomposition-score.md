@@ -6,7 +6,7 @@
 - Workload and event context: **SIMULATED**, deterministic, seed-controlled and capped at 50 requests/s inside the testbed namespace.
 - Seed discipline: every row below is from the committed **HELD-OUT** set; development tests use disjoint seeds.
 - Label discipline: the engine receives only `Observation` plus `ContextWindow`; private residual intervals are applied afterward by `lab/scoring`.
-- Runtime config fingerprint: `fdd7c78ffa81d5ba94fa19851bd38369c778d216ebf76488a4d8ab41c2a8e1d4`.
+- Runtime config fingerprint: `e191a3cb4c1881e276fe499f575328ac992cfb03771152aac645ad261e575244`.
 
 ## Held-out runs
 

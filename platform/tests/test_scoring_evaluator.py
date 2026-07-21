@@ -10,6 +10,7 @@ from lab.scoring.evaluator import build_rate_observations, score_observations
 from lab.scoring.gates import ScoreGateConfig, evaluate_gates
 
 from common.config import DetectorConfig
+from tests.factories import behavioral_ratio_config
 
 SCENARIO_ROOT = Path(__file__).resolve().parents[2] / "lab" / "scenarios"
 START = datetime(2026, 7, 21, 12, 0, tzinfo=UTC)
@@ -134,4 +135,5 @@ def _detector() -> DetectorConfig:
         baseline_update_gate_ratio=0.25,
         expected_band_relative_tolerance=0.1,
         absolute_noise_floors={"frontend.request_rate": 1.0},
+        behavioral_ratios=behavioral_ratio_config(),
     )

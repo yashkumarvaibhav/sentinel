@@ -195,6 +195,43 @@ class EventCalendarConfig(ConfigModel):
         return self
 
 
+class BehavioralRatioRuleConfig(ConfigModel):
+    """Operator-owned deformation and saturation parameters for one ratio."""
+
+    baseline_floor: PositiveFloat
+    trigger_relative_deformation: PositiveFloat
+    full_score_relative_deformation: PositiveFloat
+    ratio_ceiling: PositiveFloat | None = None
+
+    @model_validator(mode="after")
+    def validate_score_range(self) -> Self:
+        if self.full_score_relative_deformation < self.trigger_relative_deformation:
+            raise ValueError(
+                "full_score_relative_deformation must be greater than or equal to "
+                "trigger_relative_deformation"
+            )
+        return self
+
+
+class BehavioralRatioConfig(ConfigModel):
+    """Scale-free behavioral monitors; thresholds remain configuration, not code."""
+
+    source_entropy: BehavioralRatioRuleConfig
+    auth_failure: BehavioralRatioRuleConfig
+    syn_ack: BehavioralRatioRuleConfig
+    rpc_amplification: BehavioralRatioRuleConfig
+
+    @model_validator(mode="after")
+    def validate_ceiling_semantics(self) -> Self:
+        for name in ("source_entropy", "auth_failure"):
+            if getattr(self, name).ratio_ceiling is not None:
+                raise ValueError(f"{name} must not define ratio_ceiling")
+        for name in ("syn_ack", "rpc_amplification"):
+            if getattr(self, name).ratio_ceiling is None:
+                raise ValueError(f"{name} must define ratio_ceiling")
+        return self
+
+
 class DetectorConfig(ConfigModel):
     version: Literal[1]
     feature_window_seconds: int = Field(ge=1, le=3600)
@@ -204,6 +241,7 @@ class DetectorConfig(ConfigModel):
     baseline_update_gate_ratio: BoundedRatio
     expected_band_relative_tolerance: BoundedRatio
     absolute_noise_floors: dict[SignalName, NonNegativeFloat] = Field(min_length=1)
+    behavioral_ratios: BehavioralRatioConfig
 
     @model_validator(mode="after")
     def validate_watermark(self) -> Self:

@@ -8,3 +8,22 @@ expected_band_relative_tolerance: 0.1
 absolute_noise_floors:
   frontend.request_rate: 1.5
   checkout.error_ratio: 0.005
+behavioral_ratios:
+  source_entropy:
+    baseline_floor: 0.25
+    trigger_relative_deformation: 0.3
+    full_score_relative_deformation: 0.7
+  auth_failure:
+    baseline_floor: 0.01
+    trigger_relative_deformation: 1.0
+    full_score_relative_deformation: 5.0
+  syn_ack:
+    baseline_floor: 0.1
+    trigger_relative_deformation: 0.5
+    full_score_relative_deformation: 2.0
+    ratio_ceiling: 20.0
+  rpc_amplification:
+    baseline_floor: 0.05
+    trigger_relative_deformation: 1.0
+    full_score_relative_deformation: 5.0
+    ratio_ceiling: 20.0

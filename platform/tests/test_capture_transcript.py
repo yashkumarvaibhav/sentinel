@@ -18,6 +18,7 @@ from lab.captures.models import CaptureTelemetry
 from lab.scoring.capture import score_decomposition_replay
 
 from common.config import DetectorConfig
+from tests.factories import behavioral_ratio_config
 
 
 def test_two_full_capture_replays_are_byte_identical_without_private_labels(
@@ -142,6 +143,7 @@ def _detector() -> DetectorConfig:
         baseline_update_gate_ratio=0.25,
         expected_band_relative_tolerance=0.1,
         absolute_noise_floors={"frontend.request_rate": 1.0},
+        behavioral_ratios=behavioral_ratio_config(),
     )
 
 

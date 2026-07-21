@@ -37,6 +37,8 @@ def test_committed_config_loads_with_cross_file_references_and_stable_fingerprin
     assert first.events.sports_connector.provider == "football-data.org"
     assert first.detectors.baseline_update_gate_ratio == 0.25
     assert first.detectors.expected_band_relative_tolerance == 0.1
+    assert first.detectors.behavioral_ratios.source_entropy.ratio_ceiling is None
+    assert first.detectors.behavioral_ratios.syn_ack.ratio_ceiling == 20.0
     assert any(cohort.protected for cohort in first.cohorts.cohorts)
     assert {slo.service for slo in first.slos.slos} <= {
         service.service for service in first.topology.services
@@ -81,6 +83,20 @@ def test_config_models_are_immutable() -> None:
             "detector-params.yml",
             lambda document: document.__setitem__("baseline_update_gate_ratio", 0),
             "baseline_update_gate_ratio must be greater than zero",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["behavioral_ratios"]["source_entropy"].__setitem__(
+                "ratio_ceiling", 20.0
+            ),
+            "source_entropy must not define ratio_ceiling",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["behavioral_ratios"]["rpc_amplification"].__setitem__(
+                "full_score_relative_deformation", 0.5
+            ),
+            "full_score_relative_deformation",
         ),
     ],
 )
