@@ -12,10 +12,10 @@ WORKDIR /app
 
 # Dependencies first, so editing platform code does not re-resolve the world.
 COPY platform/pyproject.toml platform/uv.lock ./
-RUN uv sync --extra api --no-dev --no-install-project
+RUN uv sync --extra api --extra storage --no-dev --no-install-project
 
 COPY platform/ ./
-RUN uv sync --extra api --no-dev
+RUN uv sync --extra api --extra storage --no-dev
 
 # Stamped at build time so /api/version can name the commit that is running.
 ARG SENTINEL_VERSION=0.1.0

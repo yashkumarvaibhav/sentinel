@@ -41,12 +41,25 @@ services:
     environment:
       SENTINEL_ENV: ${SENTINEL_ENV:-dev}
       POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-sentinel}
+      POSTGRES_USER: ${POSTGRES_USER:-sentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentinel}
+      POSTGRES_SCHEMA: ${POSTGRES_SCHEMA:-sentinel}
+      POSTGRES_DEV_SCHEMA: ${POSTGRES_DEV_SCHEMA:-sentinel_dev}
       CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-sentinel}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-sentinel}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-sentinel}
+      CLICKHOUSE_RETENTION_DAYS: ${CLICKHOUSE_RETENTION_DAYS:-15}
       REDPANDA_BROKERS: redpanda:9092
       VICTORIAMETRICS_URL: http://victoriametrics:8428
       LOKI_URL: http://loki:3100
       TEMPO_URL: http://tempo:3200
       COLLECTOR_URL: http://otel-collector:13133
+      STORAGE_POOL_MIN_SIZE: ${STORAGE_POOL_MIN_SIZE:-1}
+      STORAGE_POOL_MAX_SIZE: ${STORAGE_POOL_MAX_SIZE:-4}
+      STORAGE_TIMEOUT_SECONDS: ${STORAGE_TIMEOUT_SECONDS:-10}
     ports:
       # Published so the dev server and local checks can reach it directly;
       # public traffic always arrives through the front door on 8041.

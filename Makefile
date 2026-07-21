@@ -63,6 +63,16 @@ contracts: ## Export JSON Schema and regenerate TypeScript contracts
 	$(PY) python -m contracts export
 	$(WEB) contracts:generate
 
+.PHONY: migrate
+migrate: ## Apply idempotent ClickHouse and Postgres migrations
+	$(COMPOSE) run --rm --build gateway python -m common.storage migrate
+
+.PHONY: verify-storage
+verify-storage: ## Run real repository round trips on the compose datastores
+	$(COMPOSE) run --rm --build -e SENTINEL_STORAGE_INTEGRATION=1 gateway \
+		env UV_CACHE_DIR=/tmp/sentinel-uv-cache \
+		uv run --extra api --extra storage pytest tests/test_storage_integration.py
+
 # --- stack ------------------------------------------------------------------
 
 .PHONY: up

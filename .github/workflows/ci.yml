@@ -93,6 +93,11 @@ jobs:
           status=$(curl -sf http://127.0.0.1:8041/api/health | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')
           test "$status" = "ready"
 
+      - name: Migrations and repository round trips
+        run: |
+          make migrate
+          make verify-storage
+
       - name: The build stamp names this commit
         run: |
           set -euo pipefail
