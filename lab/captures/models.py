@@ -70,6 +70,14 @@ class PrivateArtifact(CaptureModel):
     sha256: Sha256
 
 
+class CaptureTelemetry(CaptureModel):
+    target: Identifier
+    source_service: Identifier
+    logical_service: Identifier
+    logical_signal: Identifier
+    tick_seconds: int = Field(ge=1, le=60)
+
+
 class CaptureManifest(CaptureModel):
     version: Literal[1]
     capture_id: Identifier
@@ -81,6 +89,7 @@ class CaptureManifest(CaptureModel):
     config_fingerprint: Sha256
     correlation_user_agent: Identifier
     anchor_user_agent: Identifier
+    telemetry: CaptureTelemetry
     topics: tuple[TopicCapture, ...] = Field(min_length=1)
     schedule: PublicArtifact
     context_feed: PublicArtifact

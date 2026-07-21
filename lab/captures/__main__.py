@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import hashlib
 import json
 import os
 import re
@@ -25,7 +26,9 @@ from lab.captures.broker import (
     read_bounded_records,
     snapshot_offsets,
 )
-from lab.captures.store import CaptureMetadata, write_capture
+from lab.captures.models import CaptureTelemetry
+from lab.captures.store import CaptureMetadata, load_runtime_capture, write_capture
+from lab.captures.transcript import replay_decomposition
 from lab.scenarios import SeedPurpose, compile_profile, load_profile, write_artifacts
 from lab.scoring.live import run_live_scenario
 
@@ -42,11 +45,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     record.add_argument("--seed", type=int, required=True)
     record.add_argument("--capture-id", required=True)
     record.add_argument("--output", type=Path, required=True)
+    replay = subparsers.add_parser("replay", help="write one canonical decomposition transcript")
+    replay.add_argument("--repo-root", type=Path, required=True)
+    replay.add_argument("--capture", type=Path, required=True)
+    replay.add_argument("--transcript", type=Path, required=True)
     subparsers.add_parser("_snapshot", help=argparse.SUPPRESS)
     collect = subparsers.add_parser("_collect", help=argparse.SUPPRESS)
     collect.add_argument("--before", type=Path, required=True)
     collect.add_argument("--after", type=Path, required=True)
     collect.add_argument("--schedule", type=Path, required=True)
+    collect.add_argument("--telemetry", type=Path, required=True)
     collect.add_argument("--context", type=Path, required=True)
     collect.add_argument("--labels", type=Path, required=True)
     collect.add_argument("--output", type=Path, required=True)
@@ -59,6 +67,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "record":
         return _record(args)
+    if args.command == "replay":
+        return _replay(args)
     if args.command == "_snapshot":
         return asyncio.run(_print_snapshot())
     if args.command == "_collect":
@@ -78,6 +88,8 @@ def _record(args: argparse.Namespace) -> int:
     invocation = secrets.token_hex(4)
     work = repo_root / "var" / "capture-work" / f"{capture_id}-{invocation}"
     paths = write_artifacts(artifacts, work)
+    telemetry_path = work / "telemetry.json"
+    telemetry_path.write_bytes(_canonical(profile.telemetry.model_dump(mode="json")))
 
     print(f"[capture] {capture_id}: snapshotting raw-topic starts", flush=True)
     before = _container_snapshot(repo_root)
@@ -103,6 +115,8 @@ def _record(args: argparse.Namespace) -> int:
             _container_path(repo_root, after_path),
             "--schedule",
             _container_path(repo_root, paths.schedule),
+            "--telemetry",
+            _container_path(repo_root, telemetry_path),
             "--context",
             _container_path(repo_root, paths.context_feed),
             "--labels",
@@ -126,6 +140,36 @@ def _record(args: argparse.Namespace) -> int:
     print(f"[capture] {capture_id}: draining exact raw-topic ranges", flush=True)
     summary = _run(command).strip()
     print(f"[capture] {capture_id}: {summary}", flush=True)
+    return 0
+
+
+def _replay(args: argparse.Namespace) -> int:
+    repo_root = args.repo_root.resolve()
+    transcript_path = args.transcript.resolve()
+    _relative_to_var(repo_root, transcript_path)
+    config = load_config(repo_root / "config")
+    replay = replay_decomposition(
+        load_runtime_capture(args.capture.resolve()),
+        detector=config.detectors,
+        replay_config_fingerprint=config.fingerprint,
+    )
+    transcript = replay.canonical_bytes()
+    transcript_path.parent.mkdir(parents=True, exist_ok=True)
+    transcript_path.write_bytes(transcript)
+    print(
+        json.dumps(
+            {
+                "capture_id": replay.capture_id,
+                "decomposed": replay.stats.decomposed,
+                "raw_dead_letters": len(replay.raw_dead_letters),
+                "telemetry_completeness": replay.telemetry_completeness,
+                "ticks": len(replay.steps),
+                "transcript_sha256": hashlib.sha256(transcript).hexdigest(),
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    )
     return 0
 
 
@@ -172,6 +216,7 @@ async def _collect(args: argparse.Namespace) -> int:
             config_fingerprint=args.config_fingerprint,
             correlation_user_agent=args.correlation_user_agent,
             anchor_user_agent=args.anchor_user_agent,
+            telemetry=CaptureTelemetry.model_validate_json(args.telemetry.read_bytes()),
         ),
         topic_bounds=bounds,
         records=records,

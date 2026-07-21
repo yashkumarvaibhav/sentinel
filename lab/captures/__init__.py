@@ -11,11 +11,13 @@ from lab.captures.store import (
     load_runtime_capture,
     write_capture,
 )
+from lab.captures.transcript import DecompositionReplay, replay_decomposition
 
 __all__ = [
     "BrokerSnapshot",
     "CaptureMetadata",
     "CaptureSourceRecord",
+    "DecompositionReplay",
     "RawReplay",
     "RuntimeCapture",
     "TopicBounds",
@@ -23,6 +25,7 @@ __all__ = [
     "bounds_between",
     "load_private_labels",
     "load_runtime_capture",
+    "replay_decomposition",
     "replay_raw",
     "write_capture",
 ]

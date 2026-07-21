@@ -16,6 +16,7 @@ from lab.captures import (
     replay_raw,
     write_capture,
 )
+from lab.captures.models import CaptureTelemetry
 
 
 def test_two_raw_replays_are_byte_identical_and_preserve_source_coordinates(
@@ -132,6 +133,13 @@ def _metadata() -> CaptureMetadata:
         config_fingerprint="a" * 64,
         correlation_user_agent="sentinel-score/run-capture",
         anchor_user_agent="sentinel-score-anchor/run-capture",
+        telemetry=CaptureTelemetry(
+            target="astronomy-shop/frontend-proxy",
+            source_service="frontend-proxy",
+            logical_service="frontend",
+            logical_signal="request_rate",
+            tick_seconds=2,
+        ),
     )
 
 

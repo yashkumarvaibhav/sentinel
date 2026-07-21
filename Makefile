@@ -163,6 +163,13 @@ capture: ## Record one held-out profile at raw-topic boundaries (PROFILE= SEED= 
 		--seed "$(SEED)" --capture-id "$(CAPTURE_ID)" \
 		--output "../var/captures/$(CAPTURE_ID)"
 
+.PHONY: replay-capture
+replay-capture: ## Replay one raw capture through decomposition (CAPTURE_ID=)
+	@test -n "$(CAPTURE_ID)" || { echo "CAPTURE_ID is required" >&2; exit 2; }
+	cd platform && PYTHONPATH=.. uv run python -m lab.captures replay \
+		--repo-root .. --capture "../var/captures/$(CAPTURE_ID)" \
+		--transcript "../var/replays/$(CAPTURE_ID)/decomposition.json"
+
 .PHONY: golden
 golden: ## Replay goldens and diff decision transcripts (gate)
 	$(call todo,golden,1.9)

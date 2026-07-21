@@ -11,6 +11,7 @@ from typing import Literal
 
 from lab.captures.models import (
     CaptureManifest,
+    CaptureTelemetry,
     PrivateArtifact,
     PublicArtifact,
     RawRecordDescriptor,
@@ -32,6 +33,7 @@ class CaptureMetadata:
     config_fingerprint: str
     correlation_user_agent: str
     anchor_user_agent: str
+    telemetry: CaptureTelemetry
 
 
 @dataclass(frozen=True)
