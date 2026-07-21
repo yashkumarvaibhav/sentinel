@@ -170,6 +170,13 @@ replay-capture: ## Replay one raw capture through decomposition (CAPTURE_ID=)
 		--repo-root .. --capture "../var/captures/$(CAPTURE_ID)" \
 		--transcript "../var/replays/$(CAPTURE_ID)/decomposition.json"
 
+.PHONY: score-captures
+score-captures: ## Gate an exact four-seed capture matrix (CAPTURE_ROOT=)
+	@test -n "$(CAPTURE_ROOT)" || { echo "CAPTURE_ROOT is required" >&2; exit 2; }
+	cd platform && PYTHONPATH=.. uv run python -m lab.scoring.capture \
+		--repo-root .. --captures-root "../$(CAPTURE_ROOT)" \
+		--report ../var/reports/phase-1-capture-score.md
+
 .PHONY: golden
 golden: ## Replay goldens and diff decision transcripts (gate)
 	$(call todo,golden,1.9)

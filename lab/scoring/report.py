@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from lab.scoring.evaluator import RunScore
 from lab.scoring.gates import GateResult, ScoreGateConfig
 from lab.scoring.metrics import MetricValue
@@ -13,15 +15,23 @@ def render_report(
     gate: GateResult,
     config: ScoreGateConfig,
     config_fingerprint: str,
+    evidence_mode: Literal["live", "capture"] = "live",
 ) -> str:
+    evidence = (
+        "- Telemetry evidence: **REAL** OpenTelemetry ingress spans from the contained "
+        "Astronomy Shop testbed, read back from ClickHouse after Collector -> Redpanda -> "
+        "ingest normalization."
+        if evidence_mode == "live"
+        else "- Telemetry evidence: **REAL** OpenTelemetry ingress spans recorded at exact "
+        "raw-topic offsets from the contained Astronomy Shop testbed, checksum-verified and "
+        "re-normalized during bit-exact replay."
+    )
     lines = [
         "# Phase 1 decomposition scoring proof",
         "",
         f"**Gate: {'PASS' if gate.passed else 'FAIL'}**",
         "",
-        "- Telemetry evidence: **REAL** OpenTelemetry ingress spans from the contained "
-        "Astronomy Shop testbed, read back from ClickHouse after Collector -> Redpanda -> "
-        "ingest normalization.",
+        evidence,
         "- Workload and event context: **SIMULATED**, deterministic, seed-controlled and "
         "capped at 50 requests/s inside the testbed namespace.",
         "- Seed discipline: every row below is from the committed **HELD-OUT** set; "

@@ -33,3 +33,11 @@ The proof report is regenerated at
 context are labeled **SIMULATED**; only the instrumented testbed telemetry is
 labeled **REAL**. Phase 1.9 records these live runs at the raw-bus boundary so
 future hosted score and golden gates can replay them bit-exactly without k3s.
+
+The scorer-only capture path is `make score-captures
+CAPTURE_ROOT=<directory>`. It discovers verified capture directories, requires
+the matrix to match all four committed held-out `(profile, seed)` pairs exactly,
+replays normalization and decomposition without labels, and only then verifies
+and applies `private/labels.json`. Missing, duplicate or extra runs fail before
+gate evaluation. This diagnostic target remains separate from `make score`
+until the DVC-backed matrix is clone-accessible and hosted CI can fetch it.

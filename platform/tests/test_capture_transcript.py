@@ -15,6 +15,7 @@ from lab.captures import (
     write_capture,
 )
 from lab.captures.models import CaptureTelemetry
+from lab.scoring.capture import score_decomposition_replay
 
 from common.config import DetectorConfig
 
@@ -108,6 +109,27 @@ def test_two_full_capture_replays_are_byte_identical_without_private_labels(
     assert first.stats.warming == 2
     assert first.stats.decomposed == 2
     assert len(first.steps) == 4
+
+    scored = score_decomposition_replay(
+        first,
+        private_labels=_json_bytes(
+            {
+                "version": 1,
+                "scenario_id": "match_night",
+                "seed": 8923,
+                "seed_purpose": "held_out",
+                "intervals": [
+                    {
+                        "label_id": "expected-residual",
+                        "start_offset_seconds": 4,
+                        "end_offset_seconds": 8,
+                    }
+                ],
+            }
+        ),
+    )
+    assert scored.metrics.false_negative == 2
+    assert scored.metrics.true_positive == 0
 
 
 def _detector() -> DetectorConfig:
