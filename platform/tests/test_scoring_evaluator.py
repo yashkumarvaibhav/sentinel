@@ -10,7 +10,11 @@ from lab.scoring.evaluator import build_rate_observations, score_observations
 from lab.scoring.gates import ScoreGateConfig, evaluate_gates
 
 from common.config import DetectorConfig
-from tests.factories import behavioral_ratio_config, log_template_config
+from tests.factories import (
+    behavioral_ratio_config,
+    change_point_saturation_config,
+    log_template_config,
+)
 
 SCENARIO_ROOT = Path(__file__).resolve().parents[2] / "lab" / "scenarios"
 START = datetime(2026, 7, 21, 12, 0, tzinfo=UTC)
@@ -137,4 +141,5 @@ def _detector() -> DetectorConfig:
         absolute_noise_floors={"frontend.request_rate": 1.0},
         behavioral_ratios=behavioral_ratio_config(),
         log_templates=log_template_config(),
+        change_point_saturation=change_point_saturation_config(),
     )

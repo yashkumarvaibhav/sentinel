@@ -42,6 +42,9 @@ def test_committed_config_loads_with_cross_file_references_and_stable_fingerprin
     assert first.detectors.behavioral_ratios.interarrival_variation.minimum_points == 5
     assert first.detectors.log_templates.max_clusters == 10_000
     assert first.detectors.log_templates.minimum_template_count == 5
+    assert first.detectors.change_point_saturation.pelt_model == "l2"
+    assert first.detectors.change_point_saturation.minimum_series_points == 12
+    assert first.detectors.change_point_saturation.maximum_headroom_ratio == 0.2
     assert any(cohort.protected for cohort in first.cohorts.cohorts)
     assert {slo.service for slo in first.slos.slos} <= {
         service.service for service in first.topology.services
@@ -112,6 +115,20 @@ def test_config_models_are_immutable() -> None:
             "detector-params.yml",
             lambda document: document["log_templates"].__setitem__("similarity_threshold", 0.0),
             "similarity_threshold must be greater than zero",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["change_point_saturation"].__setitem__(
+                "minimum_series_points", 7
+            ),
+            "at least two minimum-sized segments",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["change_point_saturation"].__setitem__(
+                "full_score_headroom_ratio", 0.2
+            ),
+            "less than maximum_headroom_ratio",
         ),
     ],
 )

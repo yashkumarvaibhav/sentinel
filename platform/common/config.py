@@ -274,6 +274,33 @@ class LogTemplateConfig(ConfigModel):
         return self
 
 
+class ChangePointSaturationConfig(ConfigModel):
+    """PELT proposal and deterministic resource-saturation confirmation policy."""
+
+    pelt_model: Literal["l2"]
+    pelt_penalty: PositiveFloat
+    minimum_series_points: int = Field(ge=6, le=100_000)
+    minimum_segment_points: int = Field(ge=2, le=50_000)
+    minimum_increasing_fraction: Probability
+    minimum_utilization_slope_per_second: PositiveFloat
+    maximum_headroom_ratio: Probability
+    full_score_headroom_ratio: Probability
+
+    @model_validator(mode="after")
+    def validate_saturation_policy(self) -> Self:
+        if self.minimum_series_points < self.minimum_segment_points * 2:
+            raise ValueError(
+                "minimum_series_points must contain at least two minimum-sized segments"
+            )
+        if self.minimum_increasing_fraction == 0.0:
+            raise ValueError("minimum_increasing_fraction must be greater than zero")
+        if self.maximum_headroom_ratio == 0.0:
+            raise ValueError("maximum_headroom_ratio must be greater than zero")
+        if self.full_score_headroom_ratio >= self.maximum_headroom_ratio:
+            raise ValueError("full_score_headroom_ratio must be less than maximum_headroom_ratio")
+        return self
+
+
 class DetectorConfig(ConfigModel):
     version: Literal[1]
     feature_window_seconds: int = Field(ge=1, le=3600)
@@ -285,6 +312,7 @@ class DetectorConfig(ConfigModel):
     absolute_noise_floors: dict[SignalName, NonNegativeFloat] = Field(min_length=1)
     behavioral_ratios: BehavioralRatioConfig
     log_templates: LogTemplateConfig
+    change_point_saturation: ChangePointSaturationConfig
 
     @model_validator(mode="after")
     def validate_watermark(self) -> Self:

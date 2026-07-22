@@ -3,6 +3,7 @@
 from common.config import (
     BehavioralRatioConfig,
     BehavioralRatioRuleConfig,
+    ChangePointSaturationConfig,
     LogTemplateConfig,
     SequenceRatioRuleConfig,
 )
@@ -68,4 +69,17 @@ def log_template_config() -> LogTemplateConfig:
         baseline_rate_floor=0.01,
         trigger_relative_deformation=2.0,
         full_score_relative_deformation=10.0,
+    )
+
+
+def change_point_saturation_config() -> ChangePointSaturationConfig:
+    return ChangePointSaturationConfig(
+        pelt_model="l2",
+        pelt_penalty=0.01,
+        minimum_series_points=12,
+        minimum_segment_points=4,
+        minimum_increasing_fraction=0.8,
+        minimum_utilization_slope_per_second=0.0002,
+        maximum_headroom_ratio=0.2,
+        full_score_headroom_ratio=0.05,
     )

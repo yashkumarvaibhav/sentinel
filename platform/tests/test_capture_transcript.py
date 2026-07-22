@@ -18,7 +18,11 @@ from lab.captures.models import CaptureTelemetry
 from lab.scoring.capture import score_decomposition_replay
 
 from common.config import DetectorConfig
-from tests.factories import behavioral_ratio_config, log_template_config
+from tests.factories import (
+    behavioral_ratio_config,
+    change_point_saturation_config,
+    log_template_config,
+)
 
 
 def test_two_full_capture_replays_are_byte_identical_without_private_labels(
@@ -145,6 +149,7 @@ def _detector() -> DetectorConfig:
         absolute_noise_floors={"frontend.request_rate": 1.0},
         behavioral_ratios=behavioral_ratio_config(),
         log_templates=log_template_config(),
+        change_point_saturation=change_point_saturation_config(),
     )
 
 
