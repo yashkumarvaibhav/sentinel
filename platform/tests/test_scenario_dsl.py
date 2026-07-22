@@ -107,6 +107,7 @@ def test_combo_night_compiles_attack_and_fault_without_claiming_unsupported_kind
     assert profile.contexts[0].expected_delta == {"frontend.request_rate": 2.5}
     assert [stimulus.kind for stimulus in profile.stimuli] == [
         "k6_journey",
+        "k6_journey",
         "flagd",
         "k6_path_attack",
         "k6_rate_phase",
@@ -140,7 +141,8 @@ def test_combo_labels_follow_measured_attack_and_fault_execution() -> None:
         stimulus_offsets={
             "behavior_attack": (126.25, 366.75),
             "payment_failure": (125.5, 305.5),
-            "checkout_traffic": (65.0, 487.25),
+            "checkout_fault_traffic": (65.0, 307.0),
+            "checkout_pressure_traffic": (307.0, 489.25),
             "measured_rate_drop": (487.25, 547.5),
             "frontend_emitter_silence": (547.5, 767.75),
         },
@@ -166,6 +168,7 @@ def test_combo_labels_follow_measured_attack_and_fault_execution() -> None:
         ("LOG_BURST", "frontend", "log_template_rate", 125.5),
         ("EDGE_DEGRADED", "checkout", "dependency.payment", 125.5),
         ("SATURATION", "checkout", "container_memory", 65.0),
+        ("SATURATION", "checkout", "container_memory", 307.0),
         ("DROP", "frontend", "request_rate", 487.25),
         ("SILENCE", "frontend", "request_rate", 547.5),
     }
