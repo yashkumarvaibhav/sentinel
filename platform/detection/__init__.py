@@ -10,8 +10,8 @@ from detection.episodes import (
 )
 from detection.pipeline import (
     EpisodePersister,
-    ResidualEpisodePipeline,
-    ResidualEpisodeWorker,
+    EpisodeWorker,
+    SymptomEpisodePipeline,
     residual_symptom,
 )
 from detection.ratios import BehavioralRatio, BehavioralRatioMonitor, RatioEvaluation
@@ -26,9 +26,9 @@ __all__ = [
     "EpisodePersister",
     "EpisodePhase",
     "EpisodeTransition",
+    "EpisodeWorker",
     "RatioEvaluation",
-    "ResidualEpisodePipeline",
-    "ResidualEpisodeWorker",
     "SymptomEpisodeMachine",
+    "SymptomEpisodePipeline",
     "residual_symptom",
 ]

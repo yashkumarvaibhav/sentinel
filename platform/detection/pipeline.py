@@ -1,24 +1,24 @@
-"""Bridge decomposition frames to anti-flapping episodes, end to end.
+"""Route every deterministic detector's symptoms into anti-flapping episodes.
 
-Decomposition (`detection/decompose.py`) turns each observation into a
-`DecompFrame` carrying a bounded `residual_score`. An upside band breach — the
-observed value above the context-aware expected band — is the first deterministic
-symptom, `RESIDUAL_EXCEED`. This module maps those frames into symptoms, drives
-them through the 2.7 `SymptomEpisodeMachine`, and persists the resulting
-episodes. Every frame produces exactly one episode tick for its
-`(RESIDUAL_EXCEED, service, signal)` key — a breach when the band is exceeded, a
-clear otherwise — so episodes open and close purely from the frame stream with
-no separate "quiet tick" bookkeeping.
+Detectors (2.1 through 2.6) each emit a scored `Symptom` per window; decomposition emits
+a `DecompFrame` whose upside band breach becomes a `RESIDUAL_EXCEED` symptom. All
+of them converge here: a symptom is routed to the 2.7 `SymptomEpisodeMachine`
+under its `(kind, service, signal)` key, so a momentary detection can never open
+an incident precursor and a key can never flap. The resulting episodes persist
+through any `EpisodePersister` — `PostgresRepository.put_episode` satisfies it —
+and only when a tick actually changed the durable record.
 
-Downside breaches (a volume drop below the band) are deliberately *not* emitted
-here: they are the `DROP`/`SILENCE` liveness detector's concern, wired
-separately, so a drop can never sustain a `RESIDUAL_EXCEED` episode.
+The router itself is telemetry-agnostic: a caller ticks it with the symptom a
+detector produced (a breach) or with `None` for a monitored key that stayed quiet
+that window (a clear), which is how episodes close. The residual path is the one
+built-in adapter because decomposition already produces one frame per tick.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime
 from typing import Protocol
 
 from common.config import EpisodeConfig
@@ -53,20 +53,30 @@ def residual_symptom(frame: DecompFrame) -> Symptom | None:
     )
 
 
-class ResidualEpisodePipeline:
-    """Drive residual band breaches through per-key anti-flapping episodes."""
+class SymptomEpisodePipeline:
+    """Drive any detector's symptoms through per-key anti-flapping episodes."""
 
     def __init__(self, *, configuration: EpisodeConfig) -> None:
         self._machine = SymptomEpisodeMachine(configuration=configuration)
 
-    def observe(self, frame: DecompFrame) -> EpisodeTransition:
+    def observe(
+        self, *, key: EpisodeKey, tick_ts: datetime, symptom: Symptom | None
+    ) -> EpisodeTransition:
+        """Advance one key by a single window tick (a symptom or a clear)."""
+        return self._machine.observe(key=key, tick_ts=tick_ts, symptom=symptom)
+
+    def observe_symptom(self, symptom: Symptom, *, tick_ts: datetime) -> EpisodeTransition:
+        """Route a detector's symptom under its own `(kind, service, signal)` key."""
+        return self.observe(key=EpisodeKey.from_symptom(symptom), tick_ts=tick_ts, symptom=symptom)
+
+    def observe_frame(self, frame: DecompFrame) -> EpisodeTransition:
         """Turn one decomposition frame into a single residual episode tick."""
         symptom = residual_symptom(frame)
         key = EpisodeKey(SymptomKind.RESIDUAL_EXCEED, frame.service, frame.signal)
-        return self._machine.observe(key=key, tick_ts=frame.ts, symptom=symptom)
+        return self.observe(key=key, tick_ts=frame.ts, symptom=symptom)
 
     def active_episodes(self) -> tuple[SymptomEpisode, ...]:
-        """Every currently open residual episode, ordered by stable id."""
+        """Every currently open episode, ordered by stable id."""
         return self._machine.active_episodes()
 
 
@@ -74,16 +84,30 @@ class EpisodePersister(Protocol):
     async def put_episode(self, episode: SymptomEpisode) -> bool: ...
 
 
-class ResidualEpisodeWorker:
-    """Persist an episode whenever a frame changes its durable record."""
+class EpisodeWorker:
+    """Persist an episode whenever a tick changed its durable record."""
 
-    def __init__(self, *, pipeline: ResidualEpisodePipeline, sink: EpisodePersister) -> None:
+    def __init__(self, *, pipeline: SymptomEpisodePipeline, sink: EpisodePersister) -> None:
         self._pipeline = pipeline
         self._sink = sink
 
-    async def handle(self, frame: DecompFrame) -> EpisodeTransition:
-        """Route one frame and persist the episode only when it changed."""
-        transition = self._pipeline.observe(frame)
+    async def handle(
+        self, *, key: EpisodeKey, tick_ts: datetime, symptom: Symptom | None
+    ) -> EpisodeTransition:
+        """Route one raw tick and persist the episode only when it changed."""
+        return await self._persist(
+            self._pipeline.observe(key=key, tick_ts=tick_ts, symptom=symptom)
+        )
+
+    async def handle_symptom(self, symptom: Symptom, *, tick_ts: datetime) -> EpisodeTransition:
+        """Route one detector symptom and persist the episode only when it changed."""
+        return await self._persist(self._pipeline.observe_symptom(symptom, tick_ts=tick_ts))
+
+    async def handle_frame(self, frame: DecompFrame) -> EpisodeTransition:
+        """Route one decomposition frame and persist the episode only when it changed."""
+        return await self._persist(self._pipeline.observe_frame(frame))
+
+    async def _persist(self, transition: EpisodeTransition) -> EpisodeTransition:
         if transition.persist and transition.episode is not None:
             await self._sink.put_episode(transition.episode)
         return transition

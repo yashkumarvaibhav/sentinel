@@ -34,7 +34,7 @@ from contracts import (
     SymptomKind,
 )
 from detection.decompose import DecompositionEngine, DecompositionWorker
-from detection.pipeline import ResidualEpisodePipeline, ResidualEpisodeWorker
+from detection.pipeline import EpisodeWorker, SymptomEpisodePipeline
 from tests.factories import (
     behavioral_ratio_config,
     change_point_saturation_config,
@@ -262,8 +262,8 @@ async def _round_trip_pipeline_episode(
         episodes=episode_config(open_after_ticks=3, close_after_ticks=3),
     )
     engine = DecompositionEngine(configuration=detector, dedup_capacity=64)
-    pipeline = ResidualEpisodePipeline(configuration=detector.episodes)
-    worker = ResidualEpisodeWorker(pipeline=pipeline, sink=repository)
+    pipeline = SymptomEpisodePipeline(configuration=detector.episodes)
+    worker = EpisodeWorker(pipeline=pipeline, sink=repository)
 
     values = [4.0, 4.0, 4.0] + [16.0] * 4 + [4.0] * 3
     closed = None
@@ -279,7 +279,7 @@ async def _round_trip_pipeline_episode(
         result = engine.decompose(observation)
         if result.frame is None:
             continue
-        transition = await worker.handle(result.frame)
+        transition = await worker.handle_frame(result.frame)
         if transition.episode is not None and transition.episode.status is EpisodeStatus.CLOSED:
             closed = transition.episode
 

@@ -5,13 +5,23 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 
-from common.config import DetectorConfig
-from contracts import DecompFrame, EpisodeStatus, Observation, SymptomEpisode, SymptomKind
+import pytest
+
+from common.config import DetectorConfig, EpisodeConfig, EpisodePolicyConfig
+from contracts import (
+    DecompFrame,
+    EpisodeStatus,
+    Observation,
+    Symptom,
+    SymptomEpisode,
+    SymptomKind,
+)
 from detection.decompose import DecompositionEngine
-from detection.episodes import EpisodeAction
+from detection.edges import DependencyCall, EdgeDegradationDetector
+from detection.episodes import EpisodeAction, EpisodeKey
 from detection.pipeline import (
-    ResidualEpisodePipeline,
-    ResidualEpisodeWorker,
+    EpisodeWorker,
+    SymptomEpisodePipeline,
     residual_symptom,
 )
 from tests.factories import (
@@ -144,12 +154,12 @@ def _detector() -> DetectorConfig:
 
 def _run(
     values: list[float],
-) -> tuple[ResidualEpisodePipeline, _RecordingSink, list[EpisodeAction]]:
+) -> tuple[SymptomEpisodePipeline, _RecordingSink, list[EpisodeAction]]:
     detector = _detector()
     engine = DecompositionEngine(configuration=detector, dedup_capacity=len(values) + 1)
-    pipeline = ResidualEpisodePipeline(configuration=detector.episodes)
+    pipeline = SymptomEpisodePipeline(configuration=detector.episodes)
     sink = _RecordingSink()
-    worker = ResidualEpisodeWorker(pipeline=pipeline, sink=sink)
+    worker = EpisodeWorker(pipeline=pipeline, sink=sink)
     actions: list[EpisodeAction] = []
 
     async def drive() -> None:
@@ -165,7 +175,7 @@ def _run(
             result = engine.decompose(observation)
             if result.frame is None:
                 continue
-            actions.append((await worker.handle(result.frame)).action)
+            actions.append((await worker.handle_frame(result.frame)).action)
 
     asyncio.run(drive())
     return pipeline, sink, actions
@@ -219,3 +229,105 @@ def test_pipeline_replay_is_deterministic() -> None:
 
     assert first_actions == second_actions
     assert first_sink.writes == second_sink.writes
+
+
+_CONFIGURED_KINDS = (
+    SymptomKind.RESIDUAL_EXCEED,
+    SymptomKind.RATIO_DEFORM,
+    SymptomKind.LOG_BURST,
+    SymptomKind.EDGE_DEGRADED,
+    SymptomKind.SATURATION,
+    SymptomKind.DROP,
+    SymptomKind.SILENCE,
+)
+
+
+def _all_kinds_config() -> EpisodeConfig:
+    policy = EpisodePolicyConfig(
+        open_after_ticks=3, close_after_ticks=3, breach_score=0.5, clear_score=0.2
+    )
+    return EpisodeConfig(policies={kind.value: policy for kind in _CONFIGURED_KINDS})
+
+
+def _symptom_of(kind: SymptomKind, index: int, *, score: float = 0.9) -> Symptom:
+    return Symptom(
+        symptom_id=f"{kind.value}-{index}",
+        kind=kind,
+        service="frontend",
+        signal="request_rate",
+        onset_ts=START + timedelta(seconds=index),
+        score=score,
+        note="synthetic detector symptom",
+        evidence_refs=(f"ev-{index}",),
+    )
+
+
+@pytest.mark.parametrize("kind", _CONFIGURED_KINDS)
+def test_every_configured_symptom_kind_drives_an_episode(kind: SymptomKind) -> None:
+    pipeline = SymptomEpisodePipeline(configuration=_all_kinds_config())
+    key = EpisodeKey(kind, "frontend", "request_rate")
+
+    opened = None
+    for index in range(3):  # three sustained breaches open the episode
+        opened = pipeline.observe_symptom(
+            _symptom_of(kind, index), tick_ts=START + timedelta(seconds=index)
+        )
+    assert opened is not None
+    assert opened.action is EpisodeAction.OPENED
+    assert opened.episode is not None
+    assert opened.episode.kind is kind
+
+    closed = None
+    for index in range(3, 6):  # three clears close it (a monitored key gone quiet)
+        closed = pipeline.observe(key=key, tick_ts=START + timedelta(seconds=index), symptom=None)
+    assert closed is not None
+    assert closed.action is EpisodeAction.CLOSED
+    assert pipeline.active_episodes() == ()
+
+
+def test_unconfigured_symptom_kind_is_ignored_by_the_router() -> None:
+    pipeline = SymptomEpisodePipeline(configuration=_all_kinds_config())
+    marker = _symptom_of(SymptomKind.DEPLOY_MARKER, 0)  # no episode policy for markers
+
+    transition = pipeline.observe_symptom(marker, tick_ts=START)
+
+    assert transition.action is EpisodeAction.IGNORED
+    assert transition.episode is None
+    assert pipeline.active_episodes() == ()
+
+
+def _degraded_edge_symptom(detector: EdgeDegradationDetector, tick: int) -> Symptom:
+    calls = tuple(
+        DependencyCall(
+            evidence_id=f"call-{tick}-{sample}",
+            ts=START + timedelta(seconds=tick, milliseconds=sample),
+            caller="frontend",
+            downstream="checkout",
+            latency_ms=latency,
+            failed=False,
+        )
+        for sample, latency in enumerate((100.0, 110.0, 120.0, 300.0, 320.0))
+    )
+    evaluation = detector.evaluate(calls, baseline_latency_p95_ms=100.0, baseline_error_rate=0.01)
+    assert evaluation.symptom is not None
+    return evaluation.symptom
+
+
+def test_real_edge_detector_symptoms_open_an_episode_through_the_pipeline() -> None:
+    # Prove the full chain with a real producer: a genuine EdgeDegradationDetector
+    # symptom, routed by kind/service/signal, opens the right episode.
+    detector = EdgeDegradationDetector(configuration=edge_degradation_config())
+    pipeline = SymptomEpisodePipeline(configuration=_all_kinds_config())
+
+    opened = None
+    for tick in range(3):
+        symptom = _degraded_edge_symptom(detector, tick)
+        assert symptom.kind is SymptomKind.EDGE_DEGRADED
+        opened = pipeline.observe_symptom(symptom, tick_ts=START + timedelta(seconds=tick))
+
+    assert opened is not None
+    assert opened.action is EpisodeAction.OPENED
+    assert opened.episode is not None
+    assert opened.episode.kind is SymptomKind.EDGE_DEGRADED
+    assert opened.episode.service == "frontend"
+    assert opened.episode.signal == "dependency.checkout"
