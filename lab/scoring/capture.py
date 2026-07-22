@@ -20,6 +20,10 @@ from lab.captures import (
     replay_decomposition,
 )
 from lab.captures.edge_transcript import replay_edge_detection
+from lab.captures.liveness_transcript import replay_liveness_detection
+from lab.captures.log_transcript import replay_log_detection
+from lab.captures.ratio_transcript import replay_ingress_ratios
+from lab.captures.resource_transcript import replay_resource_detection
 from lab.scenarios import load_profile
 from lab.scenarios.models import LabModel, ResidualLabelInterval, SymptomLabelInterval
 from lab.scoring.evaluator import EpisodeRunScore, RunScore, score_symptom_episodes
@@ -205,6 +209,116 @@ def score_edge_episode_capture(
     )
 
 
+def score_detection_episode_capture(
+    root: Path,
+    *,
+    detector: DetectorConfig,
+    replay_config_fingerprint: str,
+) -> EpisodeRunScore:
+    """Replay every public deterministic path before applying private labels once."""
+    capture = load_runtime_capture(root)
+    decomposition = replay_decomposition(
+        capture,
+        detector=detector,
+        replay_config_fingerprint=replay_config_fingerprint,
+    )
+    residual_pipeline = SymptomEpisodePipeline(configuration=detector.episodes)
+    revisions: list[SymptomEpisode] = []
+    for step in decomposition.steps:
+        if step.frame is None:
+            continue
+        transition = residual_pipeline.observe_frame(step.frame)
+        if transition.episode is not None:
+            revisions.append(transition.episode)
+    revisions.extend(residual_pipeline.active_episodes())
+
+    edge = replay_edge_detection(
+        capture,
+        detector=detector,
+        replay_config_fingerprint=replay_config_fingerprint,
+    )
+    logs = replay_log_detection(
+        capture,
+        detector=detector,
+        replay_config_fingerprint=replay_config_fingerprint,
+    )
+    ratios = replay_ingress_ratios(
+        capture,
+        detector=detector,
+        replay_config_fingerprint=replay_config_fingerprint,
+    )
+    liveness = replay_liveness_detection(
+        capture,
+        detector=detector,
+        replay_config_fingerprint=replay_config_fingerprint,
+    )
+    resources = replay_resource_detection(
+        capture,
+        detector=detector,
+        replay_config_fingerprint=replay_config_fingerprint,
+    )
+    public_replays = (edge, logs, ratios, liveness, resources)
+    if any(
+        (
+            replay.capture_id,
+            replay.scenario_id,
+            replay.seed,
+            replay.seed_purpose,
+            replay.anchor_ts,
+        )
+        != (
+            decomposition.capture_id,
+            decomposition.scenario_id,
+            decomposition.seed,
+            decomposition.seed_purpose,
+            decomposition.anchor_ts,
+        )
+        for replay in public_replays
+    ):
+        raise ValueError("detector replay identities do not describe one capture")
+    for replay in public_replays:
+        revisions.extend(
+            result.transition.episode
+            for step in replay.steps
+            for result in step.results
+            if result.transition is not None and result.transition.episode is not None
+        )
+        revisions.extend(replay.active_episodes)
+    evaluation_end = decomposition.anchor_ts + timedelta(
+        seconds=len(decomposition.steps) * capture.manifest.telemetry.tick_seconds
+    )
+
+    # The complete decomposition + edge/log/ratio/liveness/resource runtime replays
+    # above are label-free. Only the scorer crosses into the private artifact.
+    labels = _capture_labels(
+        load_private_labels(root),
+        scenario_id=decomposition.scenario_id,
+        seed=decomposition.seed,
+        seed_purpose=decomposition.seed_purpose,
+    )
+    residual_labels = tuple(
+        SymptomLabelInterval(
+            label_id=label.label_id,
+            kind=SymptomKind.RESIDUAL_EXCEED.value,
+            service=capture.manifest.telemetry.logical_service,
+            signal=capture.manifest.telemetry.logical_signal,
+            start_offset_seconds=float(label.start_offset_seconds),
+            end_offset_seconds=float(label.end_offset_seconds),
+        )
+        for label in labels.intervals
+    )
+    return score_symptom_episodes(
+        capture_id=decomposition.capture_id,
+        scenario_id=decomposition.scenario_id,
+        seed=decomposition.seed,
+        seed_purpose=decomposition.seed_purpose,
+        anchor_ts=decomposition.anchor_ts,
+        evaluation_end_ts=evaluation_end,
+        episodes=tuple(revisions),
+        labels=residual_labels + labels.symptom_intervals,
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m lab.scoring.capture")
     parser.add_argument("--repo-root", type=Path, required=True)
@@ -293,12 +407,12 @@ def _development_symptom_main(
 ) -> int:
     config = load_config(repo_root / "config")
     runs = (
-        score_residual_episode_capture(
+        score_detection_episode_capture(
             residual_capture.resolve(),
             detector=config.detectors,
             replay_config_fingerprint=config.fingerprint,
         ),
-        score_edge_episode_capture(
+        score_detection_episode_capture(
             edge_capture.resolve(),
             detector=config.detectors,
             replay_config_fingerprint=config.fingerprint,

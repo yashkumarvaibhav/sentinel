@@ -252,6 +252,9 @@ def score_symptom_episodes(
         raise ValueError("evaluation_end_ts must be after anchor_ts")
     latest_episodes = _latest_episode_revisions(episodes)
     _validate_episode_bounds(latest_episodes, start=anchor, end=evaluation_end)
+    label_ids = tuple(label.label_id for label in labels)
+    if len(label_ids) != len(set(label_ids)):
+        raise ValueError("symptom label IDs must be unique")
     expected = tuple(
         _ExpectedEpisode(
             label_id=label.label_id,

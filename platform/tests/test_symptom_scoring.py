@@ -125,6 +125,22 @@ def test_missing_expected_and_predicted_kinds_keep_insufficient_denominators() -
     assert residual.metrics.recall.status == "insufficient"
 
 
+def test_duplicate_private_label_ids_fail_closed() -> None:
+    label = _label("duplicate-label", SymptomKind.EDGE_DEGRADED, 10.0, 20.0)
+
+    with pytest.raises(ValueError, match="symptom label IDs must be unique"):
+        score_symptom_episodes(
+            capture_id="duplicate-label-capture",
+            scenario_id="cascade_night",
+            seed=401,
+            seed_purpose="development",
+            anchor_ts=START,
+            evaluation_end_ts=START + timedelta(seconds=30),
+            episodes=(),
+            labels=(label, label),
+        )
+
+
 def test_symptom_gates_fail_closed_for_missing_or_below_floor_kinds() -> None:
     score = score_symptom_episodes(
         capture_id="gate-capture",
@@ -198,6 +214,92 @@ def test_capture_scorer_opens_private_labels_only_after_runtime_replay(
 
     assert calls == ["runtime-replay", "private-labels"]
     assert score.score_for(SymptomKind.EDGE_DEGRADED).metrics.precision.status == "insufficient"
+
+
+def test_combined_capture_scorer_finishes_every_public_path_before_labels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    manifest = SimpleNamespace(
+        telemetry=SimpleNamespace(
+            logical_service="frontend",
+            logical_signal="request_rate",
+            tick_seconds=2,
+        )
+    )
+    identity = {
+        "capture_id": "combined-capture",
+        "scenario_id": "cascade_night",
+        "seed": 401,
+        "seed_purpose": "development",
+        "anchor_ts": START,
+    }
+    decomposition = SimpleNamespace(
+        **identity,
+        steps=(SimpleNamespace(frame=None),),
+    )
+    detector_replay = SimpleNamespace(
+        **identity,
+        steps=(SimpleNamespace(results=()),),
+        active_episodes=(),
+    )
+
+    def public_replay(name: str, result: object) -> object:
+        calls.append(name)
+        return result
+
+    def read_labels(_: Path) -> bytes:
+        assert calls == ["decomposition", "edge", "logs", "ratios", "liveness", "resources"]
+        calls.append("private-labels")
+        return (
+            b'{"intervals":[],"scenario_id":"cascade_night","seed":401,'
+            b'"seed_purpose":"development","symptom_intervals":[],"version":1}'
+        )
+
+    monkeypatch.setattr(
+        capture_scoring, "load_runtime_capture", lambda _: SimpleNamespace(manifest=manifest)
+    )
+    monkeypatch.setattr(
+        capture_scoring,
+        "replay_decomposition",
+        lambda *_args, **_kwargs: public_replay("decomposition", decomposition),
+    )
+    monkeypatch.setattr(
+        capture_scoring,
+        "replay_edge_detection",
+        lambda *_args, **_kwargs: public_replay("edge", detector_replay),
+    )
+    monkeypatch.setattr(
+        capture_scoring,
+        "replay_log_detection",
+        lambda *_args, **_kwargs: public_replay("logs", detector_replay),
+    )
+    monkeypatch.setattr(
+        capture_scoring,
+        "replay_ingress_ratios",
+        lambda *_args, **_kwargs: public_replay("ratios", detector_replay),
+    )
+    monkeypatch.setattr(
+        capture_scoring,
+        "replay_liveness_detection",
+        lambda *_args, **_kwargs: public_replay("liveness", detector_replay),
+    )
+    monkeypatch.setattr(
+        capture_scoring,
+        "replay_resource_detection",
+        lambda *_args, **_kwargs: public_replay("resources", detector_replay),
+    )
+    monkeypatch.setattr(capture_scoring, "load_private_labels", read_labels)
+    config = load_config(REPO_ROOT / "config")
+
+    score = capture_scoring.score_detection_episode_capture(
+        Path("unused"),
+        detector=config.detectors,
+        replay_config_fingerprint=config.fingerprint,
+    )
+
+    assert calls[-1] == "private-labels"
+    assert all(item.metrics.precision.status == "insufficient" for item in score.by_kind)
 
 
 def _label(
