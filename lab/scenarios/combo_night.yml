@@ -69,7 +69,7 @@ stimuli:
     duration_seconds: 240
     attack: single_path
     path: /
-    rate_rps: 20
+    rate_rps: 15
   - stimulus_id: measured_rate_drop
     kind: k6_rate_phase
     start_offset_seconds: 484
