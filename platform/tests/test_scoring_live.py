@@ -213,11 +213,13 @@ def test_live_stimuli_use_fixed_owned_resources_and_restore_flagd() -> None:
     commands: list[list[str]] = []
     waits: list[datetime] = []
     span_reads: list[tuple[str, int]] = []
+    events: list[str] = []
     anchor = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
 
     def runner(command: list[str], *, input_text: str | None = None, timeout: int = 120) -> str:
         del input_text, timeout
         commands.append(command)
+        events.append("command")
         if "get" in command and "configmap" in command:
             return _flag_config_map()
         if "get" in command and "job" in command:
@@ -228,6 +230,7 @@ def test_live_stimuli_use_fixed_owned_resources_and_restore_flagd() -> None:
 
     def read_spans(user_agent: str, expected: int) -> tuple[datetime, ...]:
         span_reads.append((user_agent, expected))
+        events.append("read-spans")
         return tuple(
             anchor + timedelta(seconds=66, milliseconds=index)
             for index in range(math.ceil(expected * 0.95))
@@ -256,6 +259,7 @@ def test_live_stimuli_use_fixed_owned_resources_and_restore_flagd() -> None:
         "email-leak",
     ]
     assert span_reads == [(span_reads[0][0], 120)]
+    assert events[-1] == "read-spans"
     assert span_reads[0][0].startswith("sentinel-stimulus/journey-")
     rendered = [" ".join(command) for command in commands]
     assert any("-n otel-demo patch configmap flagd-config" in item for item in rendered)

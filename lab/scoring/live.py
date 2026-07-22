@@ -404,6 +404,7 @@ def execute_stimuli(
     flags = _FlagdController(command, flag_stimuli) if flag_stimuli else None
     active_chaos: dict[str, _ChaosManifest] = {}
     active_journeys: dict[str, _JourneyRun] = {}
+    completed_journeys: list[_JourneyRun] = []
     started: dict[str, datetime] = {}
     completed: list[StimulusExecution] = []
     primary_error: BaseException | None = None
@@ -455,15 +456,11 @@ def execute_stimuli(
                     ended_at = _require_utc(now(), "stimulus end")
                 else:
                     journey = active_journeys[stimulus.stimulus_id]
-                    timestamps = _finish_checkout_journey(
-                        command,
-                        journey=journey,
-                        span_reader=read_journey_spans,
-                    )
+                    _finish_k6_stimulus(command, journey=journey)
                     del active_journeys[stimulus.stimulus_id]
-                    started.pop(stimulus.stimulus_id)
-                    started_at = timestamps[0]
-                    ended_at = timestamps[-1] + timedelta(microseconds=1)
+                    completed_journeys.append(journey)
+                    started_at = started.pop(stimulus.stimulus_id)
+                    ended_at = _require_utc(now(), "stimulus end")
                 completed.append(
                     StimulusExecution(
                         stimulus_id=stimulus.stimulus_id,
@@ -478,6 +475,8 @@ def execute_stimuli(
                         ended_at=ended_at,
                     )
                 )
+        for journey in completed_journeys:
+            _verify_k6_stimulus_spans(journey=journey, span_reader=read_journey_spans)
     except BaseException as exc:
         primary_error = exc
 
@@ -740,12 +739,11 @@ def _primary_run_id(schedule: CompiledSchedule, invocation: str) -> str:
     return f"run-{stem}"
 
 
-def _finish_checkout_journey(
+def _finish_k6_stimulus(
     runner: CommandRunner,
     *,
     journey: _JourneyRun,
-    span_reader: Callable[[str, int], tuple[datetime, ...]],
-) -> tuple[datetime, ...]:
+) -> None:
     _wait_for_job(journey.job_name, timeout_seconds=journey.timeout_seconds, runner=runner)
     log = runner(
         [
@@ -762,6 +760,14 @@ def _finish_checkout_journey(
         raise RuntimeError(
             f"checkout journey completion log lacked workload evidence for {journey.job_name}"
         )
+    _delete_owned(journey.job_name, runner=runner)
+
+
+def _verify_k6_stimulus_spans(
+    *,
+    journey: _JourneyRun,
+    span_reader: Callable[[str, int], tuple[datetime, ...]],
+) -> None:
     timestamps = span_reader(journey.user_agent, journey.expected_spans)
     if not timestamps:
         raise RuntimeError(f"checkout journey emitted no ingress spans: {journey.job_name}")
@@ -771,8 +777,6 @@ def _finish_checkout_journey(
             f"checkout journey telemetry incomplete for {journey.job_name}: "
             f"{len(timestamps)}/{journey.expected_spans} spans"
         )
-    _delete_owned(journey.job_name, runner=runner)
-    return tuple(sorted(timestamps))
 
 
 def _load_chaos_manifest(repo_root: Path, stimulus: ChaosMeshStimulus) -> _ChaosManifest:
