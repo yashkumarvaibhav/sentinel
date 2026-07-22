@@ -1,4 +1,4 @@
-"""Label-free raw capture replay through edge windows and episode routing."""
+"""Label-free raw capture replay through log windows and episode routing."""
 
 from __future__ import annotations
 
@@ -10,17 +10,17 @@ from typing import Literal
 
 from common.config import DetectorConfig
 from contracts import SymptomEpisode
-from detection.runner import EdgeDetectionRunner, EdgeWindowAdvance
+from detection.log_runner import LogDetectionRunner, LogWindowAdvance
 from lab.captures.detection_replay import detection_replay_timeline
 from lab.captures.store import RuntimeCapture
 
 
 @dataclass(frozen=True)
-class EdgeReplayStep:
-    """All configured edge advances at one event-time tick."""
+class LogReplayStep:
+    """All configured service log advances at one complete event-time window."""
 
     tick_ts: datetime
-    results: tuple[EdgeWindowAdvance, ...]
+    results: tuple[LogWindowAdvance, ...]
 
     def canonical_value(self) -> dict[str, object]:
         return {
@@ -30,8 +30,8 @@ class EdgeReplayStep:
 
 
 @dataclass(frozen=True)
-class EdgeDetectionReplay:
-    """Deterministic edge-detector transcript from one public raw capture."""
+class LogDetectionReplay:
+    """Deterministic log-detector transcript from one public raw capture."""
 
     capture_id: str
     scenario_id: str
@@ -42,7 +42,7 @@ class EdgeDetectionReplay:
     raw_replay_sha256: str
     raw_dead_letters: tuple[str, ...]
     anchor_ts: datetime
-    steps: tuple[EdgeReplayStep, ...]
+    steps: tuple[LogReplayStep, ...]
     active_episodes: tuple[SymptomEpisode, ...]
 
     def canonical_bytes(self) -> bytes:
@@ -68,31 +68,31 @@ class EdgeDetectionReplay:
         ).encode()
 
 
-def replay_edge_detection(
+def replay_log_detection(
     capture: RuntimeCapture,
     *,
     detector: DetectorConfig,
     replay_config_fingerprint: str,
-) -> EdgeDetectionReplay:
-    """Run normalized trace observations through configured edge windows and episodes."""
+) -> LogDetectionReplay:
+    """Run normalized public log observations through fixed windows and episodes."""
     manifest = capture.manifest
     timeline = detection_replay_timeline(capture)
     raw = timeline.raw
     anchor_ts = timeline.anchor_ts
 
-    runner = EdgeDetectionRunner(
-        configuration=detector.edge_degradation,
+    runner = LogDetectionRunner(
+        configuration=detector.log_templates,
         episodes=detector.episodes,
     )
     end_ts = timeline.end_ts
     in_range = timeline.observations
-    steps: list[EdgeReplayStep] = []
+    steps: list[LogReplayStep] = []
     previous = anchor_ts
     tick = anchor_ts + timedelta(seconds=runner.advance_seconds)
     while tick <= end_ts:
         batch = tuple(item for item in in_range if previous < item.ts <= tick)
         steps.append(
-            EdgeReplayStep(
+            LogReplayStep(
                 tick_ts=tick,
                 results=runner.advance(observations=batch, tick_ts=tick),
             )
@@ -100,15 +100,14 @@ def replay_edge_detection(
         previous = tick
         tick += timedelta(seconds=runner.advance_seconds)
 
-    raw_bytes = raw.canonical_bytes()
-    return EdgeDetectionReplay(
+    return LogDetectionReplay(
         capture_id=manifest.capture_id,
         scenario_id=manifest.scenario_id,
         seed=manifest.seed,
         seed_purpose=manifest.seed_purpose,
         capture_config_fingerprint=manifest.config_fingerprint,
         replay_config_fingerprint=replay_config_fingerprint,
-        raw_replay_sha256=hashlib.sha256(raw_bytes).hexdigest(),
+        raw_replay_sha256=hashlib.sha256(raw.canonical_bytes()).hexdigest(),
         raw_dead_letters=raw.dead_letters,
         anchor_ts=anchor_ts,
         steps=tuple(steps),

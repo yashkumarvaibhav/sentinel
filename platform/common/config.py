@@ -254,6 +254,11 @@ class BehavioralRatioConfig(ConfigModel):
 class LogTemplateConfig(ConfigModel):
     """Deterministic Drain3 structure and template-frequency burst policy."""
 
+    window_seconds: int = Field(ge=1, le=3600)
+    baseline_warmup_windows: int = Field(ge=1, le=100_000)
+    minimum_window_records: int = Field(ge=1, le=1_000_000)
+    dedup_capacity: int = Field(ge=1, le=10_000_000)
+    service_mappings: dict[Identifier, Identifier] = Field(min_length=1)
     similarity_threshold: Probability
     max_depth: int = Field(ge=3, le=32)
     max_children: int = Field(ge=2, le=100_000)
@@ -268,6 +273,10 @@ class LogTemplateConfig(ConfigModel):
     def validate_log_policy(self) -> Self:
         if self.similarity_threshold == 0.0:
             raise ValueError("similarity_threshold must be greater than zero")
+        if self.minimum_window_records < self.minimum_template_count:
+            raise ValueError(
+                "minimum_window_records must be greater than or equal to minimum_template_count"
+            )
         if self.full_score_relative_deformation < self.trigger_relative_deformation:
             raise ValueError(
                 "full_score_relative_deformation must be greater than or equal to "
@@ -601,6 +610,12 @@ def _validate_references(config: SentinelConfig) -> None:
             raise ConfigLoadError(
                 "detector-params.yml: "
                 f"{rule.caller}->{rule.downstream} is not a configured topology dependency"
+            )
+    for logical_service in config.detectors.log_templates.service_mappings.values():
+        if logical_service not in services:
+            raise ConfigLoadError(
+                "detector-params.yml: log service mapping references an unknown topology "
+                f"service: {logical_service}"
             )
 
 

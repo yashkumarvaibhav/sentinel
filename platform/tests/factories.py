@@ -67,6 +67,16 @@ def behavioral_ratio_config() -> BehavioralRatioConfig:
 
 def log_template_config() -> LogTemplateConfig:
     return LogTemplateConfig(
+        window_seconds=60,
+        baseline_warmup_windows=1,
+        minimum_window_records=5,
+        dedup_capacity=1_000,
+        service_mappings={
+            "frontend-proxy": "frontend",
+            "checkout": "checkout",
+            "cart": "cart",
+            "payment": "payment",
+        },
         similarity_threshold=0.4,
         max_depth=4,
         max_children=100,

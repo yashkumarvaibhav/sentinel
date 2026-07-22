@@ -42,6 +42,10 @@ def test_committed_config_loads_with_cross_file_references_and_stable_fingerprin
     assert first.detectors.behavioral_ratios.interarrival_variation.minimum_points == 5
     assert first.detectors.log_templates.max_clusters == 10_000
     assert first.detectors.log_templates.minimum_template_count == 5
+    assert first.detectors.log_templates.window_seconds == 60
+    assert first.detectors.log_templates.baseline_warmup_windows == 1
+    assert first.detectors.log_templates.minimum_window_records == 5
+    assert first.detectors.log_templates.service_mappings["frontend-proxy"] == "frontend"
     assert first.detectors.change_point_saturation.pelt_model == "l2"
     assert first.detectors.change_point_saturation.minimum_series_points == 12
     assert first.detectors.change_point_saturation.maximum_headroom_ratio == 0.2
@@ -137,6 +141,18 @@ def test_config_models_are_immutable() -> None:
             "detector-params.yml",
             lambda document: document["log_templates"].__setitem__("similarity_threshold", 0.0),
             "similarity_threshold must be greater than zero",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["log_templates"].__setitem__("minimum_window_records", 4),
+            "minimum_window_records must be greater than or equal to minimum_template_count",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["log_templates"]["service_mappings"].__setitem__(
+                "unknown-source", "missing"
+            ),
+            "log service mapping references an unknown topology service",
         ),
         (
             "detector-params.yml",

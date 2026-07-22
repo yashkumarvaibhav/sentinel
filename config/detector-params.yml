@@ -46,6 +46,15 @@ behavioral_ratios:
     full_score_relative_deformation: 0.8
     minimum_points: 5
 log_templates:
+  window_seconds: 60
+  baseline_warmup_windows: 1
+  minimum_window_records: 5
+  dedup_capacity: 10000
+  service_mappings:
+    frontend-proxy: frontend
+    checkout: checkout
+    cart: cart
+    payment: payment
   similarity_threshold: 0.4
   max_depth: 4
   max_children: 100
