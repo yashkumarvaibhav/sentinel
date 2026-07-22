@@ -9,6 +9,7 @@ from common.config import (
     EdgeDegradationRuleConfig,
     EpisodeConfig,
     EpisodePolicyConfig,
+    IngressRatioWindowConfig,
     LivenessConfig,
     LogTemplateConfig,
     SequenceRatioRuleConfig,
@@ -16,8 +17,22 @@ from common.config import (
 )
 
 
-def behavioral_ratio_config() -> BehavioralRatioConfig:
+def behavioral_ratio_config(
+    *,
+    ingress_service_mappings: dict[str, str] | None = None,
+) -> BehavioralRatioConfig:
     return BehavioralRatioConfig(
+        ingress_windows=IngressRatioWindowConfig(
+            window_seconds=60,
+            baseline_warmup_windows=1,
+            minimum_window_requests=6,
+            dedup_capacity=1_000,
+            service_mappings=(
+                {"frontend-proxy": "frontend"}
+                if ingress_service_mappings is None
+                else ingress_service_mappings
+            ),
+        ),
         source_entropy=BehavioralRatioRuleConfig(
             baseline_floor=0.25,
             trigger_relative_deformation=0.3,

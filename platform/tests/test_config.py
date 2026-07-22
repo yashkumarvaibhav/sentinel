@@ -40,6 +40,13 @@ def test_committed_config_loads_with_cross_file_references_and_stable_fingerprin
     assert first.detectors.behavioral_ratios.source_entropy.ratio_ceiling is None
     assert first.detectors.behavioral_ratios.syn_ack.ratio_ceiling == 20.0
     assert first.detectors.behavioral_ratios.interarrival_variation.minimum_points == 5
+    assert first.detectors.behavioral_ratios.ingress_windows.window_seconds == 60
+    assert first.detectors.behavioral_ratios.ingress_windows.baseline_warmup_windows == 1
+    assert first.detectors.behavioral_ratios.ingress_windows.minimum_window_requests == 6
+    assert (
+        first.detectors.behavioral_ratios.ingress_windows.service_mappings["frontend-proxy"]
+        == "frontend"
+    )
     assert first.detectors.log_templates.max_clusters == 10_000
     assert first.detectors.log_templates.minimum_template_count == 5
     assert first.detectors.log_templates.window_seconds == 60
@@ -136,6 +143,20 @@ def test_config_models_are_immutable() -> None:
                 "minimum_points", 2
             ),
             "minimum_points",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["behavioral_ratios"]["ingress_windows"].__setitem__(
+                "minimum_window_requests", 5
+            ),
+            "minimum_window_requests must be at least interarrival minimum_points",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["behavioral_ratios"]["ingress_windows"][
+                "service_mappings"
+            ].__setitem__("unknown-source", "missing"),
+            "ingress ratio service mapping references an unknown topology service",
         ),
         (
             "detector-params.yml",

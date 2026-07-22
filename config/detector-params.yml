@@ -9,6 +9,13 @@ absolute_noise_floors:
   frontend.request_rate: 1.5
   checkout.error_ratio: 0.005
 behavioral_ratios:
+  ingress_windows:
+    window_seconds: 60
+    baseline_warmup_windows: 1
+    minimum_window_requests: 6
+    dedup_capacity: 10000
+    service_mappings:
+      frontend-proxy: frontend
   source_entropy:
     baseline_floor: 0.25
     trigger_relative_deformation: 0.3

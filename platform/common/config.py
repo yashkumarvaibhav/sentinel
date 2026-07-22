@@ -221,9 +221,20 @@ class SequenceRatioRuleConfig(BehavioralRatioRuleConfig):
     minimum_points: int = Field(ge=3, le=100_000)
 
 
+class IngressRatioWindowConfig(ConfigModel):
+    """Event-time materialization policy for ratios derived from HTTP ingress spans."""
+
+    window_seconds: int = Field(ge=1, le=3600)
+    baseline_warmup_windows: int = Field(ge=1, le=100_000)
+    minimum_window_requests: int = Field(ge=2, le=1_000_000)
+    dedup_capacity: int = Field(ge=1, le=10_000_000)
+    service_mappings: dict[Identifier, Identifier] = Field(min_length=1)
+
+
 class BehavioralRatioConfig(ConfigModel):
     """Scale-free behavioral monitors; thresholds remain configuration, not code."""
 
+    ingress_windows: IngressRatioWindowConfig
     source_entropy: BehavioralRatioRuleConfig
     auth_failure: BehavioralRatioRuleConfig
     syn_ack: BehavioralRatioRuleConfig
@@ -248,6 +259,11 @@ class BehavioralRatioConfig(ConfigModel):
         for name in ("syn_ack", "rpc_amplification"):
             if getattr(self, name).ratio_ceiling is None:
                 raise ValueError(f"{name} must define ratio_ceiling")
+        minimum_requests = self.interarrival_variation.minimum_points + 1
+        if self.ingress_windows.minimum_window_requests < minimum_requests:
+            raise ValueError(
+                "ingress minimum_window_requests must be at least interarrival minimum_points + 1"
+            )
         return self
 
 
@@ -616,6 +632,15 @@ def _validate_references(config: SentinelConfig) -> None:
             raise ConfigLoadError(
                 "detector-params.yml: log service mapping references an unknown topology "
                 f"service: {logical_service}"
+            )
+    ingress_ratio_services = (
+        config.detectors.behavioral_ratios.ingress_windows.service_mappings.values()
+    )
+    for logical_service in ingress_ratio_services:
+        if logical_service not in services:
+            raise ConfigLoadError(
+                "detector-params.yml: ingress ratio service mapping references an unknown "
+                f"topology service: {logical_service}"
             )
 
 

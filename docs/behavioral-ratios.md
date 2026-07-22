@@ -40,3 +40,41 @@ Impossible subset counts such as failures greater than attempts fail closed. Pos
 unbounded ratios use the configured finite ceiling and disclose that cap in the symptom note.
 Every emitted symptom also names its current value, baseline, deformation, trigger, raw window
 summary and sorted evidence references.
+
+## HTTP ingress window materialization
+
+`IngressRatioDetectionRunner` currently materializes the two ratios directly
+supported by normalized HTTP server spans: path entropy and inter-arrival
+variation. Explicit YAML mappings select telemetry services and their logical
+topology services. Other services, non-server spans and non-millisecond signals
+are ignored; event context and capture labels are absent from the API.
+
+A valid request requires a non-negative `span.duration_ms`, server span kind,
+exactly one trace link and an absolute HTTP(S) `http.url`. The path component is
+the category; query parameters are deliberately excluded. A trace may contain
+several distinct ingress requests, so the normalized observation ID—not the
+trace ID—is the request/evidence identity. Semantic observation-ID deduplication
+still makes at-least-once replay idempotent.
+
+Each configured logical service owns independent frozen baselines for both
+metrics. Window size, sufficient request count, warmup windows, dedup capacity
+and telemetry-to-logical mappings are versioned under
+`behavioral_ratios.ingress_windows`. Every complete event-time window yields
+one status per service and metric:
+
+- `WARMING` for a valid measurement while its baseline is incomplete;
+- `INSUFFICIENT` for empty, sparse, malformed, ambiguous or degenerate
+  evidence;
+- `BREACH` for a deterministic deformation; or
+- `CLEAR` only for a sufficient, unambiguous measurement with no deformation.
+
+Only `BREACH` and `CLEAR` advance the independent `RATIO_DEFORM` episode keys.
+Incomplete capture tails are never converted into ticks. Exact retry is
+idempotent, while conflicting same-time input, gaps, reordering, future
+evidence and observation-ID reuse fail closed.
+
+Source entropy, auth failure, SYN:ACK, RPC retry amplification, conversion and
+crowd coherence remain detector APIs only until their required raw semantics
+exist. In particular, the materializer does not treat a cluster peer as an end
+user source, infer conversion from unrelated spans, infer retries without an
+explicit retry marker, or pair unrelated KPIs.

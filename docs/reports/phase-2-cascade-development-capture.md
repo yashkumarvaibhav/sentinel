@@ -5,8 +5,8 @@
 `cascade_night` keeps the frontend volume fully explained by a simulated match
 while a contained payment failure degrades the checkout-to-payment edge. A
 second bounded checkout journey after flag restoration supplies real recovery
-evidence. This capture validates the first Phase 2 window-materializer vertical
-slice without claiming detector precision or recall.
+evidence. This capture validates the edge, log and ingress-ratio development
+materializers without claiming detector precision or recall.
 
 - **Telemetry evidence: REAL.** Logs, metrics and traces came from the contained
   Astronomy Shop testbed and were retained at exact raw-topic offsets.
@@ -22,10 +22,10 @@ slice without claiming detector precision or recall.
 - **Capture-time runtime config fingerprint:**
   `25b6b55fa226476b2d73a08dbdcde34ba0f117f9936a263d75325daeff89bec0`.
 - **Current replay config fingerprint:**
-  `741c02102b83203e177483d37fe211a782f1d4bfecf9f491a0b2808e16711d7b`.
-  This differs only because the later log-window policy and telemetry-to-logical
-  service mappings are now versioned configuration; the immutable raw bytes
-  and capture-time fingerprint remain pinned separately.
+  `0fadaa18ffb693544883740080362540de6b0dbdf502d269680edeabfa33cd49`.
+  This differs only because the later log/ratio window policies and
+  telemetry-to-logical service mappings are now versioned configuration; the
+  immutable raw bytes and capture-time fingerprint remain pinned separately.
 
 ## Capture evidence
 
@@ -46,6 +46,8 @@ slice without claiming detector precision or recall.
 | Edge episode lifecycle | `OPENED` +104 s; `CLOSED` +144 s |
 | Complete log windows | 2 × 4 configured logical services |
 | Active log episodes after replay | 0 |
+| Complete ingress-ratio windows | 2 × 2 configured frontend ratios |
+| Active ratio episodes after replay | 0 |
 
 The legitimate surge remains decomposed as `explained_base=4` plus
 `explained_event=6` with residual 0. The trace evidence simultaneously contains
@@ -73,16 +75,28 @@ failed. Invalid token` template at 0.6833 messages/s against a zero baseline
 fabricated or left active. These are development observations, not calibrated
 precision or recall claims.
 
+The frontend ingress-ratio replay also contains exactly two complete 60-second
+windows. The 308-request first window warms a path-entropy baseline of
+2.414886 bits and an inter-arrival CV baseline of 0.445111. The 767-request
+second window is sufficient and unambiguous: path entropy is 2.259707
+(relative deformation 0.064259, below the configured 0.3 trigger), while
+inter-arrival CV rises to 0.576218 and therefore has zero lower-direction
+deformation. Both produce `CLEAR`/`HELD`, leaving no active ratio episode. The
+materializer counts distinct normalized ingress observations even when several
+requests share one trace, and uses each observation ID as its evidence identity.
+
 ## Replay provenance and scope
 
 - Raw replay SHA-256:
   `9d84fe76e6064d2c08380970f71ae9d5a6e1d26c8f7791dc89d8dd235211351d`.
 - Decomposition transcript SHA-256:
-  `45f9ce0bd9a8501232f523c1b3ba8222ffd20440f74e922fba76421be94a2921`.
+  `e605ce2c3b74c61c32e353f3bb364e97402c245c807910c572ae473d60b8a1a1`.
 - Edge-detector transcript SHA-256:
-  `416900b411f9ac2912a65ff3d8f3a5177f14ea71547ede100943e1c786e5f859`.
+  `9f3e364f4c8bda8aea08ecae2a017be245028fc4dc71137fc57dcb953dcf5c76`.
 - Log-detector transcript SHA-256:
-  `485caf3d1142bb01af01874ae357f5c5db8639c985b1af3b0ca9b9eb0b138798`.
+  `cc2d325c810da433b075fcb405c452d9a260aad6b7a3eaf2bedf2f524fb45cc1`.
+- Ingress-ratio transcript SHA-256:
+  `f6b6006e6f48529eb95fcc63d74af6477a72afabeb40a2c2eeb14c2168fa4d26`.
 - The raw capture stays outside git because it is a DVC-scale binary artifact.
   The committed report pins the evidence needed to shape the deterministic
   window materializer.
