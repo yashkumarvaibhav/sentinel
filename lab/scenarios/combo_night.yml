@@ -28,7 +28,7 @@ load_phases:
     duration_seconds: 60
     rate_rps: 2
   - name: event_with_emitter_silence
-    duration_seconds: 160
+    duration_seconds: 220
     rate_rps: 10
   - name: event_recovery
     duration_seconds: 60
@@ -40,7 +40,7 @@ contexts:
     source: scenario_compiler
     honesty: SIMULATED
     start_offset_seconds: 64
-    duration_seconds: 700
+    duration_seconds: 760
     expected_delta:
       frontend.request_rate: 2.5
     trust_score: 1.0
@@ -84,7 +84,7 @@ stimuli:
   - stimulus_id: frontend_emitter_silence
     kind: chaos_mesh
     start_offset_seconds: 544
-    duration_seconds: 160
+    duration_seconds: 220
     experiment: frontend-proxy-pod-failure
 residual_labels:
   - label_id: behavior-attack-volume
@@ -133,4 +133,4 @@ symptom_labels:
     signal: request_rate
     stimulus_id: frontend_emitter_silence
     start_offset_seconds: 544
-    end_offset_seconds: 704
+    end_offset_seconds: 764

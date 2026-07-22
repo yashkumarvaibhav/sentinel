@@ -65,7 +65,7 @@ def test_frontend_emitter_failure_is_single_target_bounded_and_self_expiring() -
     }
     assert document["spec"]["action"] == "pod-failure"
     assert document["spec"]["mode"] == "one"
-    assert document["spec"]["duration"] == "160s"
+    assert document["spec"]["duration"] == "220s"
     assert document["spec"]["selector"] == {
         "namespaces": ["otel-demo"],
         "labelSelectors": {"app.kubernetes.io/component": "frontend-proxy"},

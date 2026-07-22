@@ -9,7 +9,7 @@ metadata:
 spec:
   action: pod-failure
   mode: one
-  duration: 160s
+  duration: 220s
   selector:
     namespaces:
       - otel-demo

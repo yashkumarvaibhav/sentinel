@@ -90,7 +90,7 @@ def test_combo_path_attack_is_fixed_target_capped_and_counted_as_primary_volume(
     assert env["SENTINEL_ATTACK_PATH"] == "/"
     assert env["SENTINEL_RATE_RPS"] == "20"
     assert env["SENTINEL_USER_AGENT"] == "sentinel-score/run-combo/attack/abc"
-    assert expected_request_count(schedule) == 10_376
+    assert expected_request_count(schedule) == 10_976
 
 
 def test_primary_rate_phase_records_measured_boundaries_without_a_second_job() -> None:

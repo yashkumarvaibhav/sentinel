@@ -144,7 +144,7 @@ def test_combo_labels_follow_measured_attack_and_fault_execution() -> None:
             "payment_failure": (125.5, 305.5),
             "email_memory_leak": (307.0, 487.25),
             "measured_rate_drop": (487.25, 547.5),
-            "frontend_emitter_silence": (547.5, 707.75),
+            "frontend_emitter_silence": (547.5, 767.75),
         },
     )
 
