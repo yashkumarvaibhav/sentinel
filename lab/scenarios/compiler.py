@@ -4,17 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import yaml
 from pydantic import ValidationError
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
 
-from lab.scenarios.models import ScenarioProfile, Stimulus
+from lab.scenarios.models import ScenarioProfile, Stimulus, SymptomLabelInterval
 
 
 class SeedPurpose(StrEnum):
@@ -131,7 +132,9 @@ def compile_profile(
         "seed": seed,
         "seed_purpose": purpose.value,
         "intervals": [label.model_dump(mode="json") for label in profile.residual_labels],
-        "symptom_intervals": [label.model_dump(mode="json") for label in profile.symptom_labels],
+        "symptom_intervals": [
+            label.model_dump(mode="json", exclude_none=True) for label in profile.symptom_labels
+        ],
     }
     return ScenarioArtifacts(schedule=schedule, context_feed=context_feed, labels=labels)
 
@@ -151,6 +154,35 @@ def write_artifacts(artifacts: ScenarioArtifacts, output: Path) -> ArtifactPaths
 def schedule_payload(schedule: CompiledSchedule) -> dict[str, object]:
     """Return the public k6 input without any private labels."""
     return _schedule_payload(schedule)
+
+
+def materialize_symptom_labels(
+    artifacts: ScenarioArtifacts,
+    *,
+    stimulus_offsets: Mapping[str, tuple[float, float]],
+) -> dict[str, object]:
+    """Shift stimulus-backed private labels to measured live execution offsets."""
+    raw_intervals = artifacts.labels.get("symptom_intervals")
+    if not isinstance(raw_intervals, list):
+        raise ValueError("compiled labels lack symptom_intervals")
+    intervals: list[dict[str, object]] = []
+    for raw_interval in raw_intervals:
+        if not isinstance(raw_interval, dict):
+            raise ValueError("compiled symptom interval is not an object")
+        payload = cast(dict[str, object], dict(raw_interval))
+        stimulus_id = payload.get("stimulus_id")
+        if stimulus_id is not None:
+            if not isinstance(stimulus_id, str) or stimulus_id not in stimulus_offsets:
+                raise ValueError(f"missing measured execution for stimulus: {stimulus_id}")
+            start, end = stimulus_offsets[stimulus_id]
+            payload["start_offset_seconds"] = start
+            payload["end_offset_seconds"] = end
+        intervals.append(
+            SymptomLabelInterval.model_validate(payload).model_dump(mode="json", exclude_none=True)
+        )
+    labels = dict(artifacts.labels)
+    labels["symptom_intervals"] = intervals
+    return labels
 
 
 def _schedule_payload(schedule: CompiledSchedule) -> dict[str, object]:

@@ -4,11 +4,26 @@ import { check, randomSeed } from 'k6';
 // The endpoint is intentionally not configurable. Scenario inputs can vary
 // bounded rates and timing, but cannot redirect this runner outside our mesh.
 const TARGET = 'http://frontend-proxy:8080';
-const schedule = JSON.parse(__ENV.SENTINEL_SCHEDULE);
 const runId = __ENV.SENTINEL_RUN_ID;
+const journey = __ENV.SENTINEL_JOURNEY || 'browse';
+const schedule = journey === 'checkout'
+  ? {
+      target: 'astronomy-shop/frontend-proxy',
+      request_mix_seed: 1,
+      phases: [{
+        name: 'checkout',
+        rate_rps: Number(__ENV.SENTINEL_RATE_RPS),
+        duration_seconds: Number(__ENV.SENTINEL_DURATION_SECONDS),
+        start_offset_seconds: 0,
+      }],
+    }
+  : JSON.parse(__ENV.SENTINEL_SCHEDULE);
 
 if (schedule.target !== 'astronomy-shop/frontend-proxy') {
   throw new Error(`unsupported contained target: ${schedule.target}`);
+}
+if (!['browse', 'checkout'].includes(journey)) {
+  throw new Error(`unsupported contained journey: ${journey}`);
 }
 
 const scenarios = {};
@@ -30,16 +45,18 @@ for (const phase of schedule.phases) {
 
 export const options = {
   scenarios,
-  thresholds: {
-    checks: ['rate>0.99'],
-    dropped_iterations: ['count==0'],
-  },
+  thresholds: journey === 'checkout'
+    ? { dropped_iterations: ['count==0'] }
+    : { checks: ['rate>0.99'], dropped_iterations: ['count==0'] },
 };
 
 const paths = ['/', '/api/products'];
 randomSeed(schedule.request_mix_seed);
 
 export function setup() {
+  if (journey === 'checkout') {
+    return;
+  }
   // The collector may sample an individual trace. A tiny separate burst makes
   // the phase origin observable without putting marker traffic in detector
   // input; the runner anchors on the last observed marker.
@@ -51,9 +68,53 @@ export function setup() {
 }
 
 export default function () {
+  if (journey === 'checkout') {
+    checkout();
+    return;
+  }
   const path = paths[Math.floor(Math.random() * paths.length)];
   const response = http.get(`${TARGET}${path}`, {
     headers: { 'User-Agent': `sentinel-score/${runId}` },
   });
   check(response, { 'testbed response below 500': (result) => result.status < 500 });
+}
+
+function checkout() {
+  const userId = `${runId}-${__VU}-${__ITER}`;
+  const headers = {
+    'Content-Type': 'application/json',
+    'User-Agent': `sentinel-stimulus/${runId}`,
+  };
+  const productId = '0PUK6V6EV0';
+  const product = http.get(`${TARGET}/api/products/${productId}`, { headers });
+  const cart = http.post(
+    `${TARGET}/api/cart`,
+    JSON.stringify({ item: { productId, quantity: 1 }, userId }),
+    { headers },
+  );
+  const order = http.post(
+    `${TARGET}/api/checkout`,
+    JSON.stringify({
+      userId,
+      email: 'sentinel-checkout@example.com',
+      address: {
+        streetAddress: '1600 Amphitheatre Parkway',
+        zipCode: '94043',
+        city: 'Mountain View',
+        state: 'CA',
+        country: 'United States',
+      },
+      userCurrency: 'USD',
+      creditCard: {
+        creditCardNumber: '4432-8015-6152-0454',
+        creditCardExpirationMonth: 1,
+        creditCardExpirationYear: 2039,
+        creditCardCvv: 672,
+      },
+    }),
+    { headers },
+  );
+  check(product, { 'checkout product request completed': (result) => result.status > 0 });
+  check(cart, { 'checkout cart request completed': (result) => result.status > 0 });
+  check(order, { 'checkout order request completed': (result) => result.status > 0 });
 }

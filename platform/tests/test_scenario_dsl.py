@@ -11,6 +11,7 @@ from lab.scenarios import (
     SeedPurpose,
     compile_profile,
     load_profile,
+    materialize_symptom_labels,
     schedule_payload,
     write_artifacts,
 )
@@ -19,7 +20,9 @@ from lab.scenarios.models import ScenarioProfile
 SCENARIO_ROOT = Path(__file__).resolve().parents[2] / "lab" / "scenarios"
 
 
-@pytest.mark.parametrize("profile_name", ["quiet_day", "match_night", "attack_day"])
+@pytest.mark.parametrize(
+    "profile_name", ["quiet_day", "match_night", "attack_day", "cascade_night"]
+)
 def test_committed_profiles_have_disjoint_seed_sets_and_bounded_fixed_target_load(
     profile_name: str,
 ) -> None:
@@ -44,6 +47,66 @@ def test_attack_day_is_a_no_event_control_with_a_labeled_surge() -> None:
     assert artifacts.context_feed["windows"] == []
     assert profile.residual_labels
     assert artifacts.labels["intervals"]
+
+
+def test_cascade_night_keeps_volume_explained_while_a_downstream_fault_runs() -> None:
+    profile = load_profile(SCENARIO_ROOT / "cascade_night.yml")
+    artifacts = compile_profile(
+        profile,
+        seed=profile.seeds.development[0],
+        purpose=SeedPurpose.DEVELOPMENT,
+    )
+
+    assert profile.residual_labels == ()
+    assert len(profile.contexts) == 1
+    context = profile.contexts[0]
+    assert context.expected_delta == {"frontend.request_rate": 2.5}
+    assert context.start_offset_seconds == 64
+    assert context.start_offset_seconds + context.duration_seconds == profile.duration_seconds
+    assert [stimulus.kind for stimulus in profile.stimuli] == ["flagd", "k6_journey"]
+    for stimulus in profile.stimuli:
+        assert stimulus.start_offset_seconds == 84
+        assert stimulus.start_offset_seconds + stimulus.duration_seconds == 104
+    assert artifacts.labels["symptom_intervals"] == [
+        {
+            "end_offset_seconds": 104,
+            "kind": "EDGE_DEGRADED",
+            "label_id": "checkout-payment-failure",
+            "service": "checkout",
+            "signal": "dependency.payment",
+            "start_offset_seconds": 84,
+            "stimulus_id": "payment_failure",
+        }
+    ]
+    assert "symptom_intervals" not in schedule_payload(artifacts.schedule)
+
+
+def test_capture_labels_follow_measured_stimulus_execution_not_planned_offsets() -> None:
+    profile = load_profile(SCENARIO_ROOT / "cascade_night.yml")
+    artifacts = compile_profile(
+        profile,
+        seed=profile.seeds.development[0],
+        purpose=SeedPurpose.DEVELOPMENT,
+    )
+
+    materialized = materialize_symptom_labels(
+        artifacts,
+        stimulus_offsets={"payment_failure": (87.901232, 107.929988)},
+    )
+
+    assert materialized["symptom_intervals"] == [
+        {
+            "end_offset_seconds": 107.929988,
+            "kind": "EDGE_DEGRADED",
+            "label_id": "checkout-payment-failure",
+            "service": "checkout",
+            "signal": "dependency.payment",
+            "start_offset_seconds": 87.901232,
+            "stimulus_id": "payment_failure",
+        }
+    ]
+    with pytest.raises(ValueError, match="missing measured execution"):
+        materialize_symptom_labels(artifacts, stimulus_offsets={})
 
 
 def test_compilation_is_byte_stable_and_seed_purpose_is_enforced() -> None:
@@ -103,6 +166,14 @@ def test_fault_stimuli_compile_publicly_while_symptom_labels_stay_private() -> N
             "duration_seconds": 20,
             "experiment": "ad-cpu-pressure",
         },
+        {
+            "stimulus_id": "checkout-traffic",
+            "kind": "k6_journey",
+            "start_offset_seconds": 64,
+            "duration_seconds": 20,
+            "journey": "checkout",
+            "rate_rps": 2,
+        },
     ]
     document["symptom_labels"] = [
         {
@@ -125,6 +196,7 @@ def test_fault_stimuli_compile_publicly_while_symptom_labels_stay_private() -> N
     assert [item["kind"] for item in stimuli] == [
         "flagd",
         "chaos_mesh",
+        "k6_journey",
     ]
     assert "symptom_labels" not in public_schedule
     assert "symptom_intervals" not in public_schedule

@@ -25,7 +25,9 @@ type HumanText = Annotated[
 ]
 type PositiveSeconds = Annotated[int, Field(ge=1, le=3600)]
 type OffsetSeconds = Annotated[int, Field(ge=0, le=3600)]
+type MeasuredOffsetSeconds = Annotated[float, Field(ge=0.0, le=3600.0)]
 type SafeRate = Annotated[int, Field(ge=1, le=50)]
+type SafeJourneyRate = Annotated[int, Field(ge=1, le=5)]
 type Probability = Annotated[float, Field(ge=0.0, le=1.0, allow_inf_nan=False)]
 type PositiveMultiplier = Annotated[float, Field(ge=1.0, le=20.0, allow_inf_nan=False)]
 type FlagName = Annotated[
@@ -137,8 +139,9 @@ class SymptomLabelInterval(LabModel):
     kind: ScoredSymptomKind
     service: Identifier
     signal: SignalName
-    start_offset_seconds: OffsetSeconds
-    end_offset_seconds: PositiveSeconds
+    stimulus_id: Identifier | None = None
+    start_offset_seconds: MeasuredOffsetSeconds
+    end_offset_seconds: MeasuredOffsetSeconds
 
     @model_validator(mode="after")
     def forward_interval(self) -> Self:
@@ -164,7 +167,16 @@ class ChaosMeshStimulus(LabModel):
     experiment: Identifier
 
 
-type Stimulus = FlagdStimulus | ChaosMeshStimulus
+class K6JourneyStimulus(LabModel):
+    stimulus_id: Identifier
+    kind: Literal["k6_journey"]
+    start_offset_seconds: OffsetSeconds
+    duration_seconds: PositiveSeconds
+    journey: Literal["checkout"]
+    rate_rps: SafeJourneyRate
+
+
+type Stimulus = FlagdStimulus | ChaosMeshStimulus | K6JourneyStimulus
 
 
 class ScenarioProfile(LabModel):
@@ -209,6 +221,28 @@ class ScenarioProfile(LabModel):
         for symptom_label in self.symptom_labels:
             if symptom_label.end_offset_seconds > duration:
                 raise ValueError(f"label exceeds scenario duration: {symptom_label.label_id}")
+            if symptom_label.stimulus_id is not None:
+                stimulus = next(
+                    (
+                        item
+                        for item in self.stimuli
+                        if item.stimulus_id == symptom_label.stimulus_id
+                    ),
+                    None,
+                )
+                if stimulus is None:
+                    raise ValueError(
+                        f"symptom label references unknown stimulus: {symptom_label.stimulus_id}"
+                    )
+                if (
+                    symptom_label.start_offset_seconds != stimulus.start_offset_seconds
+                    or symptom_label.end_offset_seconds
+                    != stimulus.start_offset_seconds + stimulus.duration_seconds
+                ):
+                    raise ValueError(
+                        "stimulus-backed label must match planned interval: "
+                        f"{symptom_label.label_id}"
+                    )
         by_target: dict[str, list[Stimulus]] = {}
         for stimulus in self.stimuli:
             if stimulus.start_offset_seconds + stimulus.duration_seconds > duration:
@@ -226,4 +260,6 @@ class ScenarioProfile(LabModel):
 def stimulus_target(stimulus: Stimulus) -> str:
     if isinstance(stimulus, FlagdStimulus):
         return f"flagd:{stimulus.flag}"
-    return f"chaos_mesh:{stimulus.experiment}"
+    if isinstance(stimulus, ChaosMeshStimulus):
+        return f"chaos_mesh:{stimulus.experiment}"
+    return f"k6_journey:{stimulus.journey}"

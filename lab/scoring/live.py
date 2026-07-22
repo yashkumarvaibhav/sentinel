@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -18,7 +19,13 @@ import yaml
 
 from lab.scenarios import ScenarioArtifacts, schedule_payload
 from lab.scenarios.compiler import CompiledSchedule
-from lab.scenarios.models import ChaosMeshStimulus, FlagdStimulus, Stimulus, stimulus_target
+from lab.scenarios.models import (
+    ChaosMeshStimulus,
+    FlagdStimulus,
+    K6JourneyStimulus,
+    Stimulus,
+    stimulus_target,
+)
 
 _SAFE_NAME = re.compile(r"^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?$")
 _NAMESPACE = "otel-demo"
@@ -52,7 +59,7 @@ class LiveTelemetry:
 @dataclass(frozen=True)
 class StimulusExecution:
     stimulus_id: str
-    kind: Literal["flagd", "chaos_mesh"]
+    kind: Literal["flagd", "chaos_mesh", "k6_journey"]
     target: str
     setting: str
     requested_start_offset_seconds: int
@@ -85,6 +92,14 @@ class _ChaosManifest:
     path: Path
     kind: str
     name: str
+
+
+@dataclass(frozen=True)
+class _JourneyRun:
+    job_name: str
+    user_agent: str
+    expected_spans: int
+    timeout_seconds: int
 
 
 def render_stimulus_executions(executions: tuple[StimulusExecution, ...]) -> bytes:
@@ -152,6 +167,57 @@ def build_k6_job(
     }
 
 
+def build_checkout_journey_job(
+    stimulus: K6JourneyStimulus,
+    *,
+    job_name: str,
+    run_id: str,
+) -> dict[str, Any]:
+    _require_safe(job_name, "job_name")
+    _require_safe(run_id, "run_id")
+    return {
+        "apiVersion": "batch/v1",
+        "kind": "Job",
+        "metadata": {
+            "name": job_name,
+            "namespace": _NAMESPACE,
+            "labels": {"sentinel.dev/role": "loadgen"},
+        },
+        "spec": {
+            "backoffLimit": 0,
+            "ttlSecondsAfterFinished": 600,
+            "template": {
+                "metadata": {"labels": {"sentinel.dev/role": "loadgen"}},
+                "spec": {
+                    "restartPolicy": "Never",
+                    "containers": [
+                        {
+                            "name": "k6",
+                            "image": "grafana/k6:0.55.0",
+                            "args": ["run", "/scripts/scenario.js"],
+                            "env": [
+                                {"name": "SENTINEL_JOURNEY", "value": stimulus.journey},
+                                {"name": "SENTINEL_RATE_RPS", "value": str(stimulus.rate_rps)},
+                                {
+                                    "name": "SENTINEL_DURATION_SECONDS",
+                                    "value": str(stimulus.duration_seconds),
+                                },
+                                {"name": "SENTINEL_RUN_ID", "value": run_id},
+                            ],
+                            "resources": {
+                                "limits": {"cpu": "1", "memory": "256Mi"},
+                                "requests": {"cpu": "100m", "memory": "64Mi"},
+                            },
+                            "volumeMounts": [{"name": "script", "mountPath": "/scripts"}],
+                        }
+                    ],
+                    "volumes": [{"name": "script", "configMap": {"name": job_name}}],
+                },
+            },
+        },
+    }
+
+
 def run_live_scenario(
     *,
     repo_root: Path,
@@ -195,6 +261,7 @@ def run_live_scenario(
                 repo_root=repo_root,
                 schedule=schedule,
                 anchor_ts=start_at,
+                invocation=invocation,
             )
         else:
             start_at = None
@@ -229,16 +296,30 @@ def execute_stimuli(
     repo_root: Path,
     schedule: CompiledSchedule,
     anchor_ts: datetime,
+    invocation: str = "manual",
     runner: CommandRunner | None = None,
     waiter: Callable[[datetime], None] | None = None,
     clock: Callable[[], datetime] | None = None,
+    journey_span_reader: Callable[[str, int], tuple[datetime, ...]] | None = None,
 ) -> tuple[StimulusExecution, ...]:
     """Run only compiled, contained lab stimuli and restore every changed target."""
     if anchor_ts.tzinfo is None or anchor_ts.utcoffset() != timedelta(0):
         raise ValueError("stimulus anchor must be timezone-aware UTC")
+    _require_safe(invocation, "invocation")
     command = _run if runner is None else runner
     wait_until = _wait_until if waiter is None else waiter
     now = _utc_now if clock is None else clock
+    read_journey_spans = (
+        (
+            lambda user_agent, expected: _wait_for_spans(
+                repo_root=repo_root,
+                user_agent=user_agent,
+                expected=expected,
+            )
+        )
+        if journey_span_reader is None
+        else journey_span_reader
+    )
     if not schedule.stimuli:
         return ()
 
@@ -252,6 +333,7 @@ def execute_stimuli(
     )
     flags = _FlagdController(command, flag_stimuli) if flag_stimuli else None
     active_chaos: dict[str, _ChaosManifest] = {}
+    active_journeys: dict[str, _JourneyRun] = {}
     started: dict[str, datetime] = {}
     completed: list[StimulusExecution] = []
     primary_error: BaseException | None = None
@@ -268,10 +350,19 @@ def execute_stimuli(
                         if flags is None:  # pragma: no cover - guarded by construction
                             raise AssertionError("flagd controller missing")
                         flags.activate(stimulus)
-                    else:
+                    elif isinstance(stimulus, ChaosMeshStimulus):
                         manifest = chaos[stimulus.stimulus_id]
                         active_chaos[stimulus.stimulus_id] = manifest
                         _apply_chaos(command, manifest)
+                    else:
+                        journey = _start_checkout_journey(
+                            command,
+                            repo_root=repo_root,
+                            schedule=schedule,
+                            stimulus=stimulus,
+                            invocation=invocation,
+                        )
+                        active_journeys[stimulus.stimulus_id] = journey
                     started[stimulus.stimulus_id] = _require_utc(now(), "stimulus start")
                     continue
 
@@ -279,26 +370,36 @@ def execute_stimuli(
                     if flags is None:  # pragma: no cover - guarded by construction
                         raise AssertionError("flagd controller missing")
                     flags.deactivate(stimulus)
-                else:
+                    started_at = started.pop(stimulus.stimulus_id)
+                    ended_at = _require_utc(now(), "stimulus end")
+                elif isinstance(stimulus, ChaosMeshStimulus):
                     manifest = active_chaos[stimulus.stimulus_id]
                     _delete_chaos(command, manifest)
                     del active_chaos[stimulus.stimulus_id]
-                ended_at = _require_utc(now(), "stimulus end")
+                    started_at = started.pop(stimulus.stimulus_id)
+                    ended_at = _require_utc(now(), "stimulus end")
+                else:
+                    journey = active_journeys[stimulus.stimulus_id]
+                    timestamps = _finish_checkout_journey(
+                        command,
+                        journey=journey,
+                        span_reader=read_journey_spans,
+                    )
+                    del active_journeys[stimulus.stimulus_id]
+                    started.pop(stimulus.stimulus_id)
+                    started_at = timestamps[0]
+                    ended_at = timestamps[-1] + timedelta(microseconds=1)
                 completed.append(
                     StimulusExecution(
                         stimulus_id=stimulus.stimulus_id,
                         kind=stimulus.kind,
                         target=stimulus_target(stimulus),
-                        setting=(
-                            stimulus.variant
-                            if isinstance(stimulus, FlagdStimulus)
-                            else stimulus.experiment
-                        ),
+                        setting=_stimulus_setting(stimulus),
                         requested_start_offset_seconds=stimulus.start_offset_seconds,
                         requested_end_offset_seconds=(
                             stimulus.start_offset_seconds + stimulus.duration_seconds
                         ),
-                        started_at=started.pop(stimulus.stimulus_id),
+                        started_at=started_at,
                         ended_at=ended_at,
                     )
                 )
@@ -309,6 +410,11 @@ def execute_stimuli(
     for manifest in reversed(tuple(active_chaos.values())):
         try:
             _delete_chaos(command, manifest)
+        except Exception as exc:  # pragma: no cover - exceptional kubectl cleanup
+            cleanup_errors.append(exc)
+    for journey in reversed(tuple(active_journeys.values())):
+        try:
+            _delete_owned(journey.job_name, runner=command)
         except Exception as exc:  # pragma: no cover - exceptional kubectl cleanup
             cleanup_errors.append(exc)
     if flags is not None:
@@ -460,11 +566,117 @@ def _stimulus_transitions(stimuli: tuple[Stimulus, ...]) -> tuple[_StimulusTrans
             transitions,
             key=lambda item: (
                 item.offset_seconds,
-                0 if item.operation == "stop" else 1,
+                _transition_priority(item),
                 item.stimulus.stimulus_id,
             ),
         )
     )
+
+
+def _transition_priority(transition: _StimulusTransition) -> int:
+    if transition.operation == "start":
+        if isinstance(transition.stimulus, FlagdStimulus):
+            return 3
+        if isinstance(transition.stimulus, ChaosMeshStimulus):
+            return 4
+        return 5
+    if isinstance(transition.stimulus, K6JourneyStimulus):
+        return 0
+    if isinstance(transition.stimulus, ChaosMeshStimulus):
+        return 1
+    return 2
+
+
+def _stimulus_setting(stimulus: Stimulus) -> str:
+    if isinstance(stimulus, FlagdStimulus):
+        return stimulus.variant
+    if isinstance(stimulus, ChaosMeshStimulus):
+        return stimulus.experiment
+    return f"{stimulus.journey}@{stimulus.rate_rps}rps"
+
+
+def _start_checkout_journey(
+    runner: CommandRunner,
+    *,
+    repo_root: Path,
+    schedule: CompiledSchedule,
+    stimulus: K6JourneyStimulus,
+    invocation: str,
+) -> _JourneyRun:
+    identity = f"{schedule.scenario_id}:{schedule.seed}:{stimulus.stimulus_id}:{invocation}"
+    suffix = hashlib.sha256(identity.encode()).hexdigest()[:20]
+    job_name = f"stim-{suffix}"
+    run_id = f"journey-{suffix}"
+    job = build_checkout_journey_job(stimulus, job_name=job_name, run_id=run_id)
+    script = repo_root / "lab" / "loadgen" / "scenario.js"
+    if not script.is_file():
+        raise ValueError("checkout journey script is missing")
+    _delete_owned(job_name, runner=runner)
+    try:
+        runner(
+            [
+                "kubectl",
+                "--context",
+                _CONTEXT,
+                "-n",
+                _NAMESPACE,
+                "create",
+                "configmap",
+                job_name,
+                f"--from-file=scenario.js={script}",
+            ]
+        )
+        runner(
+            ["kubectl", "--context", _CONTEXT, "apply", "-f", "-"],
+            input_text=yaml.safe_dump(job, sort_keys=False),
+        )
+    except BaseException as exc:
+        try:
+            _delete_owned(job_name, runner=runner)
+        except Exception as cleanup_error:  # pragma: no cover - exceptional kubectl cleanup
+            exc.add_note(f"checkout journey cleanup also failed: {cleanup_error}")
+        raise
+    return _JourneyRun(
+        job_name=job_name,
+        user_agent=f"sentinel-stimulus/{run_id}",
+        expected_spans=stimulus.rate_rps * stimulus.duration_seconds * 3,
+        timeout_seconds=stimulus.duration_seconds + 90,
+    )
+
+
+def _finish_checkout_journey(
+    runner: CommandRunner,
+    *,
+    journey: _JourneyRun,
+    span_reader: Callable[[str, int], tuple[datetime, ...]],
+) -> tuple[datetime, ...]:
+    _wait_for_job(journey.job_name, timeout_seconds=journey.timeout_seconds, runner=runner)
+    log = runner(
+        [
+            "kubectl",
+            "--context",
+            _CONTEXT,
+            "-n",
+            _NAMESPACE,
+            "logs",
+            f"job/{journey.job_name}",
+        ]
+    )
+    if "iterations" not in log or "dropped_iterations" not in log:
+        raise RuntimeError(
+            f"checkout journey completion log lacked workload evidence for {journey.job_name}"
+        )
+    timestamps = span_reader(journey.user_agent, journey.expected_spans)
+    if not timestamps:
+        raise RuntimeError(f"checkout journey emitted no ingress spans: {journey.job_name}")
+    minimum = math.ceil(journey.expected_spans * 0.95)
+    if len(timestamps) < minimum:
+        raise RuntimeError(
+            f"checkout journey telemetry incomplete for {journey.job_name}: "
+            f"{len(timestamps)}/{journey.expected_spans} spans"
+        )
+    _delete_owned(journey.job_name, runner=runner)
+    return tuple(sorted(timestamps))
 
 
 def _load_chaos_manifest(repo_root: Path, stimulus: ChaosMeshStimulus) -> _ChaosManifest:
@@ -623,11 +835,17 @@ def _wait_for_spans(
     raise RuntimeError(f"no ingress spans arrived for {user_agent}")
 
 
-def _wait_for_job(name: str, *, timeout_seconds: int) -> None:
+def _wait_for_job(
+    name: str,
+    *,
+    timeout_seconds: int,
+    runner: CommandRunner | None = None,
+) -> None:
+    command = _run if runner is None else runner
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         document = json.loads(
-            _run(
+            command(
                 [
                     "kubectl",
                     "--context",
@@ -646,7 +864,9 @@ def _wait_for_job(name: str, *, timeout_seconds: int) -> None:
         if isinstance(status, dict) and status.get("succeeded") == 1:
             return
         if isinstance(status, dict) and status.get("failed", 0) >= 1:
-            log = _run(["kubectl", "--context", _CONTEXT, "-n", _NAMESPACE, "logs", f"job/{name}"])
+            log = command(
+                ["kubectl", "--context", _CONTEXT, "-n", _NAMESPACE, "logs", f"job/{name}"]
+            )
             raise RuntimeError(f"k6 job failed: {name}\n{log}")
         time.sleep(2)
     raise RuntimeError(f"k6 job timed out: {name}")
@@ -654,11 +874,25 @@ def _wait_for_job(name: str, *, timeout_seconds: int) -> None:
 
 def _wait_for_anchor(*, repo_root: Path, user_agent: str) -> datetime:
     deadline = time.monotonic() + 20
+    latest_timestamps: tuple[datetime, ...] = ()
+    previous_count = 0
+    stable_polls = 0
     while time.monotonic() < deadline:
         timestamps = _query_spans(repo_root=repo_root, user_agent=user_agent)
-        if timestamps:
+        if len(timestamps) >= 10:
             return timestamps[-1]
+        if timestamps:
+            latest_timestamps = timestamps
+            if len(timestamps) == previous_count:
+                stable_polls += 1
+            else:
+                stable_polls = 0
+            previous_count = len(timestamps)
+            if stable_polls >= 3:
+                return timestamps[-1]
         time.sleep(2)
+    if latest_timestamps:
+        return latest_timestamps[-1]
     raise RuntimeError(f"scenario start marker did not arrive for {user_agent}")
 
 
@@ -698,9 +932,10 @@ def _query_spans(*, repo_root: Path, user_agent: str) -> tuple[datetime, ...]:
     )
 
 
-def _delete_owned(name: str) -> None:
+def _delete_owned(name: str, *, runner: CommandRunner | None = None) -> None:
     _require_safe(name, "resource name")
-    _run(
+    command = _run if runner is None else runner
+    command(
         [
             "kubectl",
             "--context",
@@ -714,7 +949,7 @@ def _delete_owned(name: str) -> None:
             "--wait=true",
         ]
     )
-    _run(
+    command(
         [
             "kubectl",
             "--context",

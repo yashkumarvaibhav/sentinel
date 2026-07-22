@@ -29,7 +29,13 @@ from lab.captures.broker import (
 from lab.captures.models import CaptureSeedPurpose, CaptureTelemetry
 from lab.captures.store import CaptureMetadata, load_runtime_capture, write_capture
 from lab.captures.transcript import replay_decomposition
-from lab.scenarios import SeedPurpose, compile_profile, load_profile, write_artifacts
+from lab.scenarios import (
+    SeedPurpose,
+    compile_profile,
+    load_profile,
+    materialize_symptom_labels,
+    write_artifacts,
+)
 from lab.scoring.live import render_stimulus_executions, run_live_scenario
 
 _SAFE_ID = re.compile(r"^[a-z0-9](?:[-a-z0-9]{0,126}[a-z0-9])?$")
@@ -42,7 +48,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     record = subparsers.add_parser("record", help="record one committed live scenario seed")
     record.add_argument("--repo-root", type=Path, required=True)
     record.add_argument(
-        "--profile", choices=("quiet_day", "match_night", "attack_day"), required=True
+        "--profile",
+        choices=("quiet_day", "match_night", "attack_day", "cascade_night"),
+        required=True,
     )
     record.add_argument("--seed", type=int, required=True)
     record.add_argument("--purpose", choices=("development", "held_out"), default="held_out")
@@ -105,6 +113,21 @@ def _record(args: argparse.Namespace) -> int:
     )
     stimulus_executions_path = work / "stimulus-executions.json"
     stimulus_executions_path.write_bytes(render_stimulus_executions(telemetry.stimulus_executions))
+    measured_offsets = {
+        execution.stimulus_id: (
+            (execution.started_at - telemetry.start_at).total_seconds(),
+            (execution.ended_at - telemetry.start_at).total_seconds(),
+        )
+        for execution in telemetry.stimulus_executions
+    }
+    paths.labels.write_bytes(
+        _canonical(
+            materialize_symptom_labels(
+                artifacts,
+                stimulus_offsets=measured_offsets,
+            )
+        )
+    )
     print(f"[capture] {capture_id}: snapshotting raw-topic ends", flush=True)
     after = _container_snapshot(repo_root)
     before_path = work / "before.json"

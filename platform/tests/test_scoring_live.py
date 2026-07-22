@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import lab.scoring.live as live_module
 import pytest
 from lab.scenarios import SeedPurpose, compile_profile, load_profile
 from lab.scenarios.compiler import CompiledSchedule
 from lab.scenarios.models import ScenarioProfile
 from lab.scoring.live import (
+    build_checkout_journey_job,
     build_k6_job,
     execute_stimuli,
     expected_request_count,
@@ -40,10 +43,76 @@ def test_live_job_is_resource_capped_in_namespace_with_no_target_override() -> N
     assert expected_request_count(artifacts.schedule) == 712
 
 
+def test_checkout_journey_is_rate_capped_and_has_no_target_override() -> None:
+    schedule = _fault_schedule(flag_variant="100x", include_journey=True)
+    stimulus = next(item for item in schedule.stimuli if item.kind == "k6_journey")
+
+    job = build_checkout_journey_job(
+        stimulus,
+        job_name="stim-checkout",
+        run_id="journey-abc",
+    )
+    container = job["spec"]["template"]["spec"]["containers"][0]
+    env = {item["name"]: item["value"] for item in container["env"]}
+
+    assert job["metadata"]["namespace"] == "otel-demo"
+    assert container["image"] == "grafana/k6:0.55.0"
+    assert container["resources"]["limits"] == {"cpu": "1", "memory": "256Mi"}
+    assert "TARGET" not in env
+    assert env["SENTINEL_JOURNEY"] == "checkout"
+    assert env["SENTINEL_RATE_RPS"] == "2"
+    assert env["SENTINEL_DURATION_SECONDS"] == "20"
+
+
+def test_live_anchor_waits_for_the_complete_marker_burst(monkeypatch: pytest.MonkeyPatch) -> None:
+    start = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
+    responses = [
+        (start,),
+        tuple(start + timedelta(milliseconds=index) for index in range(10)),
+    ]
+
+    def query_spans(*, repo_root: Path, user_agent: str) -> tuple[datetime, ...]:
+        del repo_root, user_agent
+        return responses.pop(0)
+
+    monkeypatch.setattr(live_module, "_query_spans", query_spans)
+    monkeypatch.setattr("lab.scoring.live.time.sleep", lambda _: None)
+
+    anchor = live_module._wait_for_anchor(
+        repo_root=SCENARIO_ROOT.parents[1],
+        user_agent="sentinel-score-anchor/run-test",
+    )
+
+    assert anchor == start + timedelta(milliseconds=9)
+    assert responses == []
+
+
+def test_live_anchor_accepts_a_stable_partial_marker_burst(monkeypatch: pytest.MonkeyPatch) -> None:
+    start = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
+    partial = tuple(start + timedelta(milliseconds=index) for index in range(4))
+    responses = [partial, partial, partial, partial]
+
+    def query_spans(*, repo_root: Path, user_agent: str) -> tuple[datetime, ...]:
+        del repo_root, user_agent
+        return responses.pop(0)
+
+    monkeypatch.setattr(live_module, "_query_spans", query_spans)
+    monkeypatch.setattr("lab.scoring.live.time.sleep", lambda _: None)
+
+    anchor = live_module._wait_for_anchor(
+        repo_root=SCENARIO_ROOT.parents[1],
+        user_agent="sentinel-score-anchor/run-test",
+    )
+
+    assert anchor == start + timedelta(milliseconds=3)
+    assert responses == []
+
+
 def test_live_stimuli_use_fixed_owned_resources_and_restore_flagd() -> None:
-    schedule = _fault_schedule(flag_variant="100x")
+    schedule = _fault_schedule(flag_variant="100x", include_journey=True)
     commands: list[list[str]] = []
     waits: list[datetime] = []
+    span_reads: list[tuple[str, int]] = []
     anchor = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
 
     def runner(command: list[str], *, input_text: str | None = None, timeout: int = 120) -> str:
@@ -51,7 +120,18 @@ def test_live_stimuli_use_fixed_owned_resources_and_restore_flagd() -> None:
         commands.append(command)
         if "get" in command and "configmap" in command:
             return _flag_config_map()
+        if "get" in command and "job" in command:
+            return '{"status":{"succeeded":1}}'
+        if "logs" in command:
+            return "iterations dropped_iterations"
         return ""
+
+    def read_spans(user_agent: str, expected: int) -> tuple[datetime, ...]:
+        span_reads.append((user_agent, expected))
+        return tuple(
+            anchor + timedelta(seconds=66, milliseconds=index)
+            for index in range(math.ceil(expected * 0.95))
+        )
 
     executions = execute_stimuli(
         repo_root=SCENARIO_ROOT.parents[1],
@@ -60,15 +140,23 @@ def test_live_stimuli_use_fixed_owned_resources_and_restore_flagd() -> None:
         runner=runner,
         waiter=waits.append,
         clock=lambda: anchor + timedelta(seconds=65),
+        journey_span_reader=read_spans,
     )
 
     assert waits == [anchor + timedelta(seconds=64), anchor + timedelta(seconds=84)]
-    assert {item.stimulus_id for item in executions} == {"ad-pressure", "email-leak"}
+    assert {item.stimulus_id for item in executions} == {
+        "ad-pressure",
+        "checkout-traffic",
+        "email-leak",
+    }
     rendered_executions = json.loads(render_stimulus_executions(executions))
     assert [item["stimulus_id"] for item in rendered_executions["items"]] == [
         "ad-pressure",
+        "checkout-traffic",
         "email-leak",
     ]
+    assert span_reads == [(span_reads[0][0], 120)]
+    assert span_reads[0][0].startswith("sentinel-stimulus/journey-")
     rendered = [" ".join(command) for command in commands]
     assert any("-n otel-demo patch configmap flagd-config" in item for item in rendered)
     assert any("-n otel-demo rollout restart deployment/flagd" in item for item in rendered)
@@ -146,6 +234,7 @@ def _fault_schedule(
     flag_variant: str,
     flag_id: str = "email-leak",
     chaos_id: str = "ad-pressure",
+    include_journey: bool = False,
 ) -> CompiledSchedule:
     profile = load_profile(SCENARIO_ROOT / "quiet_day.yml")
     document = profile.model_dump(mode="json")
@@ -166,6 +255,17 @@ def _fault_schedule(
             "experiment": "ad-cpu-pressure",
         },
     ]
+    if include_journey:
+        document["stimuli"].append(
+            {
+                "stimulus_id": "checkout-traffic",
+                "kind": "k6_journey",
+                "start_offset_seconds": 64,
+                "duration_seconds": 20,
+                "journey": "checkout",
+                "rate_rps": 2,
+            }
+        )
     return compile_profile(
         ScenarioProfile.model_validate(document),
         seed=profile.seeds.development[0],

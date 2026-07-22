@@ -1,0 +1,59 @@
+version: 1
+scenario_id: cascade_night
+description: A legitimate match surge stays volume-explained while a payment failure degrades the checkout dependency edge.
+honesty: SIMULATED
+telemetry:
+  target: astronomy-shop/frontend-proxy
+  source_service: frontend-proxy
+  logical_service: frontend
+  logical_signal: request_rate
+  tick_seconds: 2
+seeds:
+  development: [401, 409]
+  held_out: [9103, 9127]
+load_phases:
+  - name: warmup
+    duration_seconds: 64
+    rate_rps: 4
+  - name: explained_event
+    duration_seconds: 20
+    rate_rps: 10
+  - name: event_with_payment_fault
+    duration_seconds: 20
+    rate_rps: 10
+  - name: event_recovery
+    duration_seconds: 40
+    rate_rps: 10
+contexts:
+  - context_id: simulated_match
+    name: Simulated championship match
+    event_type: sports_fixture
+    source: scenario_compiler
+    honesty: SIMULATED
+    start_offset_seconds: 64
+    duration_seconds: 80
+    expected_delta:
+      frontend.request_rate: 2.5
+    trust_score: 1.0
+stimuli:
+  - stimulus_id: payment_failure
+    kind: flagd
+    start_offset_seconds: 84
+    duration_seconds: 20
+    flag: paymentFailure
+    variant: 100%
+  - stimulus_id: checkout_fault_traffic
+    kind: k6_journey
+    start_offset_seconds: 84
+    duration_seconds: 20
+    journey: checkout
+    rate_rps: 2
+residual_labels: []
+symptom_labels:
+  - label_id: checkout-payment-failure
+    kind: EDGE_DEGRADED
+    service: checkout
+    signal: dependency.payment
+    stimulus_id: payment_failure
+    start_offset_seconds: 84
+    end_offset_seconds: 104

@@ -7,6 +7,7 @@ from lab.scenarios.compiler import (
     SeedPurpose,
     compile_profile,
     load_profile,
+    materialize_symptom_labels,
     schedule_payload,
     write_artifacts,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "SeedPurpose",
     "compile_profile",
     "load_profile",
+    "materialize_symptom_labels",
     "schedule_payload",
     "write_artifacts",
 ]
