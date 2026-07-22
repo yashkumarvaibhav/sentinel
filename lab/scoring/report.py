@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Literal
 
-from lab.scoring.evaluator import RunScore
-from lab.scoring.gates import GateResult, ScoreGateConfig
+from lab.scoring.evaluator import EpisodeRunScore, RunScore, SymptomKindScore
+from lab.scoring.gates import GateResult, ScoreGateConfig, SymptomGateResult
 from lab.scoring.metrics import MetricValue
 
 
@@ -128,6 +128,114 @@ def render_report(
     return "\n".join(lines)
 
 
+def render_symptom_report(
+    *,
+    runs: tuple[EpisodeRunScore, ...],
+    gate: SymptomGateResult,
+    config: ScoreGateConfig,
+    config_fingerprint: str,
+) -> str:
+    """Render an honest development proof for episode-level symptom metrics."""
+    required = set(gate.required_kinds)
+    lines = [
+        "# Phase 2 per-symptom episode scoring proof",
+        "",
+        f"**Development gate: {'PASS' if gate.passed else 'FAIL'}**",
+        "",
+        "- Telemetry evidence: **REAL** OpenTelemetry capture bytes replayed through the "
+        "runtime detector and anti-flapping episode paths.",
+        "- Workload, event context and injected faults: **SIMULATED** and bounded to the "
+        "contained Astronomy Shop testbed.",
+        "- Seed discipline: this proof uses **DEVELOPMENT** captures only. It neither runs nor "
+        "reads held-out `cascade_night` / `combo_night` seeds.",
+        "- Label discipline: public runtime replay completes before scorer-only private labels "
+        "are opened. Predictions are matched one-to-one over half-open event-time intervals; "
+        "retries of one `episode_id` count once.",
+        f"- Runtime config fingerprint: `{config_fingerprint}`.",
+        "",
+        "## Development captures",
+        "",
+        "| Capture | Profile | Seed | Kind | Predicted | Expected | TP | FP | FN | Precision | "
+        "Recall | Detect p50/p95 |",
+        "|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for run in runs:
+        visible = tuple(
+            score for score in run.by_kind if score.predicted_count > 0 or score.expected_count > 0
+        )
+        for score in visible:
+            lines.append(
+                "| "
+                + " | ".join(
+                    (
+                        run.capture_id,
+                        run.scenario_id,
+                        str(run.seed),
+                        score.kind.value,
+                        str(score.predicted_count),
+                        str(score.expected_count),
+                        str(score.metrics.true_positive),
+                        str(score.metrics.false_positive),
+                        str(score.metrics.false_negative),
+                        _metric(score.metrics.precision),
+                        _metric(score.metrics.recall),
+                        _episode_latencies(score),
+                    )
+                )
+                + " |"
+            )
+
+    lines.extend(
+        [
+            "",
+            "## Per-kind development gates",
+            "",
+            "| Kind | Precision | Floor | Recall | Floor | Scope | Result |",
+            "|---|---:|---:|---:|---:|---|---|",
+        ]
+    )
+    for score in gate.by_kind:
+        precision_floor = config.symptom_precision_min[score.kind.value]
+        recall_floor = config.symptom_recall_min[score.kind.value]
+        gated = score.kind in required
+        passed = (
+            gated
+            and score.metrics.precision.value is not None
+            and score.metrics.precision.value >= precision_floor
+            and score.metrics.recall.value is not None
+            and score.metrics.recall.value >= recall_floor
+        )
+        result = "PASS" if passed else ("FAIL" if gated else "NOT GATED")
+        lines.append(
+            f"| {score.kind.value} | {_metric(score.metrics.precision)} | "
+            f">= {precision_floor:.3f} | {_metric(score.metrics.recall)} | "
+            f">= {recall_floor:.3f} | {'required' if gated else 'pending evidence'} | "
+            f"{result} |"
+        )
+    if gate.failures:
+        lines.extend(["", "## Failures", ""])
+        lines.extend(
+            f"- `{failure.metric}` for `{failure.scope}`: {_optional(failure.actual)}; "
+            f"requires {failure.requirement}."
+            for failure in gate.failures
+        )
+    lines.extend(
+        [
+            "",
+            "## Scope of this proof",
+            "",
+            "This development slice freezes the generic evaluator and the first measured "
+            "RESIDUAL_EXCEED / EDGE_DEGRADED baselines. Kinds without an expected or predicted "
+            "episode remain `insufficient`; they are not rendered as zero and are not "
+            "release-gated until their development scenarios supply honest labels. The final "
+            "Phase 2 gate still requires fresh held-out cascade/combo captures and every "
+            "configured symptom kind.",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def _metric(metric: MetricValue) -> str:
     return "insufficient" if metric.value is None else f"{metric.value:.3f}"
 
@@ -140,6 +248,12 @@ def _latencies(run: RunScore) -> str:
     if run.detection_latency_p50 is None or run.detection_latency_p95 is None:
         return "insufficient"
     return f"{run.detection_latency_p50:.1f}s/{run.detection_latency_p95:.1f}s"
+
+
+def _episode_latencies(score: SymptomKindScore) -> str:
+    if score.detection_latency_p50 is None or score.detection_latency_p95 is None:
+        return "insufficient"
+    return f"{score.detection_latency_p50:.1f}s/{score.detection_latency_p95:.1f}s"
 
 
 def _gate_row(name: str, metric: MetricValue, requirement: str, passed: bool) -> str:

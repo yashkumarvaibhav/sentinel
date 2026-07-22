@@ -162,6 +162,24 @@ def test_score_gates_fail_closed_on_insufficient_or_incomplete_evidence() -> Non
             residual_recall_min=0.9,
             quiet_day_false_positive_rate_max=0.0,
             telemetry_completeness_min=0.95,
+            symptom_precision_min={
+                "RESIDUAL_EXCEED": 0.9,
+                "RATIO_DEFORM": 0.9,
+                "LOG_BURST": 0.9,
+                "EDGE_DEGRADED": 0.9,
+                "SATURATION": 0.9,
+                "DROP": 0.9,
+                "SILENCE": 0.9,
+            },
+            symptom_recall_min={
+                "RESIDUAL_EXCEED": 0.9,
+                "RATIO_DEFORM": 0.9,
+                "LOG_BURST": 0.9,
+                "EDGE_DEGRADED": 0.9,
+                "SATURATION": 0.9,
+                "DROP": 0.9,
+                "SILENCE": 0.9,
+            },
         ),
     )
 

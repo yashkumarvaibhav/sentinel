@@ -1,0 +1,260 @@
+"""Per-symptom scoring matches durable episodes without leaking private labels."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
+
+import lab.scoring.capture as capture_scoring
+import pytest
+from lab.scenarios.models import ScoredSymptomKind, SymptomLabelInterval
+from lab.scoring.evaluator import score_symptom_episodes
+from lab.scoring.gates import evaluate_symptom_gates, load_gate_config
+
+from common.config import load_config
+from contracts import EpisodeStatus, SymptomEpisode, SymptomKind
+
+START = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_half_open_temporal_boundaries_do_not_manufacture_episode_matches() -> None:
+    label = _label("expected-edge", SymptomKind.EDGE_DEGRADED, 10.0, 20.0)
+    touching_before = _episode("before", SymptomKind.EDGE_DEGRADED, 0.0, 10.0)
+    touching_after = _episode("after", SymptomKind.EDGE_DEGRADED, 20.0, 30.0)
+
+    missed = score_symptom_episodes(
+        capture_id="boundary-capture",
+        scenario_id="cascade_night",
+        seed=401,
+        seed_purpose="development",
+        anchor_ts=START,
+        evaluation_end_ts=START + timedelta(seconds=40),
+        episodes=(touching_after, touching_before),
+        labels=(label,),
+    ).score_for(SymptomKind.EDGE_DEGRADED)
+
+    assert (missed.metrics.true_positive, missed.metrics.false_positive) == (0, 2)
+    assert missed.metrics.false_negative == 1
+
+    overlapping = _episode("overlap", SymptomKind.EDGE_DEGRADED, 19.0, 21.0)
+    matched = score_symptom_episodes(
+        capture_id="boundary-capture",
+        scenario_id="cascade_night",
+        seed=401,
+        seed_purpose="development",
+        anchor_ts=START,
+        evaluation_end_ts=START + timedelta(seconds=40),
+        episodes=(overlapping,),
+        labels=(label,),
+    ).score_for(SymptomKind.EDGE_DEGRADED)
+
+    assert matched.metrics.true_positive == 1
+    assert matched.metrics.false_positive == 0
+    assert matched.metrics.false_negative == 0
+
+
+def test_episode_matching_is_one_to_one_and_retry_revisions_are_deduplicated() -> None:
+    label = _label("expected-edge", SymptomKind.EDGE_DEGRADED, 10.0, 20.0)
+    active_retry = _episode(
+        "episode-a",
+        SymptomKind.EDGE_DEGRADED,
+        11.0,
+        None,
+        revision=1,
+    )
+    closed_latest = _episode(
+        "episode-a",
+        SymptomKind.EDGE_DEGRADED,
+        11.0,
+        18.0,
+        revision=2,
+    )
+    duplicate_prediction = _episode(
+        "episode-b",
+        SymptomKind.EDGE_DEGRADED,
+        14.0,
+        19.0,
+    )
+
+    score = score_symptom_episodes(
+        capture_id="duplicate-capture",
+        scenario_id="cascade_night",
+        seed=401,
+        seed_purpose="development",
+        anchor_ts=START,
+        evaluation_end_ts=START + timedelta(seconds=30),
+        episodes=(closed_latest, duplicate_prediction, active_retry),
+        labels=(label,),
+    ).score_for(SymptomKind.EDGE_DEGRADED)
+
+    assert score.predicted_count == 2
+    assert score.expected_count == 1
+    assert score.metrics.true_positive == 1
+    assert score.metrics.false_positive == 1
+    assert score.metrics.false_negative == 0
+    assert score.metrics.precision.value == 0.5
+    assert score.metrics.recall.value == 1.0
+
+
+def test_missing_expected_and_predicted_kinds_keep_insufficient_denominators() -> None:
+    edge_label = _label("expected-edge", SymptomKind.EDGE_DEGRADED, 10.0, 20.0)
+    unexpected_log = _episode("unexpected-log", SymptomKind.LOG_BURST, 12.0, 18.0)
+
+    score = score_symptom_episodes(
+        capture_id="missing-kind-capture",
+        scenario_id="cascade_night",
+        seed=401,
+        seed_purpose="development",
+        anchor_ts=START,
+        evaluation_end_ts=START + timedelta(seconds=30),
+        episodes=(unexpected_log,),
+        labels=(edge_label,),
+    )
+    edge = score.score_for(SymptomKind.EDGE_DEGRADED)
+    log = score.score_for(SymptomKind.LOG_BURST)
+    residual = score.score_for(SymptomKind.RESIDUAL_EXCEED)
+
+    assert edge.metrics.precision.status == "insufficient"
+    assert edge.metrics.recall.value == 0.0
+    assert log.metrics.precision.value == 0.0
+    assert log.metrics.recall.status == "insufficient"
+    assert residual.metrics.precision.status == "insufficient"
+    assert residual.metrics.recall.status == "insufficient"
+
+
+def test_symptom_gates_fail_closed_for_missing_or_below_floor_kinds() -> None:
+    score = score_symptom_episodes(
+        capture_id="gate-capture",
+        scenario_id="cascade_night",
+        seed=401,
+        seed_purpose="development",
+        anchor_ts=START,
+        evaluation_end_ts=START + timedelta(seconds=30),
+        episodes=(_episode("unexpected-log", SymptomKind.LOG_BURST, 12.0, 18.0),),
+        labels=(_label("expected-edge", SymptomKind.EDGE_DEGRADED, 10.0, 20.0),),
+    )
+    config = load_gate_config(REPO_ROOT / "lab" / "scoring" / "config.yml")
+
+    result = evaluate_symptom_gates(
+        (score,),
+        config,
+        required_kinds=(
+            SymptomKind.RESIDUAL_EXCEED,
+            SymptomKind.LOG_BURST,
+            SymptomKind.EDGE_DEGRADED,
+        ),
+    )
+
+    assert not result.passed
+    assert {(failure.metric, failure.scope) for failure in result.failures} == {
+        ("symptom_precision", "RESIDUAL_EXCEED"),
+        ("symptom_recall", "RESIDUAL_EXCEED"),
+        ("symptom_precision", "LOG_BURST"),
+        ("symptom_recall", "LOG_BURST"),
+        ("symptom_precision", "EDGE_DEGRADED"),
+        ("symptom_recall", "EDGE_DEGRADED"),
+    }
+
+
+def test_capture_scorer_opens_private_labels_only_after_runtime_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    replay = SimpleNamespace(
+        capture_id="ordered-capture",
+        scenario_id="cascade_night",
+        seed=401,
+        seed_purpose="development",
+        anchor_ts=START,
+        steps=(SimpleNamespace(tick_ts=START + timedelta(seconds=1), results=()),),
+        active_episodes=(),
+    )
+
+    def replay_public(*_: object, **__: object) -> object:
+        calls.append("runtime-replay")
+        return replay
+
+    def read_labels(_: Path) -> bytes:
+        assert calls == ["runtime-replay"]
+        calls.append("private-labels")
+        return (
+            b'{"intervals":[],"scenario_id":"cascade_night","seed":401,'
+            b'"seed_purpose":"development","symptom_intervals":[],"version":1}'
+        )
+
+    monkeypatch.setattr(capture_scoring, "load_runtime_capture", lambda _: object())
+    monkeypatch.setattr(capture_scoring, "replay_edge_detection", replay_public)
+    monkeypatch.setattr(capture_scoring, "load_private_labels", read_labels)
+    config = load_config(REPO_ROOT / "config")
+
+    score = capture_scoring.score_edge_episode_capture(
+        Path("unused"),
+        detector=config.detectors,
+        replay_config_fingerprint=config.fingerprint,
+    )
+
+    assert calls == ["runtime-replay", "private-labels"]
+    assert score.score_for(SymptomKind.EDGE_DEGRADED).metrics.precision.status == "insufficient"
+
+
+def _label(
+    label_id: str,
+    kind: SymptomKind,
+    start: float,
+    end: float,
+) -> SymptomLabelInterval:
+    route = {
+        SymptomKind.EDGE_DEGRADED: ("checkout", "dependency.payment"),
+        SymptomKind.LOG_BURST: ("payment", "log_template_rate"),
+        SymptomKind.RESIDUAL_EXCEED: ("frontend", "request_rate"),
+    }
+    service, signal = route[kind]
+    return SymptomLabelInterval(
+        label_id=label_id,
+        kind=cast(ScoredSymptomKind, kind.value),
+        service=service,
+        signal=signal,
+        start_offset_seconds=start,
+        end_offset_seconds=end,
+    )
+
+
+def _episode(
+    episode_id: str,
+    kind: SymptomKind,
+    opened: float,
+    closed: float | None,
+    *,
+    revision: int = 1,
+) -> SymptomEpisode:
+    route = {
+        SymptomKind.EDGE_DEGRADED: ("checkout", "dependency.payment"),
+        SymptomKind.LOG_BURST: ("payment", "log_template_rate"),
+        SymptomKind.RESIDUAL_EXCEED: ("frontend", "request_rate"),
+    }
+    service, signal = route[kind]
+    opened_ts = START + timedelta(seconds=opened)
+    confirmed_ts = opened_ts + timedelta(seconds=1)
+    last_breach_ts = confirmed_ts
+    closed_ts = None if closed is None else START + timedelta(seconds=closed)
+    return SymptomEpisode(
+        episode_id=episode_id,
+        kind=kind,
+        service=service,
+        signal=signal,
+        status=EpisodeStatus.ACTIVE if closed is None else EpisodeStatus.CLOSED,
+        opened_ts=opened_ts,
+        confirmed_ts=confirmed_ts,
+        last_breach_ts=last_breach_ts,
+        closed_ts=closed_ts,
+        peak_score=0.9,
+        breach_tick_count=3,
+        revision=revision,
+        opening_symptom_id=f"{episode_id}-open",
+        peak_symptom_id=f"{episode_id}-peak",
+        latest_symptom_id=f"{episode_id}-latest",
+        evidence_refs=(f"{episode_id}-evidence",),
+    )

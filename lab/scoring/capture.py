@@ -4,31 +4,35 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
+from datetime import timedelta
 from pathlib import Path
 from typing import Literal
 
 from pydantic import Field
 
 from common.config import DetectorConfig, load_config
+from contracts import SymptomEpisode, SymptomKind
+from detection.pipeline import SymptomEpisodePipeline
 from lab.captures import (
     DecompositionReplay,
     load_private_labels,
     load_runtime_capture,
     replay_decomposition,
 )
+from lab.captures.edge_transcript import replay_edge_detection
 from lab.scenarios import load_profile
 from lab.scenarios.models import LabModel, ResidualLabelInterval, SymptomLabelInterval
-from lab.scoring.evaluator import RunScore
-from lab.scoring.gates import evaluate_gates, load_gate_config
+from lab.scoring.evaluator import EpisodeRunScore, RunScore, score_symptom_episodes
+from lab.scoring.gates import evaluate_gates, evaluate_symptom_gates, load_gate_config
 from lab.scoring.metrics import binary_metrics
-from lab.scoring.report import render_report
+from lab.scoring.report import render_report, render_symptom_report
 
 
 class CaptureLabels(LabModel):
     version: Literal[1]
     scenario_id: str = Field(min_length=1, max_length=128)
     seed: int
-    seed_purpose: Literal["held_out"]
+    seed_purpose: Literal["development", "held_out"]
     intervals: tuple[ResidualLabelInterval, ...]
     symptom_intervals: tuple[SymptomLabelInterval, ...] = ()
 
@@ -52,9 +56,12 @@ def score_decomposition_replay(
     *,
     private_labels: bytes,
 ) -> RunScore:
-    labels = CaptureLabels.model_validate_json(private_labels)
-    if labels.scenario_id != replay.scenario_id or labels.seed != replay.seed:
-        raise ValueError("private label identity does not match capture transcript")
+    labels = _capture_labels(
+        private_labels,
+        scenario_id=replay.scenario_id,
+        seed=replay.seed,
+        seed_purpose=replay.seed_purpose,
+    )
     scored = tuple(item for item in replay.steps if item.frame is not None)
     offsets = tuple((item.observation.ts - replay.anchor_ts).total_seconds() for item in scored)
     predicted = tuple(item.frame.residual_score > 0.0 for item in scored if item.frame is not None)
@@ -89,13 +96,145 @@ def score_decomposition_replay(
     )
 
 
+def score_residual_episode_capture(
+    root: Path,
+    *,
+    detector: DetectorConfig,
+    replay_config_fingerprint: str,
+) -> EpisodeRunScore:
+    """Finish public decomposition/episode replay before opening private labels."""
+    capture = load_runtime_capture(root)
+    replay = replay_decomposition(
+        capture,
+        detector=detector,
+        replay_config_fingerprint=replay_config_fingerprint,
+    )
+    pipeline = SymptomEpisodePipeline(configuration=detector.episodes)
+    revisions: list[SymptomEpisode] = []
+    for step in replay.steps:
+        if step.frame is None:
+            continue
+        transition = pipeline.observe_frame(step.frame)
+        if transition.episode is not None:
+            revisions.append(transition.episode)
+    revisions.extend(pipeline.active_episodes())
+    evaluation_end = replay.anchor_ts + timedelta(
+        seconds=len(replay.steps) * capture.manifest.telemetry.tick_seconds
+    )
+
+    # This is deliberately after the complete runtime replay above.
+    labels = _capture_labels(
+        load_private_labels(root),
+        scenario_id=replay.scenario_id,
+        seed=replay.seed,
+        seed_purpose=replay.seed_purpose,
+    )
+    residual_labels = tuple(
+        SymptomLabelInterval(
+            label_id=label.label_id,
+            kind=SymptomKind.RESIDUAL_EXCEED.value,
+            service=capture.manifest.telemetry.logical_service,
+            signal=capture.manifest.telemetry.logical_signal,
+            start_offset_seconds=float(label.start_offset_seconds),
+            end_offset_seconds=float(label.end_offset_seconds),
+        )
+        for label in labels.intervals
+    )
+    explicit_residual = tuple(
+        label
+        for label in labels.symptom_intervals
+        if label.kind == SymptomKind.RESIDUAL_EXCEED.value
+    )
+    return score_symptom_episodes(
+        capture_id=replay.capture_id,
+        scenario_id=replay.scenario_id,
+        seed=replay.seed,
+        seed_purpose=replay.seed_purpose,
+        anchor_ts=replay.anchor_ts,
+        evaluation_end_ts=evaluation_end,
+        episodes=tuple(revisions),
+        labels=residual_labels + explicit_residual,
+    )
+
+
+def score_edge_episode_capture(
+    root: Path,
+    *,
+    detector: DetectorConfig,
+    replay_config_fingerprint: str,
+) -> EpisodeRunScore:
+    """Finish public edge/episode replay before opening private labels."""
+    capture = load_runtime_capture(root)
+    replay = replay_edge_detection(
+        capture,
+        detector=detector,
+        replay_config_fingerprint=replay_config_fingerprint,
+    )
+    revisions = (
+        tuple(
+            result.transition.episode
+            for step in replay.steps
+            for result in step.results
+            if result.transition is not None and result.transition.episode is not None
+        )
+        + replay.active_episodes
+    )
+    if not replay.steps:
+        raise ValueError("edge replay produced no completed evaluation ticks")
+
+    # This is deliberately after the complete runtime replay above.
+    labels = _capture_labels(
+        load_private_labels(root),
+        scenario_id=replay.scenario_id,
+        seed=replay.seed,
+        seed_purpose=replay.seed_purpose,
+    )
+    return score_symptom_episodes(
+        capture_id=replay.capture_id,
+        scenario_id=replay.scenario_id,
+        seed=replay.seed,
+        seed_purpose=replay.seed_purpose,
+        anchor_ts=replay.anchor_ts,
+        evaluation_end_ts=replay.steps[-1].tick_ts,
+        episodes=revisions,
+        labels=tuple(
+            label
+            for label in labels.symptom_intervals
+            if label.kind == SymptomKind.EDGE_DEGRADED.value
+        ),
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m lab.scoring.capture")
     parser.add_argument("--repo-root", type=Path, required=True)
-    parser.add_argument("--captures-root", type=Path, required=True)
+    parser.add_argument("--captures-root", type=Path)
+    parser.add_argument("--development-residual-capture", type=Path)
+    parser.add_argument("--development-edge-capture", type=Path)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args(argv)
     repo_root = args.repo_root.resolve()
+    development_paths = (
+        args.development_residual_capture,
+        args.development_edge_capture,
+    )
+    if any(path is not None for path in development_paths):
+        if (
+            not all(path is not None for path in development_paths)
+            or args.captures_root is not None
+        ):
+            parser.error(
+                "development symptom scoring requires both development capture paths and no "
+                "--captures-root"
+            )
+        return _development_symptom_main(
+            repo_root=repo_root,
+            residual_capture=args.development_residual_capture,
+            edge_capture=args.development_edge_capture,
+            report_path=args.report.resolve(),
+        )
+    if args.captures_root is None:
+        parser.error("--captures-root is required for the held-out decomposition gate")
     captures = tuple(
         sorted(
             path
@@ -145,6 +284,46 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0 if gate.passed else 1
 
 
+def _development_symptom_main(
+    *,
+    repo_root: Path,
+    residual_capture: Path,
+    edge_capture: Path,
+    report_path: Path,
+) -> int:
+    config = load_config(repo_root / "config")
+    runs = (
+        score_residual_episode_capture(
+            residual_capture.resolve(),
+            detector=config.detectors,
+            replay_config_fingerprint=config.fingerprint,
+        ),
+        score_edge_episode_capture(
+            edge_capture.resolve(),
+            detector=config.detectors,
+            replay_config_fingerprint=config.fingerprint,
+        ),
+    )
+    if any(run.seed_purpose != "development" for run in runs):
+        raise ValueError("development symptom proof cannot consume held-out captures")
+    gate_config = load_gate_config(repo_root / "lab" / "scoring" / "config.yml")
+    gate = evaluate_symptom_gates(
+        runs,
+        gate_config,
+        required_kinds=(SymptomKind.RESIDUAL_EXCEED, SymptomKind.EDGE_DEGRADED),
+    )
+    report = render_symptom_report(
+        runs=runs,
+        gate=gate,
+        config=gate_config,
+        config_fingerprint=config.fingerprint,
+    )
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(report, encoding="utf-8")
+    print(report, flush=True)
+    return 0 if gate.passed else 1
+
+
 def _is_labeled(offset: float, labels: tuple[ResidualLabelInterval, ...]) -> bool:
     return any(label.start_offset_seconds <= offset < label.end_offset_seconds for label in labels)
 
@@ -160,6 +339,23 @@ def _first_detection_latency(
         None,
     )
     return None if first is None else first - start_offset
+
+
+def _capture_labels(
+    private_labels: bytes,
+    *,
+    scenario_id: str,
+    seed: int,
+    seed_purpose: Literal["development", "held_out"],
+) -> CaptureLabels:
+    labels = CaptureLabels.model_validate_json(private_labels)
+    if (
+        labels.scenario_id != scenario_id
+        or labels.seed != seed
+        or labels.seed_purpose != seed_purpose
+    ):
+        raise ValueError("private label identity does not match capture transcript")
+    return labels
 
 
 if __name__ == "__main__":

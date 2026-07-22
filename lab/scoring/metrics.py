@@ -26,6 +26,17 @@ class BinaryMetrics:
     false_positive_rate: MetricValue
 
 
+@dataclass(frozen=True)
+class EpisodeMetrics:
+    """Event-level precision/recall where true negatives are not enumerable."""
+
+    true_positive: int
+    false_positive: int
+    false_negative: int
+    precision: MetricValue
+    recall: MetricValue
+
+
 def binary_metrics(*, predicted: tuple[bool, ...], expected: tuple[bool, ...]) -> BinaryMetrics:
     if len(predicted) != len(expected):
         raise ValueError("predicted and expected lengths differ")
@@ -49,6 +60,28 @@ def binary_metrics(*, predicted: tuple[bool, ...], expected: tuple[bool, ...]) -
         precision=_ratio(true_positive, true_positive + false_positive),
         recall=_ratio(true_positive, true_positive + false_negative),
         false_positive_rate=_ratio(false_positive, false_positive + true_negative),
+    )
+
+
+def episode_metrics(
+    *,
+    matched_count: int,
+    predicted_count: int,
+    expected_count: int,
+) -> EpisodeMetrics:
+    """Build exact one-to-one episode metrics without inventing true negatives."""
+    if min(matched_count, predicted_count, expected_count) < 0:
+        raise ValueError("episode counts must be non-negative")
+    if matched_count > predicted_count or matched_count > expected_count:
+        raise ValueError("matched episodes cannot exceed predictions or expectations")
+    false_positive = predicted_count - matched_count
+    false_negative = expected_count - matched_count
+    return EpisodeMetrics(
+        true_positive=matched_count,
+        false_positive=false_positive,
+        false_negative=false_negative,
+        precision=_ratio(matched_count, predicted_count),
+        recall=_ratio(matched_count, expected_count),
     )
 
 
