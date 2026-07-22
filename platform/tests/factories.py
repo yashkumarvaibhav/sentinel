@@ -5,6 +5,8 @@ from common.config import (
     BehavioralRatioRuleConfig,
     ChangePointSaturationConfig,
     DropRuleConfig,
+    EdgeDegradationConfig,
+    EdgeDegradationRuleConfig,
     LivenessConfig,
     LogTemplateConfig,
     SequenceRatioRuleConfig,
@@ -103,4 +105,44 @@ def liveness_config() -> LivenessConfig:
                 full_score_age_seconds=300.0,
             )
         },
+    )
+
+
+def edge_degradation_config() -> EdgeDegradationConfig:
+    return EdgeDegradationConfig(
+        rules=(
+            EdgeDegradationRuleConfig(
+                caller="frontend",
+                downstream="checkout",
+                minimum_samples=5,
+                latency_baseline_floor_ms=5.0,
+                error_rate_baseline_floor=0.01,
+                trigger_relative_latency_rise=0.5,
+                full_score_relative_latency_rise=2.0,
+                trigger_relative_error_rise=1.0,
+                full_score_relative_error_rise=5.0,
+            ),
+            EdgeDegradationRuleConfig(
+                caller="frontend",
+                downstream="cart",
+                minimum_samples=5,
+                latency_baseline_floor_ms=5.0,
+                error_rate_baseline_floor=0.01,
+                trigger_relative_latency_rise=0.5,
+                full_score_relative_latency_rise=2.0,
+                trigger_relative_error_rise=1.0,
+                full_score_relative_error_rise=5.0,
+            ),
+            EdgeDegradationRuleConfig(
+                caller="checkout",
+                downstream="payment",
+                minimum_samples=5,
+                latency_baseline_floor_ms=5.0,
+                error_rate_baseline_floor=0.01,
+                trigger_relative_latency_rise=0.5,
+                full_score_relative_latency_rise=2.0,
+                trigger_relative_error_rise=1.0,
+                full_score_relative_error_rise=5.0,
+            ),
+        )
     )

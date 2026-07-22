@@ -29,6 +29,7 @@ from detection.decompose import DecompositionEngine, DecompositionWorker
 from tests.factories import (
     behavioral_ratio_config,
     change_point_saturation_config,
+    edge_degradation_config,
     liveness_config,
     log_template_config,
 )
@@ -151,6 +152,7 @@ async def _round_trip_clickhouse(config: Settings, client: httpx.AsyncClient, su
         log_templates=log_template_config(),
         change_point_saturation=change_point_saturation_config(),
         liveness=liveness_config(),
+        edge_degradation=edge_degradation_config(),
     )
     engine = DecompositionEngine(configuration=detector, dedup_capacity=100)
     worker = DecompositionWorker(engine=engine, sink=repository)

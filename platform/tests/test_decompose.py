@@ -18,6 +18,7 @@ from detection.decompose import (
 from tests.factories import (
     behavioral_ratio_config,
     change_point_saturation_config,
+    edge_degradation_config,
     liveness_config,
     log_template_config,
 )
@@ -230,6 +231,7 @@ def _configuration() -> DetectorConfig:
         log_templates=log_template_config(),
         change_point_saturation=change_point_saturation_config(),
         liveness=liveness_config(),
+        edge_degradation=edge_degradation_config(),
     )
 
 

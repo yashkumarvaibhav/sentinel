@@ -51,6 +51,10 @@ def test_committed_config_loads_with_cross_file_references_and_stable_fingerprin
     assert (
         first.detectors.liveness.silence_rules["frontend.request_rate"].maximum_age_seconds == 120.0
     )
+    assert len(first.detectors.edge_degradation.rules) == 4
+    assert first.detectors.edge_degradation.rules[0].caller == "frontend"
+    assert first.detectors.edge_degradation.rules[0].downstream == "checkout"
+    assert first.detectors.edge_degradation.rules[0].minimum_samples == 20
     assert any(cohort.protected for cohort in first.cohorts.cohorts)
     assert {slo.service for slo in first.slos.slos} <= {
         service.service for service in first.topology.services
@@ -164,6 +168,34 @@ def test_config_models_are_immutable() -> None:
                 document["liveness"]["drop_rules"]["frontend.request_rate"],
             ),
             "unknown topology service",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["edge_degradation"]["rules"][0].__setitem__(
+                "full_score_relative_latency_rise", 0.25
+            ),
+            "full_score_relative_latency_rise",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["edge_degradation"]["rules"][0].__setitem__(
+                "error_rate_baseline_floor", 0.0
+            ),
+            "error_rate_baseline_floor must be greater than zero",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["edge_degradation"]["rules"][0].__setitem__(
+                "downstream", "payment"
+            ),
+            "is not a configured topology dependency",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["edge_degradation"]["rules"].append(
+                document["edge_degradation"]["rules"][0]
+            ),
+            "unique caller/downstream pairs",
         ),
     ],
 )

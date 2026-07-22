@@ -341,6 +341,51 @@ class LivenessConfig(ConfigModel):
     silence_rules: dict[SignalName, SilenceRuleConfig] = Field(min_length=1)
 
 
+class EdgeDegradationRuleConfig(ConfigModel):
+    """Evidence sufficiency and deformation policy for one dependency edge."""
+
+    caller: Identifier
+    downstream: Identifier
+    minimum_samples: int = Field(ge=3, le=1_000_000)
+    latency_baseline_floor_ms: PositiveFloat
+    error_rate_baseline_floor: Probability
+    trigger_relative_latency_rise: PositiveFloat
+    full_score_relative_latency_rise: PositiveFloat
+    trigger_relative_error_rise: PositiveFloat
+    full_score_relative_error_rise: PositiveFloat
+
+    @model_validator(mode="after")
+    def validate_edge_policy(self) -> Self:
+        if self.caller == self.downstream:
+            raise ValueError("an edge caller and downstream must differ")
+        if self.error_rate_baseline_floor == 0.0:
+            raise ValueError("error_rate_baseline_floor must be greater than zero")
+        if self.full_score_relative_latency_rise < self.trigger_relative_latency_rise:
+            raise ValueError(
+                "full_score_relative_latency_rise must be greater than or equal to "
+                "trigger_relative_latency_rise"
+            )
+        if self.full_score_relative_error_rise < self.trigger_relative_error_rise:
+            raise ValueError(
+                "full_score_relative_error_rise must be greater than or equal to "
+                "trigger_relative_error_rise"
+            )
+        return self
+
+
+class EdgeDegradationConfig(ConfigModel):
+    """Operator-owned rules for explicitly monitored topology edges."""
+
+    rules: tuple[EdgeDegradationRuleConfig, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def unique_edges(self) -> Self:
+        edges = [(rule.caller, rule.downstream) for rule in self.rules]
+        if len(edges) != len(set(edges)):
+            raise ValueError("edge degradation rules must identify unique caller/downstream pairs")
+        return self
+
+
 class DetectorConfig(ConfigModel):
     version: Literal[1]
     feature_window_seconds: int = Field(ge=1, le=3600)
@@ -354,6 +399,7 @@ class DetectorConfig(ConfigModel):
     log_templates: LogTemplateConfig
     change_point_saturation: ChangePointSaturationConfig
     liveness: LivenessConfig
+    edge_degradation: EdgeDegradationConfig
 
     @model_validator(mode="after")
     def validate_watermark(self) -> Self:
@@ -474,6 +520,11 @@ def _load[T: ConfigModel](path: Path, model: type[T]) -> T:
 
 def _validate_references(config: SentinelConfig) -> None:
     services = {service.service for service in config.topology.services}
+    topology_edges = {
+        (service.service, dependency)
+        for service in config.topology.services
+        for dependency in service.dependencies
+    }
     for slo in config.slos.slos:
         if slo.service not in services:
             raise ConfigLoadError(f"slo.yml: {slo.service} references an unknown topology service")
@@ -495,6 +546,13 @@ def _validate_references(config: SentinelConfig) -> None:
                 raise ConfigLoadError(
                     f"{filename}: {signal} references an unknown topology service"
                 )
+    for rule in config.detectors.edge_degradation.rules:
+        edge = (rule.caller, rule.downstream)
+        if edge not in topology_edges:
+            raise ConfigLoadError(
+                "detector-params.yml: "
+                f"{rule.caller}->{rule.downstream} is not a configured topology dependency"
+            )
 
 
 def _reject_ground_truth(value: object, *, filename: str) -> None:
