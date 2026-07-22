@@ -30,7 +30,7 @@ from lab.captures.models import CaptureSeedPurpose, CaptureTelemetry
 from lab.captures.store import CaptureMetadata, load_runtime_capture, write_capture
 from lab.captures.transcript import replay_decomposition
 from lab.scenarios import SeedPurpose, compile_profile, load_profile, write_artifacts
-from lab.scoring.live import run_live_scenario
+from lab.scoring.live import render_stimulus_executions, run_live_scenario
 
 _SAFE_ID = re.compile(r"^[a-z0-9](?:[-a-z0-9]{0,126}[a-z0-9])?$")
 _EMPTY_PHASE_ONE_ENRICHMENT = b'{"items":[],"version":1}\n'
@@ -60,6 +60,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     collect.add_argument("--telemetry", type=Path, required=True)
     collect.add_argument("--context", type=Path, required=True)
     collect.add_argument("--labels", type=Path, required=True)
+    collect.add_argument("--stimulus-executions", type=Path, required=True)
     collect.add_argument("--output", type=Path, required=True)
     collect.add_argument("--capture-id", required=True)
     collect.add_argument("--scenario-id", required=True)
@@ -102,6 +103,8 @@ def _record(args: argparse.Namespace) -> int:
         artifacts=artifacts,
         invocation=invocation,
     )
+    stimulus_executions_path = work / "stimulus-executions.json"
+    stimulus_executions_path.write_bytes(render_stimulus_executions(telemetry.stimulus_executions))
     print(f"[capture] {capture_id}: snapshotting raw-topic ends", flush=True)
     after = _container_snapshot(repo_root)
     before_path = work / "before.json"
@@ -125,6 +128,8 @@ def _record(args: argparse.Namespace) -> int:
             _container_path(repo_root, paths.context_feed),
             "--labels",
             _container_path(repo_root, paths.labels),
+            "--stimulus-executions",
+            _container_path(repo_root, stimulus_executions_path),
             "--output",
             _container_path(repo_root, output),
             "--capture-id",
@@ -229,7 +234,10 @@ async def _collect(args: argparse.Namespace) -> int:
         schedule=args.schedule.read_bytes(),
         context_feed=args.context.read_bytes(),
         private_labels=args.labels.read_bytes(),
-        enrichments={"phase-1.json": _EMPTY_PHASE_ONE_ENRICHMENT},
+        enrichments={
+            "phase-1.json": _EMPTY_PHASE_ONE_ENRICHMENT,
+            "stimulus-executions.json": args.stimulus_executions.read_bytes(),
+        },
     )
     size_bytes = sum(item.size_bytes for topic in manifest.topics for item in topic.records)
     print(

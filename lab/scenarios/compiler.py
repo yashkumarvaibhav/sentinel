@@ -14,7 +14,7 @@ from pydantic import ValidationError
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
 
-from lab.scenarios.models import ScenarioProfile
+from lab.scenarios.models import ScenarioProfile, Stimulus
 
 
 class SeedPurpose(StrEnum):
@@ -41,6 +41,7 @@ class CompiledSchedule:
     request_mix_seed: int
     target: Literal["astronomy-shop/frontend-proxy"]
     phases: tuple[CompiledLoadPhase, ...]
+    stimuli: tuple[Stimulus, ...]
 
 
 @dataclass(frozen=True)
@@ -116,6 +117,7 @@ def compile_profile(
         request_mix_seed=request_mix_seed,
         target=profile.telemetry.target,
         phases=tuple(phases),
+        stimuli=profile.stimuli,
     )
     context_feed: dict[str, object] = {
         "version": 1,
@@ -129,6 +131,7 @@ def compile_profile(
         "seed": seed,
         "seed_purpose": purpose.value,
         "intervals": [label.model_dump(mode="json") for label in profile.residual_labels],
+        "symptom_intervals": [label.model_dump(mode="json") for label in profile.symptom_labels],
     }
     return ScenarioArtifacts(schedule=schedule, context_feed=context_feed, labels=labels)
 
@@ -168,6 +171,7 @@ def _schedule_payload(schedule: CompiledSchedule) -> dict[str, object]:
             }
             for phase in schedule.phases
         ],
+        "stimuli": [stimulus.model_dump(mode="json") for stimulus in schedule.stimuli],
     }
 
 

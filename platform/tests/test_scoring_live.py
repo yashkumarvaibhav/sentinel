@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
+import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from lab.scenarios import SeedPurpose, compile_profile, load_profile
-from lab.scoring.live import build_k6_job, expected_request_count
+from lab.scenarios.compiler import CompiledSchedule
+from lab.scenarios.models import ScenarioProfile
+from lab.scoring.live import (
+    build_k6_job,
+    execute_stimuli,
+    expected_request_count,
+    render_stimulus_executions,
+)
 
 SCENARIO_ROOT = Path(__file__).resolve().parents[2] / "lab" / "scenarios"
 
@@ -28,3 +38,156 @@ def test_live_job_is_resource_capped_in_namespace_with_no_target_override() -> N
     assert "TARGET" not in env
     assert env["SENTINEL_RUN_ID"] == "run-abc"
     assert expected_request_count(artifacts.schedule) == 712
+
+
+def test_live_stimuli_use_fixed_owned_resources_and_restore_flagd() -> None:
+    schedule = _fault_schedule(flag_variant="100x")
+    commands: list[list[str]] = []
+    waits: list[datetime] = []
+    anchor = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
+
+    def runner(command: list[str], *, input_text: str | None = None, timeout: int = 120) -> str:
+        del input_text, timeout
+        commands.append(command)
+        if "get" in command and "configmap" in command:
+            return _flag_config_map()
+        return ""
+
+    executions = execute_stimuli(
+        repo_root=SCENARIO_ROOT.parents[1],
+        schedule=schedule,
+        anchor_ts=anchor,
+        runner=runner,
+        waiter=waits.append,
+        clock=lambda: anchor + timedelta(seconds=65),
+    )
+
+    assert waits == [anchor + timedelta(seconds=64), anchor + timedelta(seconds=84)]
+    assert {item.stimulus_id for item in executions} == {"ad-pressure", "email-leak"}
+    rendered_executions = json.loads(render_stimulus_executions(executions))
+    assert [item["stimulus_id"] for item in rendered_executions["items"]] == [
+        "ad-pressure",
+        "email-leak",
+    ]
+    rendered = [" ".join(command) for command in commands]
+    assert any("-n otel-demo patch configmap flagd-config" in item for item in rendered)
+    assert any("-n otel-demo rollout restart deployment/flagd" in item for item in rendered)
+    assert any("apply -f" in item and "ad-cpu-pressure.yaml" in item for item in rendered)
+    assert any("delete -f" in item and "ad-cpu-pressure.yaml" in item for item in rendered)
+    patches = [command[-1] for command in commands if "patch" in command]
+    assert any(
+        json.loads(json.loads(patch)["data"]["demo.flagd.json"])["flags"]["emailMemoryLeak"][
+            "defaultVariant"
+        ]
+        == "100x"
+        for patch in patches
+    )
+    assert '"defaultVariant": "off"' in json.loads(patches[-1])["data"]["demo.flagd.json"]
+
+
+def test_live_stimulus_failure_still_restores_flagd() -> None:
+    schedule = _fault_schedule(flag_variant="100x", flag_id="a-flag", chaos_id="z-chaos")
+    commands: list[list[str]] = []
+    anchor = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
+
+    def runner(command: list[str], *, input_text: str | None = None, timeout: int = 120) -> str:
+        del input_text, timeout
+        commands.append(command)
+        if "get" in command and "configmap" in command:
+            return _flag_config_map()
+        if "apply" in command:
+            raise RuntimeError("injection failed")
+        return ""
+
+    with pytest.raises(RuntimeError, match="injection failed"):
+        execute_stimuli(
+            repo_root=SCENARIO_ROOT.parents[1],
+            schedule=schedule,
+            anchor_ts=anchor,
+            runner=runner,
+            waiter=lambda _: None,
+            clock=lambda: anchor,
+        )
+
+    patches = [command[-1] for command in commands if "patch" in command]
+    assert len(patches) == 2
+    assert '"defaultVariant": "off"' in json.loads(patches[-1])["data"]["demo.flagd.json"]
+    assert any(
+        "delete" in command and any("ad-cpu-pressure.yaml" in item for item in command)
+        for command in commands
+    )
+
+
+def test_unknown_flag_variant_fails_before_any_mutation() -> None:
+    commands: list[list[str]] = []
+
+    def runner(command: list[str], *, input_text: str | None = None, timeout: int = 120) -> str:
+        del input_text, timeout
+        commands.append(command)
+        if "get" in command and "configmap" in command:
+            return _flag_config_map()
+        return ""
+
+    with pytest.raises(ValueError, match="unknown flagd variant"):
+        execute_stimuli(
+            repo_root=SCENARIO_ROOT.parents[1],
+            schedule=_fault_schedule(flag_variant="not-real"),
+            anchor_ts=datetime(2026, 7, 22, 12, 0, tzinfo=UTC),
+            runner=runner,
+            waiter=lambda _: None,
+            clock=lambda: datetime(2026, 7, 22, 12, 0, tzinfo=UTC),
+        )
+
+    assert not any("patch" in command for command in commands)
+
+
+def _fault_schedule(
+    *,
+    flag_variant: str,
+    flag_id: str = "email-leak",
+    chaos_id: str = "ad-pressure",
+) -> CompiledSchedule:
+    profile = load_profile(SCENARIO_ROOT / "quiet_day.yml")
+    document = profile.model_dump(mode="json")
+    document["stimuli"] = [
+        {
+            "stimulus_id": flag_id,
+            "kind": "flagd",
+            "start_offset_seconds": 64,
+            "duration_seconds": 20,
+            "flag": "emailMemoryLeak",
+            "variant": flag_variant,
+        },
+        {
+            "stimulus_id": chaos_id,
+            "kind": "chaos_mesh",
+            "start_offset_seconds": 64,
+            "duration_seconds": 20,
+            "experiment": "ad-cpu-pressure",
+        },
+    ]
+    return compile_profile(
+        ScenarioProfile.model_validate(document),
+        seed=profile.seeds.development[0],
+        purpose=SeedPurpose.DEVELOPMENT,
+    ).schedule
+
+
+def _flag_config_map() -> str:
+    config = {
+        "$schema": "https://flagd.dev/schema/v0/flags.json",
+        "flags": {
+            "emailMemoryLeak": {
+                "state": "ENABLED",
+                "variants": {"off": 0, "100x": 100},
+                "defaultVariant": "off",
+            }
+        },
+    }
+    return json.dumps(
+        {
+            "apiVersion": "v1",
+            "kind": "ConfigMap",
+            "data": {"demo.flagd.json": json.dumps(config, indent=2) + "\n"},
+        }
+    )

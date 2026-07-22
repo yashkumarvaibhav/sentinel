@@ -137,7 +137,11 @@ continuous real traffic.
 Two components are switched off: the bundled `llm` model server (out of scope,
 and the heaviest pod in the mesh) with the `product-reviews` service that
 depends on it, and the `flagd-ui` sidecar (OOM-killed at the chart's 250Mi
-limit; we drive flags through the API, not a second web app).
+limit). The chart exposes flag evaluation but no writable management API.
+Scenario fault-driving therefore patches only the owned `flagd-config`
+ConfigMap, rolls only `deployment/flagd` so its `emptyDir` receives the new
+document, then restores the exact original document and rolls flagd again.
+See `docs/scenario-fault-driving.md`.
 
 The chart's 20 MiB limit for `product-catalog` is overridden to 64 MiB. The
 default repeatedly OOM-killed its instrumented Go process during the first live

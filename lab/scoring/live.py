@@ -7,19 +7,37 @@ import math
 import re
 import subprocess
 import time
+from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, Protocol, cast
 
 import yaml
 
 from lab.scenarios import ScenarioArtifacts, schedule_payload
 from lab.scenarios.compiler import CompiledSchedule
+from lab.scenarios.models import ChaosMeshStimulus, FlagdStimulus, Stimulus, stimulus_target
 
 _SAFE_NAME = re.compile(r"^[a-z0-9](?:[-a-z0-9]{0,61}[a-z0-9])?$")
 _NAMESPACE = "otel-demo"
 _CONTEXT = "k3d-sentinel-lab"
+_FLAG_CONFIG_MAP = "flagd-config"
+_FLAG_DEPLOYMENT = "flagd"
+_FLAG_DOCUMENT_KEY = "demo.flagd.json"
+_ALLOWED_CHAOS_KINDS = frozenset({"StressChaos", "NetworkChaos", "PodChaos", "IOChaos"})
+_MAX_CHAOS_DURATION_SECONDS = 300
+
+
+class CommandRunner(Protocol):
+    def __call__(
+        self,
+        command: list[str],
+        *,
+        input_text: str | None = None,
+        timeout: int = 120,
+    ) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -28,6 +46,57 @@ class LiveTelemetry:
     span_timestamps: tuple[datetime, ...]
     correlation_user_agent: str
     anchor_user_agent: str
+    stimulus_executions: tuple[StimulusExecution, ...]
+
+
+@dataclass(frozen=True)
+class StimulusExecution:
+    stimulus_id: str
+    kind: Literal["flagd", "chaos_mesh"]
+    target: str
+    setting: str
+    requested_start_offset_seconds: int
+    requested_end_offset_seconds: int
+    started_at: datetime
+    ended_at: datetime
+
+    def canonical_value(self) -> dict[str, object]:
+        return {
+            "ended_at": self.ended_at.isoformat(),
+            "kind": self.kind,
+            "requested_end_offset_seconds": self.requested_end_offset_seconds,
+            "requested_start_offset_seconds": self.requested_start_offset_seconds,
+            "setting": self.setting,
+            "started_at": self.started_at.isoformat(),
+            "stimulus_id": self.stimulus_id,
+            "target": self.target,
+        }
+
+
+@dataclass(frozen=True)
+class _StimulusTransition:
+    offset_seconds: int
+    operation: Literal["start", "stop"]
+    stimulus: Stimulus
+
+
+@dataclass(frozen=True)
+class _ChaosManifest:
+    path: Path
+    kind: str
+    name: str
+
+
+def render_stimulus_executions(executions: tuple[StimulusExecution, ...]) -> bytes:
+    value = {
+        "items": [
+            item.canonical_value() for item in sorted(executions, key=lambda item: item.stimulus_id)
+        ],
+        "version": 1,
+    }
+    return (
+        json.dumps(value, allow_nan=False, separators=(",", ":"), sort_keys=True) + "\n"
+    ).encode()
 
 
 def expected_request_count(schedule: CompiledSchedule) -> int:
@@ -117,6 +186,19 @@ def run_live_scenario(
             input_text=yaml.safe_dump(job, sort_keys=False),
         )
         duration = sum(phase.duration_seconds for phase in schedule.phases)
+        if schedule.stimuli:
+            start_at = _wait_for_anchor(
+                repo_root=repo_root,
+                user_agent=f"sentinel-score-anchor/{run_id}",
+            )
+            stimulus_executions = execute_stimuli(
+                repo_root=repo_root,
+                schedule=schedule,
+                anchor_ts=start_at,
+            )
+        else:
+            start_at = None
+            stimulus_executions = ()
         _wait_for_job(job_name, timeout_seconds=duration + 180)
         log = _run(["kubectl", "--context", _CONTEXT, "-n", _NAMESPACE, "logs", f"job/{job_name}"])
         if "iterations" not in log or "dropped_iterations" not in log:
@@ -126,18 +208,369 @@ def run_live_scenario(
             user_agent=f"sentinel-score/{run_id}",
             expected=expected_request_count(schedule),
         )
-        start_at = _wait_for_anchor(
-            repo_root=repo_root,
-            user_agent=f"sentinel-score-anchor/{run_id}",
-        )
+        if start_at is None:
+            start_at = _wait_for_anchor(
+                repo_root=repo_root,
+                user_agent=f"sentinel-score-anchor/{run_id}",
+            )
         return LiveTelemetry(
             start_at=start_at,
             span_timestamps=timestamps,
             correlation_user_agent=f"sentinel-score/{run_id}",
             anchor_user_agent=f"sentinel-score-anchor/{run_id}",
+            stimulus_executions=stimulus_executions,
         )
     finally:
         _delete_owned(job_name)
+
+
+def execute_stimuli(
+    *,
+    repo_root: Path,
+    schedule: CompiledSchedule,
+    anchor_ts: datetime,
+    runner: CommandRunner | None = None,
+    waiter: Callable[[datetime], None] | None = None,
+    clock: Callable[[], datetime] | None = None,
+) -> tuple[StimulusExecution, ...]:
+    """Run only compiled, contained lab stimuli and restore every changed target."""
+    if anchor_ts.tzinfo is None or anchor_ts.utcoffset() != timedelta(0):
+        raise ValueError("stimulus anchor must be timezone-aware UTC")
+    command = _run if runner is None else runner
+    wait_until = _wait_until if waiter is None else waiter
+    now = _utc_now if clock is None else clock
+    if not schedule.stimuli:
+        return ()
+
+    chaos = {
+        stimulus.stimulus_id: _load_chaos_manifest(repo_root, stimulus)
+        for stimulus in schedule.stimuli
+        if isinstance(stimulus, ChaosMeshStimulus)
+    }
+    flag_stimuli = tuple(
+        stimulus for stimulus in schedule.stimuli if isinstance(stimulus, FlagdStimulus)
+    )
+    flags = _FlagdController(command, flag_stimuli) if flag_stimuli else None
+    active_chaos: dict[str, _ChaosManifest] = {}
+    started: dict[str, datetime] = {}
+    completed: list[StimulusExecution] = []
+    primary_error: BaseException | None = None
+
+    try:
+        transitions = _stimulus_transitions(schedule.stimuli)
+        offsets = sorted({transition.offset_seconds for transition in transitions})
+        for offset in offsets:
+            wait_until(anchor_ts + timedelta(seconds=offset))
+            for transition in (item for item in transitions if item.offset_seconds == offset):
+                stimulus = transition.stimulus
+                if transition.operation == "start":
+                    if isinstance(stimulus, FlagdStimulus):
+                        if flags is None:  # pragma: no cover - guarded by construction
+                            raise AssertionError("flagd controller missing")
+                        flags.activate(stimulus)
+                    else:
+                        manifest = chaos[stimulus.stimulus_id]
+                        active_chaos[stimulus.stimulus_id] = manifest
+                        _apply_chaos(command, manifest)
+                    started[stimulus.stimulus_id] = _require_utc(now(), "stimulus start")
+                    continue
+
+                if isinstance(stimulus, FlagdStimulus):
+                    if flags is None:  # pragma: no cover - guarded by construction
+                        raise AssertionError("flagd controller missing")
+                    flags.deactivate(stimulus)
+                else:
+                    manifest = active_chaos[stimulus.stimulus_id]
+                    _delete_chaos(command, manifest)
+                    del active_chaos[stimulus.stimulus_id]
+                ended_at = _require_utc(now(), "stimulus end")
+                completed.append(
+                    StimulusExecution(
+                        stimulus_id=stimulus.stimulus_id,
+                        kind=stimulus.kind,
+                        target=stimulus_target(stimulus),
+                        setting=(
+                            stimulus.variant
+                            if isinstance(stimulus, FlagdStimulus)
+                            else stimulus.experiment
+                        ),
+                        requested_start_offset_seconds=stimulus.start_offset_seconds,
+                        requested_end_offset_seconds=(
+                            stimulus.start_offset_seconds + stimulus.duration_seconds
+                        ),
+                        started_at=started.pop(stimulus.stimulus_id),
+                        ended_at=ended_at,
+                    )
+                )
+    except BaseException as exc:
+        primary_error = exc
+
+    cleanup_errors: list[Exception] = []
+    for manifest in reversed(tuple(active_chaos.values())):
+        try:
+            _delete_chaos(command, manifest)
+        except Exception as exc:  # pragma: no cover - exceptional kubectl cleanup
+            cleanup_errors.append(exc)
+    if flags is not None:
+        try:
+            flags.restore()
+        except Exception as exc:  # pragma: no cover - exceptional kubectl cleanup
+            cleanup_errors.append(exc)
+
+    if primary_error is not None:
+        for cleanup_error in cleanup_errors:
+            primary_error.add_note(f"cleanup also failed: {cleanup_error}")
+        raise primary_error.with_traceback(primary_error.__traceback__)
+    if cleanup_errors:
+        raise ExceptionGroup("stimulus cleanup failed", cleanup_errors)
+    return tuple(sorted(completed, key=lambda item: item.stimulus_id))
+
+
+class _FlagdController:
+    def __init__(self, runner: CommandRunner, stimuli: tuple[FlagdStimulus, ...]) -> None:
+        self._runner = runner
+        response = runner(
+            [
+                "kubectl",
+                "--context",
+                _CONTEXT,
+                "-n",
+                _NAMESPACE,
+                "get",
+                "configmap",
+                _FLAG_CONFIG_MAP,
+                "-o",
+                "json",
+            ]
+        )
+        outer = _json_object(response, "flagd ConfigMap")
+        data = outer.get("data")
+        if not isinstance(data, dict) or not isinstance(data.get(_FLAG_DOCUMENT_KEY), str):
+            raise ValueError("flagd ConfigMap lacks demo.flagd.json")
+        self._original_text = cast(str, data[_FLAG_DOCUMENT_KEY])
+        self._original = _json_object(self._original_text, "flagd document")
+        flags = self._original.get("flags")
+        if not isinstance(flags, dict):
+            raise ValueError("flagd document lacks flags")
+        for stimulus in stimuli:
+            definition = flags.get(stimulus.flag)
+            if not isinstance(definition, dict):
+                raise ValueError(f"unknown flagd flag: {stimulus.flag}")
+            variants = definition.get("variants")
+            if not isinstance(variants, dict) or stimulus.variant not in variants:
+                raise ValueError(f"unknown flagd variant: {stimulus.flag}={stimulus.variant}")
+            if definition.get("defaultVariant") == stimulus.variant:
+                raise ValueError(f"flagd stimulus is a no-op: {stimulus.flag}")
+        self._active: dict[str, str] = {}
+        self._dirty = False
+
+    def activate(self, stimulus: FlagdStimulus) -> None:
+        self._active[stimulus.flag] = stimulus.variant
+        self._apply_desired()
+
+    def deactivate(self, stimulus: FlagdStimulus) -> None:
+        del self._active[stimulus.flag]
+        self._apply_desired()
+
+    def restore(self) -> None:
+        if self._dirty:
+            self._patch_and_rollout(self._original_text)
+            self._dirty = False
+
+    def _apply_desired(self) -> None:
+        if not self._active:
+            desired = self._original_text
+        else:
+            document = deepcopy(self._original)
+            flags = cast(dict[str, Any], document["flags"])
+            for flag, variant in self._active.items():
+                definition = cast(dict[str, Any], flags[flag])
+                definition["defaultVariant"] = variant
+            desired = json.dumps(document, allow_nan=False, indent=2, sort_keys=True) + "\n"
+        self._patch_and_rollout(desired)
+        self._dirty = bool(self._active)
+
+    def _patch_and_rollout(self, document: str) -> None:
+        patch = json.dumps(
+            {"data": {_FLAG_DOCUMENT_KEY: document}},
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        self._runner(
+            [
+                "kubectl",
+                "--context",
+                _CONTEXT,
+                "-n",
+                _NAMESPACE,
+                "patch",
+                "configmap",
+                _FLAG_CONFIG_MAP,
+                "--type",
+                "merge",
+                "-p",
+                patch,
+            ]
+        )
+        self._dirty = True
+        self._runner(
+            [
+                "kubectl",
+                "--context",
+                _CONTEXT,
+                "-n",
+                _NAMESPACE,
+                "rollout",
+                "restart",
+                f"deployment/{_FLAG_DEPLOYMENT}",
+            ]
+        )
+        self._runner(
+            [
+                "kubectl",
+                "--context",
+                _CONTEXT,
+                "-n",
+                _NAMESPACE,
+                "rollout",
+                "status",
+                f"deployment/{_FLAG_DEPLOYMENT}",
+                "--timeout=60s",
+            ],
+            timeout=75,
+        )
+
+
+def _stimulus_transitions(stimuli: tuple[Stimulus, ...]) -> tuple[_StimulusTransition, ...]:
+    transitions = tuple(
+        transition
+        for stimulus in stimuli
+        for transition in (
+            _StimulusTransition(stimulus.start_offset_seconds, "start", stimulus),
+            _StimulusTransition(
+                stimulus.start_offset_seconds + stimulus.duration_seconds,
+                "stop",
+                stimulus,
+            ),
+        )
+    )
+    return tuple(
+        sorted(
+            transitions,
+            key=lambda item: (
+                item.offset_seconds,
+                0 if item.operation == "stop" else 1,
+                item.stimulus.stimulus_id,
+            ),
+        )
+    )
+
+
+def _load_chaos_manifest(repo_root: Path, stimulus: ChaosMeshStimulus) -> _ChaosManifest:
+    path = (repo_root / "lab" / "testbed" / "chaos" / f"{stimulus.experiment}.yaml").resolve()
+    owned = (repo_root / "lab" / "testbed" / "chaos").resolve()
+    if path.parent != owned or not path.is_file():
+        raise ValueError(f"unknown committed Chaos Mesh experiment: {stimulus.experiment}")
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise ValueError(f"invalid Chaos Mesh manifest: {path.name}")
+    kind = document.get("kind")
+    metadata = document.get("metadata")
+    spec = document.get("spec")
+    if kind not in _ALLOWED_CHAOS_KINDS:
+        raise ValueError(f"unsupported Chaos Mesh kind: {kind}")
+    if not isinstance(metadata, dict) or not isinstance(spec, dict):
+        raise ValueError(f"invalid Chaos Mesh manifest: {path.name}")
+    if metadata.get("name") != stimulus.experiment or metadata.get("namespace") != _NAMESPACE:
+        raise ValueError(f"Chaos Mesh manifest identity mismatch: {path.name}")
+    selector = spec.get("selector")
+    if not isinstance(selector, dict) or selector.get("namespaces") != [_NAMESPACE]:
+        raise ValueError(f"Chaos Mesh selector must be confined to {_NAMESPACE}: {path.name}")
+    duration = spec.get("duration")
+    if not isinstance(duration, str) or not (
+        0 < _duration_seconds(duration) <= _MAX_CHAOS_DURATION_SECONDS
+    ):
+        raise ValueError(f"Chaos Mesh duration is missing or unbounded: {path.name}")
+    if _contains_key(document, "externalTargets"):
+        raise ValueError(f"Chaos Mesh external targets are forbidden: {path.name}")
+    return _ChaosManifest(path=path, kind=cast(str, kind), name=stimulus.experiment)
+
+
+def _apply_chaos(runner: CommandRunner, manifest: _ChaosManifest) -> None:
+    runner(["kubectl", "--context", _CONTEXT, "apply", "-f", str(manifest.path)])
+    runner(
+        [
+            "kubectl",
+            "--context",
+            _CONTEXT,
+            "-n",
+            _NAMESPACE,
+            "wait",
+            f"{manifest.kind.lower()}/{manifest.name}",
+            "--for=condition=AllInjected",
+            "--timeout=60s",
+        ],
+        timeout=75,
+    )
+
+
+def _delete_chaos(runner: CommandRunner, manifest: _ChaosManifest) -> None:
+    runner(
+        [
+            "kubectl",
+            "--context",
+            _CONTEXT,
+            "-n",
+            _NAMESPACE,
+            "delete",
+            "-f",
+            str(manifest.path),
+            "--ignore-not-found",
+            "--wait=true",
+        ]
+    )
+
+
+def _duration_seconds(value: str) -> int:
+    match = re.fullmatch(r"(\d+)([smh])", value)
+    if match is None:
+        return 0
+    multiplier = {"s": 1, "m": 60, "h": 3600}[match.group(2)]
+    return int(match.group(1)) * multiplier
+
+
+def _contains_key(value: object, target: str) -> bool:
+    if isinstance(value, dict):
+        return target in value or any(_contains_key(item, target) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_key(item, target) for item in value)
+    return False
+
+
+def _json_object(value: str, label: str) -> dict[str, Any]:
+    try:
+        document = json.loads(value)
+    except (json.JSONDecodeError, UnicodeError) as exc:
+        raise ValueError(f"invalid {label}: {exc}") from exc
+    if not isinstance(document, dict):
+        raise ValueError(f"invalid {label}: root must be an object")
+    return cast(dict[str, Any], document)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _require_utc(value: datetime, label: str) -> datetime:
+    if value.tzinfo is None or value.utcoffset() != timedelta(0):
+        raise ValueError(f"{label} must be timezone-aware UTC")
+    return value
+
+
+def _wait_until(target: datetime) -> None:
+    while (remaining := (target - _utc_now()).total_seconds()) > 0:
+        time.sleep(min(remaining, 1.0))
 
 
 def _preflight(repo_root: Path) -> None:

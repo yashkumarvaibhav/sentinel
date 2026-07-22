@@ -21,7 +21,7 @@ from detection.decompose import (
 from lab.captures.models import CaptureModel
 from lab.captures.replay import RawReplay, replay_raw
 from lab.captures.store import RuntimeCapture
-from lab.scenarios.models import RelativeContext
+from lab.scenarios.models import RelativeContext, Stimulus
 
 
 class CapturedLoadPhase(CaptureModel):
@@ -40,6 +40,7 @@ class CapturedSchedule(CaptureModel):
     request_mix_seed: int = Field(ge=1)
     target: Literal["astronomy-shop/frontend-proxy"]
     phases: tuple[CapturedLoadPhase, ...] = Field(min_length=2)
+    stimuli: tuple[Stimulus, ...] = ()
 
     @model_validator(mode="after")
     def contiguous_phases(self) -> Self:
@@ -52,6 +53,13 @@ class CapturedSchedule(CaptureModel):
                 raise ValueError("captured phases must be contiguous and start at zero")
             names.add(phase.name)
             offset += phase.duration_seconds
+        stimulus_ids: set[str] = set()
+        for stimulus in self.stimuli:
+            if stimulus.stimulus_id in stimulus_ids:
+                raise ValueError(f"captured stimulus IDs must be unique: {stimulus.stimulus_id}")
+            if stimulus.start_offset_seconds + stimulus.duration_seconds > offset:
+                raise ValueError(f"captured stimulus exceeds schedule: {stimulus.stimulus_id}")
+            stimulus_ids.add(stimulus.stimulus_id)
         return self
 
     @property

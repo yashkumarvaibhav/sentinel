@@ -17,7 +17,7 @@ from lab.captures import (
     replay_decomposition,
 )
 from lab.scenarios import load_profile
-from lab.scenarios.models import LabModel, ResidualLabelInterval
+from lab.scenarios.models import LabModel, ResidualLabelInterval, SymptomLabelInterval
 from lab.scoring.evaluator import RunScore
 from lab.scoring.gates import evaluate_gates, load_gate_config
 from lab.scoring.metrics import binary_metrics
@@ -30,6 +30,7 @@ class CaptureLabels(LabModel):
     seed: int
     seed_purpose: Literal["held_out"]
     intervals: tuple[ResidualLabelInterval, ...]
+    symptom_intervals: tuple[SymptomLabelInterval, ...] = ()
 
 
 def score_capture(

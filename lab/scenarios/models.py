@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from itertools import pairwise
 from typing import Annotated, Literal, Self
 
 from pydantic import (
@@ -27,6 +28,39 @@ type OffsetSeconds = Annotated[int, Field(ge=0, le=3600)]
 type SafeRate = Annotated[int, Field(ge=1, le=50)]
 type Probability = Annotated[float, Field(ge=0.0, le=1.0, allow_inf_nan=False)]
 type PositiveMultiplier = Annotated[float, Field(ge=1.0, le=20.0, allow_inf_nan=False)]
+type FlagName = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, min_length=1, max_length=128, pattern=r"^[A-Za-z][A-Za-z0-9]*$"
+    ),
+]
+type VariantName = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9%_.-]*$",
+    ),
+]
+type SignalName = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=255,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+    ),
+]
+type ScoredSymptomKind = Literal[
+    "RESIDUAL_EXCEED",
+    "RATIO_DEFORM",
+    "LOG_BURST",
+    "EDGE_DEGRADED",
+    "SATURATION",
+    "DROP",
+    "SILENCE",
+]
 
 
 class LabModel(BaseModel):
@@ -98,6 +132,41 @@ class ResidualLabelInterval(LabModel):
         return self
 
 
+class SymptomLabelInterval(LabModel):
+    label_id: Identifier
+    kind: ScoredSymptomKind
+    service: Identifier
+    signal: SignalName
+    start_offset_seconds: OffsetSeconds
+    end_offset_seconds: PositiveSeconds
+
+    @model_validator(mode="after")
+    def forward_interval(self) -> Self:
+        if self.end_offset_seconds <= self.start_offset_seconds:
+            raise ValueError("symptom label end offset must be after its start offset")
+        return self
+
+
+class FlagdStimulus(LabModel):
+    stimulus_id: Identifier
+    kind: Literal["flagd"]
+    start_offset_seconds: OffsetSeconds
+    duration_seconds: PositiveSeconds
+    flag: FlagName
+    variant: VariantName
+
+
+class ChaosMeshStimulus(LabModel):
+    stimulus_id: Identifier
+    kind: Literal["chaos_mesh"]
+    start_offset_seconds: OffsetSeconds
+    duration_seconds: PositiveSeconds
+    experiment: Identifier
+
+
+type Stimulus = FlagdStimulus | ChaosMeshStimulus
+
+
 class ScenarioProfile(LabModel):
     version: Literal[1]
     scenario_id: Identifier
@@ -107,7 +176,9 @@ class ScenarioProfile(LabModel):
     seeds: SeedSets
     load_phases: tuple[LoadPhase, ...] = Field(min_length=2)
     contexts: tuple[RelativeContext, ...] = ()
+    stimuli: tuple[Stimulus, ...] = ()
     residual_labels: tuple[ResidualLabelInterval, ...] = ()
+    symptom_labels: tuple[SymptomLabelInterval, ...] = ()
 
     @property
     def duration_seconds(self) -> int:
@@ -121,14 +192,38 @@ class ScenarioProfile(LabModel):
         context_ids = [context.context_id for context in self.contexts]
         if len(context_ids) != len(set(context_ids)):
             raise ValueError("context ids must be unique")
+        stimulus_ids = [stimulus.stimulus_id for stimulus in self.stimuli]
+        if len(stimulus_ids) != len(set(stimulus_ids)):
+            raise ValueError("stimulus ids must be unique")
         label_ids = [label.label_id for label in self.residual_labels]
+        label_ids.extend(label.label_id for label in self.symptom_labels)
         if len(label_ids) != len(set(label_ids)):
             raise ValueError("label ids must be unique")
         duration = self.duration_seconds
         for context in self.contexts:
             if context.start_offset_seconds + context.duration_seconds > duration:
                 raise ValueError(f"context exceeds scenario duration: {context.context_id}")
-        for label in self.residual_labels:
-            if label.end_offset_seconds > duration:
-                raise ValueError(f"label exceeds scenario duration: {label.label_id}")
+        for residual_label in self.residual_labels:
+            if residual_label.end_offset_seconds > duration:
+                raise ValueError(f"label exceeds scenario duration: {residual_label.label_id}")
+        for symptom_label in self.symptom_labels:
+            if symptom_label.end_offset_seconds > duration:
+                raise ValueError(f"label exceeds scenario duration: {symptom_label.label_id}")
+        by_target: dict[str, list[Stimulus]] = {}
+        for stimulus in self.stimuli:
+            if stimulus.start_offset_seconds + stimulus.duration_seconds > duration:
+                raise ValueError(f"stimulus exceeds scenario duration: {stimulus.stimulus_id}")
+            by_target.setdefault(stimulus_target(stimulus), []).append(stimulus)
+        for target, stimuli in by_target.items():
+            ordered = sorted(stimuli, key=lambda item: item.start_offset_seconds)
+            for previous, current in pairwise(ordered):
+                previous_end = previous.start_offset_seconds + previous.duration_seconds
+                if current.start_offset_seconds < previous_end:
+                    raise ValueError(f"overlapping stimuli for {target}")
         return self
+
+
+def stimulus_target(stimulus: Stimulus) -> str:
+    if isinstance(stimulus, FlagdStimulus):
+        return f"flagd:{stimulus.flag}"
+    return f"chaos_mesh:{stimulus.experiment}"

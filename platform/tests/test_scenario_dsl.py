@@ -4,9 +4,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import cast
 
 import pytest
-from lab.scenarios import SeedPurpose, compile_profile, load_profile, write_artifacts
+from lab.scenarios import (
+    SeedPurpose,
+    compile_profile,
+    load_profile,
+    schedule_payload,
+    write_artifacts,
+)
 from lab.scenarios.models import ScenarioProfile
 
 SCENARIO_ROOT = Path(__file__).resolve().parents[2] / "lab" / "scenarios"
@@ -75,6 +82,91 @@ def test_compiler_emits_public_schedule_context_and_private_labels_separately(
     assert labels["intervals"]
     assert context["windows"]
     assert all("expected_residual" not in phase for phase in schedule["phases"])
+
+
+def test_fault_stimuli_compile_publicly_while_symptom_labels_stay_private() -> None:
+    profile = load_profile(SCENARIO_ROOT / "quiet_day.yml")
+    document = profile.model_dump(mode="json")
+    document["stimuli"] = [
+        {
+            "stimulus_id": "email-leak",
+            "kind": "flagd",
+            "start_offset_seconds": 64,
+            "duration_seconds": 20,
+            "flag": "emailMemoryLeak",
+            "variant": "100x",
+        },
+        {
+            "stimulus_id": "ad-pressure",
+            "kind": "chaos_mesh",
+            "start_offset_seconds": 64,
+            "duration_seconds": 20,
+            "experiment": "ad-cpu-pressure",
+        },
+    ]
+    document["symptom_labels"] = [
+        {
+            "label_id": "email-saturation",
+            "kind": "SATURATION",
+            "service": "email",
+            "signal": "process.runtime.jvm.memory.usage",
+            "start_offset_seconds": 64,
+            "end_offset_seconds": 84,
+        }
+    ]
+    artifacts = compile_profile(
+        ScenarioProfile.model_validate(document),
+        seed=profile.seeds.development[0],
+        purpose=SeedPurpose.DEVELOPMENT,
+    )
+
+    public_schedule = schedule_payload(artifacts.schedule)
+    stimuli = cast(list[dict[str, object]], public_schedule["stimuli"])
+    assert [item["kind"] for item in stimuli] == [
+        "flagd",
+        "chaos_mesh",
+    ]
+    assert "symptom_labels" not in public_schedule
+    assert "symptom_intervals" not in public_schedule
+    assert artifacts.labels["symptom_intervals"] == document["symptom_labels"]
+
+
+def test_fault_stimuli_are_bounded_and_same_target_overlap_is_rejected() -> None:
+    profile = load_profile(SCENARIO_ROOT / "quiet_day.yml")
+    document = profile.model_dump(mode="json")
+    document["stimuli"] = [
+        {
+            "stimulus_id": "too-long",
+            "kind": "flagd",
+            "start_offset_seconds": 64,
+            "duration_seconds": 21,
+            "flag": "emailMemoryLeak",
+            "variant": "100x",
+        }
+    ]
+    with pytest.raises(ValueError, match="stimulus exceeds scenario duration"):
+        ScenarioProfile.model_validate(document)
+
+    document["stimuli"] = [
+        {
+            "stimulus_id": "first",
+            "kind": "flagd",
+            "start_offset_seconds": 60,
+            "duration_seconds": 20,
+            "flag": "emailMemoryLeak",
+            "variant": "10x",
+        },
+        {
+            "stimulus_id": "second",
+            "kind": "flagd",
+            "start_offset_seconds": 70,
+            "duration_seconds": 10,
+            "flag": "emailMemoryLeak",
+            "variant": "100x",
+        },
+    ]
+    with pytest.raises(ValueError, match="overlapping stimuli for flagd:emailMemoryLeak"):
+        ScenarioProfile.model_validate(document)
 
 
 def test_invalid_seed_overlap_and_over_cap_rate_fail_validation() -> None:
