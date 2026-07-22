@@ -44,13 +44,13 @@ for (const phase of schedule.phases) {
     throw new Error(`phase rate outside 1..50 rps: ${phase.rate_rps}`);
   }
   // Checkout performs three sequential requests and successful downstream
-  // calls can take close to ten seconds while the deliberately pressured
-  // service recovers. Preallocate for ten seconds of concurrency so k6
+  // calls can take fifteen seconds while the deliberately pressured service
+  // recovers. Preallocate for twenty seconds of concurrency so k6
   // delivers the requested arrival rate without relaxing the
   // zero-dropped-iterations honesty gate. Browse traffic keeps its tighter
   // budget.
   const preAllocatedVUs = journey === 'checkout'
-    ? Math.min(Math.max(phase.rate_rps * 10, 10), 50)
+    ? Math.min(Math.max(phase.rate_rps * 20, 10), 50)
     : Math.min(Math.max(phase.rate_rps, 2), 20);
   scenarios[phase.name] = {
     executor: 'constant-arrival-rate',

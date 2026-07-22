@@ -47,7 +47,7 @@ def test_checkout_journey_preallocates_for_slow_successful_iterations() -> None:
     script = (REPO_ROOT / "lab" / "loadgen" / "scenario.js").read_text(encoding="utf-8")
 
     assert "const preAllocatedVUs = journey === 'checkout'" in script
-    assert "Math.min(Math.max(phase.rate_rps * 10, 10), 50)" in script
+    assert "Math.min(Math.max(phase.rate_rps * 20, 10), 50)" in script
     assert "preAllocatedVUs," in script
     assert "dropped_iterations: ['count==0']" in script
 
