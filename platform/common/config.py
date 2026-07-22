@@ -348,6 +348,7 @@ class EdgeDegradationRuleConfig(ConfigModel):
 
     caller: Identifier
     downstream: Identifier
+    rpc_service: Identifier
     minimum_samples: int = Field(ge=3, le=1_000_000)
     latency_baseline_floor_ms: PositiveFloat
     error_rate_baseline_floor: Probability
@@ -378,13 +379,24 @@ class EdgeDegradationRuleConfig(ConfigModel):
 class EdgeDegradationConfig(ConfigModel):
     """Operator-owned rules for explicitly monitored topology edges."""
 
+    window_seconds: int = Field(ge=1, le=3600)
+    advance_seconds: int = Field(ge=1, le=3600)
+    baseline_warmup_samples: int = Field(ge=3, le=1_000_000)
+    dedup_capacity: int = Field(ge=1, le=10_000_000)
     rules: tuple[EdgeDegradationRuleConfig, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def unique_edges(self) -> Self:
+    def validate_materialization_policy(self) -> Self:
+        if self.advance_seconds > self.window_seconds:
+            raise ValueError("edge advance_seconds cannot exceed window_seconds")
+        if self.window_seconds % self.advance_seconds != 0:
+            raise ValueError("edge window_seconds must be divisible by advance_seconds")
         edges = [(rule.caller, rule.downstream) for rule in self.rules]
         if len(edges) != len(set(edges)):
             raise ValueError("edge degradation rules must identify unique caller/downstream pairs")
+        telemetry_keys = [(rule.caller, rule.rpc_service) for rule in self.rules]
+        if len(telemetry_keys) != len(set(telemetry_keys)):
+            raise ValueError("edge degradation rules must identify unique caller/RPC services")
         return self
 
 

@@ -52,8 +52,12 @@ def test_committed_config_loads_with_cross_file_references_and_stable_fingerprin
         first.detectors.liveness.silence_rules["frontend.request_rate"].maximum_age_seconds == 120.0
     )
     assert len(first.detectors.edge_degradation.rules) == 4
+    assert first.detectors.edge_degradation.window_seconds == 12
+    assert first.detectors.edge_degradation.advance_seconds == 2
+    assert first.detectors.edge_degradation.baseline_warmup_samples == 3
     assert first.detectors.edge_degradation.rules[0].caller == "frontend"
     assert first.detectors.edge_degradation.rules[0].downstream == "checkout"
+    assert first.detectors.edge_degradation.rules[0].rpc_service == "oteldemo.CheckoutService"
     assert first.detectors.edge_degradation.rules[0].minimum_samples == 20
     assert set(first.detectors.episodes.policies) >= {
         "RESIDUAL_EXCEED",
@@ -176,6 +180,11 @@ def test_config_models_are_immutable() -> None:
                 document["liveness"]["drop_rules"]["frontend.request_rate"],
             ),
             "unknown topology service",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["edge_degradation"].__setitem__("advance_seconds", 13),
+            "advance_seconds cannot exceed window_seconds",
         ),
         (
             "detector-params.yml",

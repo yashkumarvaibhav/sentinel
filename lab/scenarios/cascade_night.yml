@@ -48,6 +48,12 @@ stimuli:
     duration_seconds: 20
     journey: checkout
     rate_rps: 2
+  - stimulus_id: checkout_recovery_traffic
+    kind: k6_journey
+    start_offset_seconds: 104
+    duration_seconds: 20
+    journey: checkout
+    rate_rps: 2
 residual_labels: []
 symptom_labels:
   - label_id: checkout-payment-failure

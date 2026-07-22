@@ -112,10 +112,15 @@ def liveness_config() -> LivenessConfig:
 
 def edge_degradation_config() -> EdgeDegradationConfig:
     return EdgeDegradationConfig(
+        window_seconds=12,
+        advance_seconds=2,
+        baseline_warmup_samples=3,
+        dedup_capacity=1000,
         rules=(
             EdgeDegradationRuleConfig(
                 caller="frontend",
                 downstream="checkout",
+                rpc_service="oteldemo.CheckoutService",
                 minimum_samples=5,
                 latency_baseline_floor_ms=5.0,
                 error_rate_baseline_floor=0.01,
@@ -127,6 +132,7 @@ def edge_degradation_config() -> EdgeDegradationConfig:
             EdgeDegradationRuleConfig(
                 caller="frontend",
                 downstream="cart",
+                rpc_service="oteldemo.CartService",
                 minimum_samples=5,
                 latency_baseline_floor_ms=5.0,
                 error_rate_baseline_floor=0.01,
@@ -138,6 +144,7 @@ def edge_degradation_config() -> EdgeDegradationConfig:
             EdgeDegradationRuleConfig(
                 caller="checkout",
                 downstream="payment",
+                rpc_service="oteldemo.PaymentService",
                 minimum_samples=5,
                 latency_baseline_floor_ms=5.0,
                 error_rate_baseline_floor=0.01,
@@ -146,7 +153,7 @@ def edge_degradation_config() -> EdgeDegradationConfig:
                 trigger_relative_error_rise=1.0,
                 full_score_relative_error_rise=5.0,
             ),
-        )
+        ),
     )
 
 

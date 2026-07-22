@@ -63,10 +63,17 @@ def test_cascade_night_keeps_volume_explained_while_a_downstream_fault_runs() ->
     assert context.expected_delta == {"frontend.request_rate": 2.5}
     assert context.start_offset_seconds == 64
     assert context.start_offset_seconds + context.duration_seconds == profile.duration_seconds
-    assert [stimulus.kind for stimulus in profile.stimuli] == ["flagd", "k6_journey"]
-    for stimulus in profile.stimuli:
-        assert stimulus.start_offset_seconds == 84
-        assert stimulus.start_offset_seconds + stimulus.duration_seconds == 104
+    assert [stimulus.kind for stimulus in profile.stimuli] == [
+        "flagd",
+        "k6_journey",
+        "k6_journey",
+    ]
+    flag, fault_journey, recovery_journey = profile.stimuli
+    assert flag.start_offset_seconds == fault_journey.start_offset_seconds == 84
+    assert flag.start_offset_seconds + flag.duration_seconds == 104
+    assert fault_journey.start_offset_seconds + fault_journey.duration_seconds == 104
+    assert recovery_journey.start_offset_seconds == 104
+    assert recovery_journey.start_offset_seconds + recovery_journey.duration_seconds == 124
     assert artifacts.labels["symptom_intervals"] == [
         {
             "end_offset_seconds": 104,

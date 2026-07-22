@@ -36,3 +36,32 @@ Every monitored edge is an explicit rule under `edge_degradation` in
 dependencies in `config/topology.yml`; two known services do not become an edge merely because both
 exist. Floors, minimum evidence, triggers and full-score points are configuration data and are part
 of the runtime fingerprint.
+
+## Window materialization and episode routing
+
+Phase 2.8e adds `EdgeDetectionRunner` between normalized observations and the
+detector. The runner accepts exact caller-supplied event-time ticks; it never
+reads wall time. Each configured `(caller, rpc_service)` mapping selects only
+client gRPC `span.duration_ms` observations with one trace reference. Malformed,
+negative, missing-status or contradictory evidence is retained as ambiguous and
+makes the affected rolling window `INSUFFICIENT`.
+
+The first configured number of valid calls per edge forms an immutable
+context-blind bootstrap baseline. Later calls enter a fixed rolling window with
+a configured advance. Both policies are operator data under `edge_degradation`,
+as is the bounded observation-ID deduplication capacity. Exact re-delivery of a
+tick is idempotent; conflicting same-time input, out-of-order ticks, timestamp
+leakage and reused IDs with different evidence fail closed.
+
+Every advance yields one auditable status for every configured edge:
+
+- `WARMING` while the baseline is incomplete;
+- `INSUFFICIENT` when the window is sparse or contains ambiguous evidence;
+- `BREACH` when the deterministic detector emits a verified symptom; or
+- `CLEAR` only when a sufficient, unambiguous evaluation emits no symptom.
+
+Only `BREACH` and `CLEAR` advance the shared episode pipeline. In particular,
+missing traffic cannot fabricate a clear tick or close an active episode. Raw
+capture replay uses the same normalized observations and event-time advances,
+and emits canonical bytes containing the evidence statistics and lifecycle
+transitions for deterministic regression checks.

@@ -15,12 +15,16 @@ from detection.pipeline import (
     residual_symptom,
 )
 from detection.ratios import BehavioralRatio, BehavioralRatioMonitor, RatioEvaluation
+from detection.runner import EdgeDetectionRunner, EdgeWindowAdvance, EdgeWindowStatus
 
 __all__ = [
     "BehavioralRatio",
     "BehavioralRatioMonitor",
     "DecompositionEngine",
     "DecompositionWorker",
+    "EdgeDetectionRunner",
+    "EdgeWindowAdvance",
+    "EdgeWindowStatus",
     "EpisodeAction",
     "EpisodeKey",
     "EpisodePersister",

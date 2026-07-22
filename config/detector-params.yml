@@ -75,9 +75,14 @@ liveness:
       maximum_age_seconds: 120.0
       full_score_age_seconds: 300.0
 edge_degradation:
+  window_seconds: 12
+  advance_seconds: 2
+  baseline_warmup_samples: 3
+  dedup_capacity: 10000
   rules:
     - caller: frontend
       downstream: checkout
+      rpc_service: oteldemo.CheckoutService
       minimum_samples: 20
       latency_baseline_floor_ms: 5.0
       error_rate_baseline_floor: 0.01
@@ -87,6 +92,7 @@ edge_degradation:
       full_score_relative_error_rise: 5.0
     - caller: frontend
       downstream: cart
+      rpc_service: oteldemo.CartService
       minimum_samples: 20
       latency_baseline_floor_ms: 5.0
       error_rate_baseline_floor: 0.01
@@ -96,6 +102,7 @@ edge_degradation:
       full_score_relative_error_rise: 5.0
     - caller: checkout
       downstream: cart
+      rpc_service: oteldemo.CartService
       minimum_samples: 20
       latency_baseline_floor_ms: 5.0
       error_rate_baseline_floor: 0.01
@@ -105,6 +112,7 @@ edge_degradation:
       full_score_relative_error_rise: 5.0
     - caller: checkout
       downstream: payment
+      rpc_service: oteldemo.PaymentService
       minimum_samples: 20
       latency_baseline_floor_ms: 5.0
       error_rate_baseline_floor: 0.01
