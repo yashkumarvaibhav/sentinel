@@ -8,7 +8,6 @@ from detection.episodes import (
     EpisodeTransition,
     SymptomEpisodeMachine,
 )
-from detection.log_runner import LogDetectionRunner, LogWindowAdvance, LogWindowStatus
 from detection.pipeline import (
     EpisodePersister,
     EpisodeWorker,
@@ -32,9 +31,6 @@ __all__ = [
     "EpisodePhase",
     "EpisodeTransition",
     "EpisodeWorker",
-    "LogDetectionRunner",
-    "LogWindowAdvance",
-    "LogWindowStatus",
     "RatioEvaluation",
     "SymptomEpisodeMachine",
     "SymptomEpisodePipeline",
