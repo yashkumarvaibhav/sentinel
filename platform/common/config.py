@@ -361,11 +361,39 @@ class SilenceRuleConfig(ConfigModel):
         return self
 
 
+class LivenessStreamConfig(ConfigModel):
+    """One decomposed logical stream expected to remain measurable."""
+
+    service: Identifier
+    signal: Identifier
+
+
 class LivenessConfig(ConfigModel):
     """Configured volume-drop and telemetry-silence rules by service signal."""
 
+    window_seconds: int = Field(ge=1, le=3600)
+    dedup_capacity: int = Field(ge=1, le=10_000_000)
+    streams: tuple[LivenessStreamConfig, ...] = Field(min_length=1)
     drop_rules: dict[SignalName, DropRuleConfig] = Field(min_length=1)
     silence_rules: dict[SignalName, SilenceRuleConfig] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_materialization_policy(self) -> Self:
+        stream_keys = tuple(f"{item.service}.{item.signal}" for item in self.streams)
+        if len(stream_keys) != len(set(stream_keys)):
+            raise ValueError("liveness streams must be unique")
+        rules = set(self.drop_rules) | set(self.silence_rules)
+        unknown_rules = sorted(rules - set(stream_keys))
+        if unknown_rules:
+            raise ValueError(
+                "liveness rules require configured streams: " + ", ".join(unknown_rules)
+            )
+        streams_without_rules = sorted(set(stream_keys) - rules)
+        if streams_without_rules:
+            raise ValueError(
+                "liveness streams require at least one rule: " + ", ".join(streams_without_rules)
+            )
+        return self
 
 
 class EdgeDegradationRuleConfig(ConfigModel):
@@ -641,6 +669,12 @@ def _validate_references(config: SentinelConfig) -> None:
             raise ConfigLoadError(
                 "detector-params.yml: ingress ratio service mapping references an unknown "
                 f"topology service: {logical_service}"
+            )
+    for stream in config.detectors.liveness.streams:
+        if stream.service not in services:
+            raise ConfigLoadError(
+                "detector-params.yml: liveness stream references an unknown topology service: "
+                f"{stream.service}"
             )
 
 

@@ -81,6 +81,11 @@ change_point_saturation:
   maximum_headroom_ratio: 0.2
   full_score_headroom_ratio: 0.05
 liveness:
+  window_seconds: 2
+  dedup_capacity: 10000
+  streams:
+    - service: frontend
+      signal: request_rate
   drop_rules:
     frontend.request_rate:
       minimum_expected_value: 1.5

@@ -5,8 +5,8 @@
 `cascade_night` keeps the frontend volume fully explained by a simulated match
 while a contained payment failure degrades the checkout-to-payment edge. A
 second bounded checkout journey after flag restoration supplies real recovery
-evidence. This capture validates the edge, log and ingress-ratio development
-materializers without claiming detector precision or recall.
+evidence. This capture validates the edge, log, ingress-ratio and liveness
+development materializers without claiming detector precision or recall.
 
 - **Telemetry evidence: REAL.** Logs, metrics and traces came from the contained
   Astronomy Shop testbed and were retained at exact raw-topic offsets.
@@ -22,10 +22,11 @@ materializers without claiming detector precision or recall.
 - **Capture-time runtime config fingerprint:**
   `25b6b55fa226476b2d73a08dbdcde34ba0f117f9936a263d75325daeff89bec0`.
 - **Current replay config fingerprint:**
-  `0fadaa18ffb693544883740080362540de6b0dbdf502d269680edeabfa33cd49`.
-  This differs only because the later log/ratio window policies and
-  telemetry-to-logical service mappings are now versioned configuration; the
-  immutable raw bytes and capture-time fingerprint remain pinned separately.
+  `645eada691f3098f73352d67040ac78e1f48f943f768209696ee558e531e1869`.
+  This differs only because the later log/ratio/liveness materialization
+  policies and telemetry-to-logical service mappings are now versioned
+  configuration; the immutable raw bytes and capture-time fingerprint remain
+  pinned separately.
 
 ## Capture evidence
 
@@ -48,6 +49,9 @@ materializers without claiming detector precision or recall.
 | Active log episodes after replay | 0 |
 | Complete ingress-ratio windows | 2 × 2 configured frontend ratios |
 | Active ratio episodes after replay | 0 |
+| Liveness ticks | 72 × 2 configured frontend paths |
+| Liveness outcomes | DROP: 30 insufficient + 42 clear; SILENCE: 72 clear |
+| Active liveness episodes after replay | 0 |
 
 The legitimate surge remains decomposed as `explained_base=4` plus
 `explained_event=6` with residual 0. The trace evidence simultaneously contains
@@ -85,18 +89,29 @@ deformation. Both produce `CLEAR`/`HELD`, leaving no active ratio episode. The
 materializer counts distinct normalized ingress observations even when several
 requests share one trace, and uses each observation ID as its evidence identity.
 
+The liveness replay consumes the same 72 complete 2-second frontend rate ticks
+after label-free decomposition. During the 30 configured decomposition warmup
+ticks, no frame exists, so `DROP` is explicitly `INSUFFICIENT` rather than a
+fabricated zero; `SILENCE` remains clear because the event-time watermark is
+within the configured grace interval. The remaining 42 frames compare measured
+volume with `explained_base + explained_event` and all clear. The first
+sufficient frame measures 4 requests/s against 4 expected; the last measures 10
+against 10. All 72 silence evaluations clear and no liveness episode remains.
+
 ## Replay provenance and scope
 
 - Raw replay SHA-256:
   `9d84fe76e6064d2c08380970f71ae9d5a6e1d26c8f7791dc89d8dd235211351d`.
 - Decomposition transcript SHA-256:
-  `e605ce2c3b74c61c32e353f3bb364e97402c245c807910c572ae473d60b8a1a1`.
+  `d928fd24e444b39caf62674b5b0908b70682b5883cbff01183b4863c9dbdb5b1`.
 - Edge-detector transcript SHA-256:
-  `9f3e364f4c8bda8aea08ecae2a017be245028fc4dc71137fc57dcb953dcf5c76`.
+  `4b149e0b2327a0a61a026b3868d7de83a83ca43678f4c0991a99552acc8f7785`.
 - Log-detector transcript SHA-256:
-  `cc2d325c810da433b075fcb405c452d9a260aad6b7a3eaf2bedf2f524fb45cc1`.
+  `6831cd471a86f125ef2028d867afdceac1de0117c35f6df18c3481c2bbc1e702`.
 - Ingress-ratio transcript SHA-256:
-  `f6b6006e6f48529eb95fcc63d74af6477a72afabeb40a2c2eeb14c2168fa4d26`.
+  `2e0b02b8c6c36a27bea78d185e79cd70f315d3b7c17ed253734b478db75e34b2`.
+- Liveness transcript SHA-256:
+  `92359f62befe4554a80350f111d07fdddbc0ede9e4e4053489b4fd3b0ee110bf`.
 - The raw capture stays outside git because it is a DVC-scale binary artifact.
   The committed report pins the evidence needed to shape the deterministic
   window materializer.

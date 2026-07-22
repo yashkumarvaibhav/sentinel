@@ -11,6 +11,7 @@ from common.config import (
     EpisodePolicyConfig,
     IngressRatioWindowConfig,
     LivenessConfig,
+    LivenessStreamConfig,
     LogTemplateConfig,
     SequenceRatioRuleConfig,
     SilenceRuleConfig,
@@ -117,8 +118,15 @@ def change_point_saturation_config() -> ChangePointSaturationConfig:
     )
 
 
-def liveness_config() -> LivenessConfig:
+def liveness_config(
+    *,
+    maximum_age_seconds: float = 120.0,
+    full_score_age_seconds: float = 300.0,
+) -> LivenessConfig:
     return LivenessConfig(
+        window_seconds=2,
+        dedup_capacity=1_000,
+        streams=(LivenessStreamConfig(service="frontend", signal="request_rate"),),
         drop_rules={
             "frontend.request_rate": DropRuleConfig(
                 minimum_expected_value=2.0,
@@ -128,8 +136,8 @@ def liveness_config() -> LivenessConfig:
         },
         silence_rules={
             "frontend.request_rate": SilenceRuleConfig(
-                maximum_age_seconds=120.0,
-                full_score_age_seconds=300.0,
+                maximum_age_seconds=maximum_age_seconds,
+                full_score_age_seconds=full_score_age_seconds,
             )
         },
     )

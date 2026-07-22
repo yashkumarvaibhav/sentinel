@@ -19,6 +19,17 @@ from common.settings import Settings
 CONFIG_ROOT = Path(__file__).resolve().parents[2] / "config"
 
 
+def _replace_liveness_service(document: dict[str, Any]) -> None:
+    liveness = document["liveness"]
+    liveness["streams"][0]["service"] = "missing"
+    liveness["drop_rules"]["missing.request_rate"] = liveness["drop_rules"].pop(
+        "frontend.request_rate"
+    )
+    liveness["silence_rules"]["missing.request_rate"] = liveness["silence_rules"].pop(
+        "frontend.request_rate"
+    )
+
+
 def test_committed_config_loads_with_cross_file_references_and_stable_fingerprint() -> None:
     first = load_config(CONFIG_ROOT)
     second = load_config(CONFIG_ROOT)
@@ -56,6 +67,9 @@ def test_committed_config_loads_with_cross_file_references_and_stable_fingerprin
     assert first.detectors.change_point_saturation.pelt_model == "l2"
     assert first.detectors.change_point_saturation.minimum_series_points == 12
     assert first.detectors.change_point_saturation.maximum_headroom_ratio == 0.2
+    assert first.detectors.liveness.window_seconds == 2
+    assert first.detectors.liveness.streams[0].service == "frontend"
+    assert first.detectors.liveness.streams[0].signal == "request_rate"
     assert (
         first.detectors.liveness.drop_rules["frontend.request_rate"].minimum_expected_value == 1.5
     )
@@ -212,10 +226,7 @@ def test_config_models_are_immutable() -> None:
         ),
         (
             "detector-params.yml",
-            lambda document: document["liveness"]["drop_rules"].__setitem__(
-                "missing.request_rate",
-                document["liveness"]["drop_rules"]["frontend.request_rate"],
-            ),
+            _replace_liveness_service,
             "unknown topology service",
         ),
         (

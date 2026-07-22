@@ -29,3 +29,23 @@ Future timestamps, local/non-UTC time, non-finite values, duplicate evidence ref
 unknown configuration services fail before emission. Both symptom kinds retain sorted raw
 evidence references, measured inputs and canonical content-hash identity. Per-stream absolute,
 relative and age policies live under `liveness` in `config/detector-params.yml`.
+
+## Event-time materialization and episodes
+
+`LivenessDetectionRunner` consumes exact decomposed stream ticks, not raw span absence. Explicit
+`liveness.streams` entries select known logical `service.signal` pairs. For a present
+`DecompFrame`, measured volume is `observed` and the expected level is
+`explained_base + explained_event`; the frame ID is the evidence reference. Sufficient
+`CLEAR`/`BREACH` results advance independent `DROP` and `SILENCE` episode keys.
+
+No frame produces an explicit `DROP/INSUFFICIENT` result and cannot clear an active drop episode.
+The same missing tick may advance `SILENCE` using only the configured event-time registration,
+the last valid frame timestamp and the current watermark. A fresh frame clears silence. Duplicate
+frames for one stream/tick, negative volume, negative expectation, misaligned ticks, changed
+evidence-ID reuse and ordering gaps fail closed without advancing either episode.
+
+The runner uses bounded semantic frame-ID deduplication and canonical input fingerprints. Exact
+redelivery of the latest tick is idempotent; a changed same-tick retry is rejected. Capture replay
+starts the expected emitter at the public scenario anchor, consumes all complete 2-second
+decomposition ticks, records `REAL` telemetry / `SIMULATED` stimulus honesty, and never reads the
+private label artifact.
