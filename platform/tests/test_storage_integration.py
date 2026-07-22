@@ -24,12 +24,21 @@ from common.storage import (
 from common.storage._clickhouse import execute as clickhouse_execute
 from common.storage.dev_labels import DevLabelRecord, DevLabelRepository
 from common.storage.migrations import migrate_storage
-from contracts import ContextWindow, DecompFrame, Observation, Symptom, SymptomKind
+from contracts import (
+    ContextWindow,
+    DecompFrame,
+    EpisodeStatus,
+    Observation,
+    Symptom,
+    SymptomEpisode,
+    SymptomKind,
+)
 from detection.decompose import DecompositionEngine, DecompositionWorker
 from tests.factories import (
     behavioral_ratio_config,
     change_point_saturation_config,
     edge_degradation_config,
+    episode_config,
     liveness_config,
     log_template_config,
 )
@@ -153,6 +162,7 @@ async def _round_trip_clickhouse(config: Settings, client: httpx.AsyncClient, su
         change_point_saturation=change_point_saturation_config(),
         liveness=liveness_config(),
         edge_degradation=edge_degradation_config(),
+        episodes=episode_config(),
     )
     engine = DecompositionEngine(configuration=detector, dedup_capacity=100)
     worker = DecompositionWorker(engine=engine, sink=repository)
@@ -225,6 +235,44 @@ async def _round_trip_postgres(config: Settings, pool: PostgresPool, suffix: str
     assert await repository.get_incident(incident.incident_id) == incident
     assert await repository.get_audit(audit.entry_id) == audit
     assert await labels.get(label.label_id) == label
+
+    await _round_trip_episode(repository, ts, suffix)
+
+
+async def _round_trip_episode(repository: PostgresRepository, ts: datetime, suffix: str) -> None:
+    episode = SymptomEpisode(
+        episode_id=f"episode-{suffix}",
+        kind=SymptomKind.RESIDUAL_EXCEED,
+        service="frontend",
+        signal="request_rate",
+        status=EpisodeStatus.ACTIVE,
+        opened_ts=ts,
+        confirmed_ts=ts + timedelta(seconds=2),
+        last_breach_ts=ts + timedelta(seconds=2),
+        peak_score=0.9,
+        breach_tick_count=3,
+        revision=1,
+        opening_symptom_id=f"symptom-{suffix}-0",
+        peak_symptom_id=f"symptom-{suffix}-0",
+        latest_symptom_id=f"symptom-{suffix}-2",
+        evidence_refs=(f"frame-{suffix}-0",),
+    )
+    advanced = episode.model_copy(
+        update={
+            "status": EpisodeStatus.CLOSED,
+            "last_breach_ts": ts + timedelta(seconds=2),
+            "closed_ts": ts + timedelta(seconds=5),
+            "revision": 3,
+        }
+    )
+
+    assert await repository.put_episode(episode) is True
+    assert await repository.put_episode(episode) is False  # identical revision is a no-op
+    assert await repository.get_episode(episode.episode_id) == episode
+
+    assert await repository.put_episode(advanced) is True  # higher revision advances
+    assert await repository.put_episode(episode) is False  # stale revision cannot regress
+    assert await repository.get_episode(episode.episode_id) == advanced
 
 
 async def _drop_test_storage(

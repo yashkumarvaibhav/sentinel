@@ -145,13 +145,22 @@ async def _migrate_postgres(config: Settings, pool: PostgresPool) -> None:
             )
             applied = {cast(str, row[0]) async for row in cursor}
 
+        available: dict[str, str] = {
+            "schema": schema,
+            "dev_schema": config.postgres_dev_schema,
+        }
         for migration in load_migrations("postgres"):
             if migration.version in applied:
                 continue
+            tokens = {match.group("name") for match in _TEMPLATE_TOKEN.finditer(migration.sql)}
+            unknown = sorted(tokens - available.keys())
+            if unknown:
+                raise ValueError(
+                    f"{migration.path.name}: unknown template tokens: {', '.join(unknown)}"
+                )
             rendered = render_migration(
                 migration,
-                schema=schema,
-                dev_schema=config.postgres_dev_schema,
+                **{name: available[name] for name in tokens},
             )
             async with connection.transaction():
                 await connection.execute(rendered, prepare=False)

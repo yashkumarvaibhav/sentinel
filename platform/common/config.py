@@ -25,6 +25,8 @@ from pydantic import (
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
 
+from contracts import SymptomKind
+
 type Identifier = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=255),
@@ -386,6 +388,40 @@ class EdgeDegradationConfig(ConfigModel):
         return self
 
 
+class EpisodePolicyConfig(ConfigModel):
+    """Per-symptom-kind breach/clear persistence and score-deadband hysteresis."""
+
+    open_after_ticks: int = Field(ge=1, le=1000)
+    close_after_ticks: int = Field(ge=1, le=1000)
+    breach_score: Probability
+    clear_score: Probability
+
+    @model_validator(mode="after")
+    def validate_hysteresis(self) -> Self:
+        if self.breach_score == 0.0:
+            raise ValueError("breach_score must be greater than zero")
+        if self.clear_score >= self.breach_score:
+            raise ValueError("clear_score must be less than breach_score")
+        return self
+
+
+class EpisodeConfig(ConfigModel):
+    """Anti-flapping episode lifecycle policy keyed by symptom kind."""
+
+    policies: dict[Identifier, EpisodePolicyConfig] = Field(min_length=1)
+
+    @field_validator("policies")
+    @classmethod
+    def validate_symptom_kinds(
+        cls, values: dict[str, EpisodePolicyConfig]
+    ) -> dict[str, EpisodePolicyConfig]:
+        known = {kind.value for kind in SymptomKind}
+        unknown = sorted(set(values) - known)
+        if unknown:
+            raise ValueError(f"unknown symptom kinds: {', '.join(unknown)}")
+        return values
+
+
 class DetectorConfig(ConfigModel):
     version: Literal[1]
     feature_window_seconds: int = Field(ge=1, le=3600)
@@ -400,6 +436,7 @@ class DetectorConfig(ConfigModel):
     change_point_saturation: ChangePointSaturationConfig
     liveness: LivenessConfig
     edge_degradation: EdgeDegradationConfig
+    episodes: EpisodeConfig
 
     @model_validator(mode="after")
     def validate_watermark(self) -> Self:

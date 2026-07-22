@@ -11,6 +11,7 @@ from pydantic import JsonValue
 
 from common.storage.models import AuditRecord, IncidentRecord
 from common.storage.pool import PostgresPool
+from contracts import SymptomEpisode
 
 
 class PostgresRepository:
@@ -20,6 +21,7 @@ class PostgresRepository:
         self._pool = pool
         self._incidents = sql.Identifier(schema, "incidents")
         self._audit_entries = sql.Identifier(schema, "audit_entries")
+        self._symptom_episodes = sql.Identifier(schema, "symptom_episodes")
 
     async def put_incident(self, record: IncidentRecord) -> None:
         """Idempotently create or replace the current state for an incident."""
@@ -68,6 +70,58 @@ class PostgresRepository:
             updated_at=cast(datetime, row[3]),
             payload=cast(dict[str, JsonValue], row[4]),
         )
+
+    async def put_episode(self, episode: SymptomEpisode) -> bool:
+        """Idempotently persist an episode; skip a stale (lower-revision) write.
+
+        The revision guard makes at-least-once redelivery and out-of-order
+        retries safe: a replayed older state can never overwrite a newer one.
+        Returns whether this call inserted or advanced the stored record.
+        """
+        updated_at = episode.closed_ts if episode.closed_ts is not None else episode.last_breach_ts
+        query = sql.SQL(
+            """
+            INSERT INTO {table}
+                (episode_id, kind, service, signal, status, revision,
+                 opened_at, updated_at, payload)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (episode_id) DO UPDATE SET
+                status = EXCLUDED.status,
+                revision = EXCLUDED.revision,
+                updated_at = EXCLUDED.updated_at,
+                payload = EXCLUDED.payload
+            WHERE {table}.revision < EXCLUDED.revision
+            RETURNING episode_id
+            """
+        ).format(table=self._symptom_episodes)
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                query,
+                (
+                    episode.episode_id,
+                    episode.kind.value,
+                    episode.service,
+                    episode.signal,
+                    episode.status.value,
+                    episode.revision,
+                    episode.opened_ts,
+                    updated_at,
+                    Jsonb(episode.model_dump(mode="json")),
+                ),
+            )
+            return await cursor.fetchone() is not None
+
+    async def get_episode(self, episode_id: str) -> SymptomEpisode | None:
+        """Fetch and strictly revalidate one episode by its stable id."""
+        query = sql.SQL("SELECT payload::text FROM {} WHERE episode_id = %s").format(
+            self._symptom_episodes
+        )
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(query, (episode_id,))
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return SymptomEpisode.model_validate_json(cast(str, row[0]))
 
     async def append_audit(self, record: AuditRecord) -> bool:
         """Append once by entry id; return whether this call inserted the row."""

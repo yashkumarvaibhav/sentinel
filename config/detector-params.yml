@@ -112,3 +112,45 @@ edge_degradation:
       full_score_relative_latency_rise: 2.0
       trigger_relative_error_rise: 1.0
       full_score_relative_error_rise: 5.0
+episodes:
+  # Anti-flapping lifecycle policy per symptom kind. open/close_after_ticks are
+  # the breach/clear persistence counts; breach_score/clear_score are the
+  # hysteresis deadband on the underlying symptom score. Starter values, tuned
+  # only on disjoint development seeds; frozen/calibrated with 2.8 per-symptom
+  # scoring.
+  policies:
+    RESIDUAL_EXCEED:
+      open_after_ticks: 3
+      close_after_ticks: 3
+      breach_score: 0.5
+      clear_score: 0.2
+    RATIO_DEFORM:
+      open_after_ticks: 3
+      close_after_ticks: 3
+      breach_score: 0.5
+      clear_score: 0.2
+    LOG_BURST:
+      open_after_ticks: 3
+      close_after_ticks: 3
+      breach_score: 0.5
+      clear_score: 0.2
+    EDGE_DEGRADED:
+      open_after_ticks: 3
+      close_after_ticks: 3
+      breach_score: 0.5
+      clear_score: 0.2
+    SATURATION:
+      open_after_ticks: 2
+      close_after_ticks: 4
+      breach_score: 0.5
+      clear_score: 0.2
+    DROP:
+      open_after_ticks: 3
+      close_after_ticks: 3
+      breach_score: 0.5
+      clear_score: 0.2
+    SILENCE:
+      open_after_ticks: 2
+      close_after_ticks: 2
+      breach_score: 0.5
+      clear_score: 0.2

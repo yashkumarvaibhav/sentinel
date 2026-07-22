@@ -125,6 +125,15 @@
       "title": "DecompFrame",
       "type": "object"
     },
+    "EpisodeStatus": {
+      "description": "Lifecycle state of an anti-flapping symptom episode.",
+      "enum": [
+        "ACTIVE",
+        "CLOSED"
+      ],
+      "title": "EpisodeStatus",
+      "type": "string"
+    },
     "FiniteFloat": {
       "type": "number"
     },
@@ -262,6 +271,95 @@
       "title": "Symptom",
       "type": "object"
     },
+    "SymptomEpisode": {
+      "additionalProperties": false,
+      "description": "A hysteresis-guarded lifecycle over repeated symptoms of one key.\n\nAn episode groups the recurring symptoms of a single ``(kind, service,\nsignal)`` into one durable incident-precursor. It opens only after a symptom\npersists (breach persistence + a score deadband) and closes only after it\nclears for long enough, so a momentary blip can never open one and a key can\nnever flap. Raw ``Symptom`` evidence is untouched; an episode only points at\nit via the opening, peak and latest symptom ids.",
+      "properties": {
+        "breach_tick_count": {
+          "minimum": 1,
+          "title": "Breach Tick Count",
+          "type": "integer"
+        },
+        "closed_ts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcDatetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "confirmed_ts": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "episode_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "evidence_refs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/SymptomKind"
+        },
+        "last_breach_ts": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "latest_symptom_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "opened_ts": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "opening_symptom_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "peak_score": {
+          "$ref": "#/$defs/Probability"
+        },
+        "peak_symptom_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "revision": {
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "service": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "signal": {
+          "$ref": "#/$defs/SignalName"
+        },
+        "status": {
+          "$ref": "#/$defs/EpisodeStatus"
+        }
+      },
+      "required": [
+        "episode_id",
+        "kind",
+        "service",
+        "signal",
+        "status",
+        "opened_ts",
+        "confirmed_ts",
+        "last_breach_ts",
+        "peak_score",
+        "breach_tick_count",
+        "revision",
+        "opening_symptom_id",
+        "peak_symptom_id",
+        "latest_symptom_id"
+      ],
+      "title": "SymptomEpisode",
+      "type": "object"
+    },
     "SymptomKind": {
       "description": "Deterministic evidence categories understood by the decision plane.",
       "enum": [
@@ -318,6 +416,9 @@
     },
     {
       "$ref": "#/$defs/Symptom"
+    },
+    {
+      "$ref": "#/$defs/SymptomEpisode"
     }
   ],
   "title": "SentinelContract"

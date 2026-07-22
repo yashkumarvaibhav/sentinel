@@ -14,6 +14,7 @@ from tests.factories import (
     behavioral_ratio_config,
     change_point_saturation_config,
     edge_degradation_config,
+    episode_config,
     liveness_config,
     log_template_config,
 )
@@ -146,4 +147,5 @@ def _detector() -> DetectorConfig:
         change_point_saturation=change_point_saturation_config(),
         liveness=liveness_config(),
         edge_degradation=edge_degradation_config(),
+        episodes=episode_config(),
     )

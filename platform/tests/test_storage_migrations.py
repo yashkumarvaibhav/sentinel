@@ -30,7 +30,7 @@ def test_clickhouse_migration_is_versioned_idempotent_and_retained() -> None:
 def test_postgres_migration_separates_runtime_and_dev_label_schemas() -> None:
     migrations = load_migrations("postgres")
 
-    assert [migration.version for migration in migrations] == ["0001"]
+    assert [migration.version for migration in migrations] == ["0001", "0002"]
     sql = render_migration(
         migrations[0],
         schema="sentinel_test",
@@ -40,6 +40,18 @@ def test_postgres_migration_separates_runtime_and_dev_label_schemas() -> None:
     assert "sentinel_test.audit_entries" in sql
     assert "sentinel_test_dev.labels" in sql
     assert "sentinel_test.labels" not in sql
+
+
+def test_episode_migration_uses_only_the_runtime_schema_token() -> None:
+    migrations = {migration.version: migration for migration in load_migrations("postgres")}
+
+    sql = render_migration(migrations["0002"], schema="sentinel_test")
+    assert "sentinel_test.symptom_episodes" in sql
+    assert "{{dev_schema}}" not in sql
+
+    # The renderer stays strict: an extra, unreferenced token is rejected.
+    with pytest.raises(ValueError, match="template mismatch"):
+        render_migration(migrations["0002"], schema="sentinel_test", dev_schema="unused")
 
 
 def test_migration_versions_are_sorted_and_unique() -> None:

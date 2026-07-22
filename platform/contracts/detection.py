@@ -6,7 +6,7 @@ import math
 from enum import StrEnum
 from typing import Self
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from contracts._base import (
     ContractModel,
@@ -88,3 +88,61 @@ class Symptom(ContractModel):
     def unique_evidence_refs(cls, values: tuple[str, ...]) -> tuple[str, ...]:
         """Avoid counting the same evidence link twice downstream."""
         return ensure_unique(values, field_name="evidence_refs")
+
+
+class EpisodeStatus(StrEnum):
+    """Lifecycle state of an anti-flapping symptom episode."""
+
+    ACTIVE = "ACTIVE"
+    CLOSED = "CLOSED"
+
+
+class SymptomEpisode(ContractModel):
+    """A hysteresis-guarded lifecycle over repeated symptoms of one key.
+
+    An episode groups the recurring symptoms of a single ``(kind, service,
+    signal)`` into one durable incident-precursor. It opens only after a symptom
+    persists (breach persistence + a score deadband) and closes only after it
+    clears for long enough, so a momentary blip can never open one and a key can
+    never flap. Raw ``Symptom`` evidence is untouched; an episode only points at
+    it via the opening, peak and latest symptom ids.
+    """
+
+    episode_id: Identifier
+    kind: SymptomKind
+    service: Identifier
+    signal: SignalName
+    status: EpisodeStatus
+    opened_ts: UtcDatetime
+    confirmed_ts: UtcDatetime
+    last_breach_ts: UtcDatetime
+    closed_ts: UtcDatetime | None = None
+    peak_score: Probability
+    breach_tick_count: int = Field(ge=1)
+    revision: int = Field(ge=1)
+    opening_symptom_id: Identifier
+    peak_symptom_id: Identifier
+    latest_symptom_id: Identifier
+    evidence_refs: tuple[Identifier, ...] = ()
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def unique_episode_evidence_refs(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        """The peak-moment evidence links are an ordered set."""
+        return ensure_unique(values, field_name="evidence_refs")
+
+    @model_validator(mode="after")
+    def validate_lifecycle(self) -> Self:
+        """Enforce a monotone onset→confirm→last-breach→close timeline."""
+        if self.confirmed_ts < self.opened_ts:
+            raise ValueError("confirmed_ts must be greater than or equal to opened_ts")
+        if self.last_breach_ts < self.confirmed_ts:
+            raise ValueError("last_breach_ts must be greater than or equal to confirmed_ts")
+        if self.status is EpisodeStatus.CLOSED:
+            if self.closed_ts is None:
+                raise ValueError("a closed episode must record closed_ts")
+            if self.closed_ts < self.last_breach_ts:
+                raise ValueError("closed_ts must be greater than or equal to last_breach_ts")
+        elif self.closed_ts is not None:
+            raise ValueError("an active episode must not record closed_ts")
+        return self

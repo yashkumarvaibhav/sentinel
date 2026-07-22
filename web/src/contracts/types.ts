@@ -6,7 +6,7 @@
 /**
  * Public contracts exchanged between Sentinel planes.
  */
-export type SentinelContract = Observation | ContextWindow | DecompFrame | Symptom;
+export type SentinelContract = Observation | ContextWindow | DecompFrame | Symptom | SymptomEpisode;
 export type TelemetryScalar = string | boolean | number;
 export type Identifier = string;
 export type FlowRefs = Identifier[];
@@ -32,6 +32,13 @@ export type SymptomKind =
   | "DEPLOY_MARKER"
   | "DROP"
   | "SILENCE";
+export type BreachTickCount = number;
+export type EvidenceRefs1 = Identifier[];
+export type Revision = number;
+/**
+ * Lifecycle state of an anti-flapping symptom episode.
+ */
+export type EpisodeStatus = "ACTIVE" | "CLOSED";
 
 /**
  * One event-time telemetry value, containing evidence but never answer-key data.
@@ -98,4 +105,32 @@ export interface Symptom {
   service: Identifier;
   signal: SignalName;
   symptom_id: Identifier;
+}
+/**
+ * A hysteresis-guarded lifecycle over repeated symptoms of one key.
+ *
+ * An episode groups the recurring symptoms of a single ``(kind, service,
+ * signal)`` into one durable incident-precursor. It opens only after a symptom
+ * persists (breach persistence + a score deadband) and closes only after it
+ * clears for long enough, so a momentary blip can never open one and a key can
+ * never flap. Raw ``Symptom`` evidence is untouched; an episode only points at
+ * it via the opening, peak and latest symptom ids.
+ */
+export interface SymptomEpisode {
+  breach_tick_count: BreachTickCount;
+  closed_ts?: UtcDatetime | null;
+  confirmed_ts: UtcDatetime;
+  episode_id: Identifier;
+  evidence_refs?: EvidenceRefs1;
+  kind: SymptomKind;
+  last_breach_ts: UtcDatetime;
+  latest_symptom_id: Identifier;
+  opened_ts: UtcDatetime;
+  opening_symptom_id: Identifier;
+  peak_score: Probability;
+  peak_symptom_id: Identifier;
+  revision: Revision;
+  service: Identifier;
+  signal: SignalName;
+  status: EpisodeStatus;
 }

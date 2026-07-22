@@ -55,6 +55,14 @@ def test_committed_config_loads_with_cross_file_references_and_stable_fingerprin
     assert first.detectors.edge_degradation.rules[0].caller == "frontend"
     assert first.detectors.edge_degradation.rules[0].downstream == "checkout"
     assert first.detectors.edge_degradation.rules[0].minimum_samples == 20
+    assert set(first.detectors.episodes.policies) >= {
+        "RESIDUAL_EXCEED",
+        "SATURATION",
+        "SILENCE",
+    }
+    assert first.detectors.episodes.policies["RESIDUAL_EXCEED"].open_after_ticks == 3
+    assert first.detectors.episodes.policies["RESIDUAL_EXCEED"].clear_score == 0.2
+    assert first.detectors.episodes.policies["SATURATION"].close_after_ticks == 4
     assert any(cohort.protected for cohort in first.cohorts.cohorts)
     assert {slo.service for slo in first.slos.slos} <= {
         service.service for service in first.topology.services
@@ -196,6 +204,34 @@ def test_config_models_are_immutable() -> None:
                 document["edge_degradation"]["rules"][0]
             ),
             "unique caller/downstream pairs",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["episodes"]["policies"]["RESIDUAL_EXCEED"].__setitem__(
+                "clear_score", 0.6
+            ),
+            "clear_score must be less than breach_score",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["episodes"]["policies"]["RESIDUAL_EXCEED"].__setitem__(
+                "breach_score", 0.0
+            ),
+            "breach_score must be greater than zero",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["episodes"]["policies"]["RESIDUAL_EXCEED"].__setitem__(
+                "open_after_ticks", 0
+            ),
+            "open_after_ticks",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["episodes"]["policies"].__setitem__(
+                "MYSTERY", document["episodes"]["policies"]["RESIDUAL_EXCEED"]
+            ),
+            "unknown symptom kinds",
         ),
     ],
 )

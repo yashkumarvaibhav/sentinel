@@ -7,6 +7,8 @@ from common.config import (
     DropRuleConfig,
     EdgeDegradationConfig,
     EdgeDegradationRuleConfig,
+    EpisodeConfig,
+    EpisodePolicyConfig,
     LivenessConfig,
     LogTemplateConfig,
     SequenceRatioRuleConfig,
@@ -146,3 +148,19 @@ def edge_degradation_config() -> EdgeDegradationConfig:
             ),
         )
     )
+
+
+def episode_config(
+    *,
+    open_after_ticks: int = 3,
+    close_after_ticks: int = 3,
+    breach_score: float = 0.5,
+    clear_score: float = 0.2,
+) -> EpisodeConfig:
+    policy = EpisodePolicyConfig(
+        open_after_ticks=open_after_ticks,
+        close_after_ticks=close_after_ticks,
+        breach_score=breach_score,
+        clear_score=clear_score,
+    )
+    return EpisodeConfig(policies={"RESIDUAL_EXCEED": policy, "SATURATION": policy})
