@@ -12,7 +12,7 @@ from lab.scenarios.models import ScenarioProfile
 SCENARIO_ROOT = Path(__file__).resolve().parents[2] / "lab" / "scenarios"
 
 
-@pytest.mark.parametrize("profile_name", ["quiet_day", "match_night"])
+@pytest.mark.parametrize("profile_name", ["quiet_day", "match_night", "attack_day"])
 def test_committed_profiles_have_disjoint_seed_sets_and_bounded_fixed_target_load(
     profile_name: str,
 ) -> None:
@@ -21,6 +21,22 @@ def test_committed_profiles_have_disjoint_seed_sets_and_bounded_fixed_target_loa
     assert set(profile.seeds.development).isdisjoint(profile.seeds.held_out)
     assert profile.telemetry.target == "astronomy-shop/frontend-proxy"
     assert max(phase.rate_rps for phase in profile.load_phases) <= 50
+
+
+def test_attack_day_is_a_no_event_control_with_a_labeled_surge() -> None:
+    profile = load_profile(SCENARIO_ROOT / "attack_day.yml")
+    artifacts = compile_profile(
+        profile,
+        seed=profile.seeds.held_out[0],
+        purpose=SeedPurpose.HELD_OUT,
+    )
+
+    # The control profile carries a labeled attack but *no* event context, so a
+    # detection can never be explained away by the calendar.
+    assert profile.contexts == ()
+    assert artifacts.context_feed["windows"] == []
+    assert profile.residual_labels
+    assert artifacts.labels["intervals"]
 
 
 def test_compilation_is_byte_stable_and_seed_purpose_is_enforced() -> None:

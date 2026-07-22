@@ -59,6 +59,47 @@ def test_expected_event_volume_is_not_labeled_but_offset_is() -> None:
     assert score.metrics.recall.value == 1.0
 
 
+def test_attack_day_pure_attack_is_fully_flagged_without_any_event_context() -> None:
+    # The control profile: the same surge shape as match_night's event, but with
+    # no calendar context. Because nothing explains the volume, every attack tick
+    # is unexplained residual — detection does not depend on an event existing.
+    profile = load_profile(SCENARIO_ROOT / "attack_day.yml")
+    artifacts = compile_profile(
+        profile,
+        seed=profile.seeds.held_out[0],
+        purpose=SeedPurpose.HELD_OUT,
+    )
+    counts = (4,) * 64 + (16,) * 20
+    timestamps = tuple(
+        START + timedelta(seconds=index, milliseconds=100 + sample * 10)
+        for index, count in enumerate(counts)
+        for sample in range(count)
+    )
+    observations = build_rate_observations(
+        profile=profile,
+        run_id="test-attack",
+        span_timestamps=timestamps,
+    )
+
+    score = score_observations(
+        profile=profile,
+        artifacts=artifacts,
+        observations=observations,
+        detector=_detector(),
+        expected_span_count=sum(counts),
+        actual_span_count=len(timestamps),
+    )
+
+    assert profile.contexts == ()  # the surge is explained by no event
+    assert score.telemetry_completeness == 1.0
+    assert score.metrics.true_positive == 10  # the whole 20s surge / 2s ticks
+    assert score.metrics.false_positive == 0
+    assert score.metrics.false_negative == 0
+    assert score.metrics.precision.value == 1.0
+    assert score.metrics.recall.value == 1.0
+    assert score.detection_latency_p95 == 0.0
+
+
 def test_quiet_profile_has_no_false_positive_on_realistic_constant_arrivals() -> None:
     profile = load_profile(SCENARIO_ROOT / "quiet_day.yml")
     artifacts = compile_profile(

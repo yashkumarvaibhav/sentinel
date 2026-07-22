@@ -1,0 +1,25 @@
+version: 1
+scenario_id: attack_day
+description: A pure volume attack with no event on the calendar; the whole surge is unexplained residual.
+honesty: SIMULATED
+telemetry:
+  target: astronomy-shop/frontend-proxy
+  source_service: frontend-proxy
+  logical_service: frontend
+  logical_signal: request_rate
+  tick_seconds: 2
+seeds:
+  development: [301, 313]
+  held_out: [9043, 9067]
+load_phases:
+  - name: warmup
+    duration_seconds: 64
+    rate_rps: 4
+  - name: attack_surge
+    duration_seconds: 20
+    rate_rps: 16
+contexts: []
+residual_labels:
+  - label_id: attack_core
+    start_offset_seconds: 64
+    end_offset_seconds: 84
