@@ -49,6 +49,13 @@ components:
 
 # --- the demo's in-cluster collector ----------------------------------------
 opentelemetry-collector:
+  # k3d reports each node's Docker-network IP as InternalIP, but kubelet's
+  # 10250 listener is inside the node container's network namespace. A normal
+  # pod repeatedly gets connection refused at that address. Host networking
+  # here means the contained k3d node, never the shared physical host; it lets
+  # each DaemonSet collector reach only its own kubelet on loopback.
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
   presets:
     # Host metrics read the *host's* /proc through the node container, which on
     # a shared machine describes other people's workloads, not the testbed.
@@ -61,6 +68,12 @@ opentelemetry-collector:
     clusterMetrics:
       enabled: true
   config:
+    receivers:
+      kubeletstats:
+        endpoint: 127.0.0.1:10250
+        # A 144-second scenario must contain at least the detector's twelve
+        # real points after startup jitter; the chart default is 20 seconds.
+        collection_interval: 10s
     exporters:
       # Removed: they point at the backends we just disabled. Left defined,
       # their configs fail validation.

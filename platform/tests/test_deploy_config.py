@@ -16,3 +16,24 @@ def test_collector_raw_bus_batches_have_a_hard_item_ceiling() -> None:
     assert batch["send_batch_size"] == 256
     assert batch["send_batch_max_size"] == 256
     assert batch["send_batch_max_size"] <= batch["send_batch_size"]
+
+
+def test_k3d_collector_can_reach_local_kubelet_at_detector_cadence() -> None:
+    document = yaml.safe_load(
+        (REPO_ROOT / "lab" / "testbed" / "otel-demo-values.yaml").read_text(encoding="utf-8")
+    )
+
+    collector = document["opentelemetry-collector"]
+    kubelet = collector["config"]["receivers"]["kubeletstats"]
+    assert collector["hostNetwork"] is True
+    assert collector["dnsPolicy"] == "ClusterFirstWithHostNet"
+    assert kubelet["endpoint"] == "127.0.0.1:10250"
+    assert kubelet["collection_interval"] == "10s"
+
+
+def test_checkout_journey_preallocates_for_slow_successful_iterations() -> None:
+    script = (REPO_ROOT / "lab" / "loadgen" / "scenario.js").read_text(encoding="utf-8")
+
+    assert "const preAllocatedVUs = journey === 'checkout'" in script
+    assert "Math.min(Math.max(phase.rate_rps * 5, 10), 50)" in script
+    assert "preAllocatedVUs," in script

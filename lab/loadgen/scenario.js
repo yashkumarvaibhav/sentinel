@@ -31,13 +31,21 @@ for (const phase of schedule.phases) {
   if (phase.rate_rps < 1 || phase.rate_rps > 50) {
     throw new Error(`phase rate outside 1..50 rps: ${phase.rate_rps}`);
   }
+  // Checkout performs three sequential requests and successful downstream
+  // calls can take more than one second under recovery load. Preallocate for
+  // five seconds of concurrency so k6 delivers the requested arrival rate
+  // instead of failing the zero-dropped-iterations honesty gate while it
+  // slowly grows the worker pool. Browse traffic keeps its tighter budget.
+  const preAllocatedVUs = journey === 'checkout'
+    ? Math.min(Math.max(phase.rate_rps * 5, 10), 50)
+    : Math.min(Math.max(phase.rate_rps, 2), 20);
   scenarios[phase.name] = {
     executor: 'constant-arrival-rate',
     rate: phase.rate_rps,
     timeUnit: '1s',
     duration: `${phase.duration_seconds}s`,
     startTime: `${phase.start_offset_seconds}s`,
-    preAllocatedVUs: Math.min(Math.max(phase.rate_rps, 2), 20),
+    preAllocatedVUs,
     maxVUs: 50,
     gracefulStop: '0s',
   };
