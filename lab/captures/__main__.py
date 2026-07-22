@@ -49,7 +49,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     record.add_argument("--repo-root", type=Path, required=True)
     record.add_argument(
         "--profile",
-        choices=("quiet_day", "match_night", "attack_day", "cascade_night"),
+        choices=("quiet_day", "match_night", "attack_day", "cascade_night", "combo_night"),
         required=True,
     )
     record.add_argument("--seed", type=int, required=True)

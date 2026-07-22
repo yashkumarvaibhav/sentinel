@@ -15,6 +15,7 @@ from lab.scenarios.models import ScenarioProfile
 from lab.scoring.live import (
     build_checkout_journey_job,
     build_k6_job,
+    build_path_attack_job,
     execute_stimuli,
     expected_request_count,
     render_stimulus_executions,
@@ -62,6 +63,33 @@ def test_checkout_journey_is_rate_capped_and_has_no_target_override() -> None:
     assert env["SENTINEL_JOURNEY"] == "checkout"
     assert env["SENTINEL_RATE_RPS"] == "2"
     assert env["SENTINEL_DURATION_SECONDS"] == "20"
+
+
+def test_combo_path_attack_is_fixed_target_capped_and_counted_as_primary_volume() -> None:
+    profile = load_profile(SCENARIO_ROOT / "combo_night.yml")
+    schedule = compile_profile(
+        profile,
+        seed=profile.seeds.development[0],
+        purpose=SeedPurpose.DEVELOPMENT,
+    ).schedule
+    stimulus = next(item for item in schedule.stimuli if item.kind == "k6_path_attack")
+
+    job = build_path_attack_job(
+        stimulus,
+        job_name="stim-path-attack",
+        run_id="attack-abc",
+        user_agent="sentinel-score/run-combo/attack/abc",
+    )
+    container = job["spec"]["template"]["spec"]["containers"][0]
+    env = {item["name"]: item["value"] for item in container["env"]}
+
+    assert container["resources"]["limits"] == {"cpu": "1", "memory": "256Mi"}
+    assert "TARGET" not in env
+    assert env["SENTINEL_JOURNEY"] == "path_attack"
+    assert env["SENTINEL_ATTACK_PATH"] == "/"
+    assert env["SENTINEL_RATE_RPS"] == "20"
+    assert env["SENTINEL_USER_AGENT"] == "sentinel-score/run-combo/attack/abc"
+    assert expected_request_count(schedule) == 6_856
 
 
 def test_live_anchor_waits_for_the_complete_marker_burst(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -130,6 +158,7 @@ def test_span_query_deduplicates_by_observation_without_unbounded_final(
     query = commands[0][-1]
     assert " FINAL" not in query
     assert "PREWHERE service = 'frontend-proxy'" in query
+    assert "startsWith" in query
     assert "GROUP BY observation_id" in query
     assert timestamps[1] - timestamps[0] == timedelta(seconds=1)
 

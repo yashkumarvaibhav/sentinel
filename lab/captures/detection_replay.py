@@ -78,7 +78,10 @@ def _scenario_spans(
             (
                 item
                 for item in ingress
-                if item.attributes.get("user_agent") == capture.manifest.correlation_user_agent
+                if _matches_correlation_user_agent(
+                    item.attributes.get("user_agent"),
+                    capture.manifest.correlation_user_agent,
+                )
             ),
             key=lambda item: (item.ts, item.observation_id),
         )
@@ -94,3 +97,7 @@ def _scenario_spans(
         )
     )
     return spans, anchors
+
+
+def _matches_correlation_user_agent(value: object, root: str) -> bool:
+    return isinstance(value, str) and (value == root or value.startswith(f"{root}/"))

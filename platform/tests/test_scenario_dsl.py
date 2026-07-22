@@ -15,13 +15,20 @@ from lab.scenarios import (
     schedule_payload,
     write_artifacts,
 )
+from lab.scenarios.capabilities import (
+    missing_positive_kinds,
+    validate_symptom_label_capabilities,
+)
 from lab.scenarios.models import ScenarioProfile
+
+from contracts import SymptomKind
 
 SCENARIO_ROOT = Path(__file__).resolve().parents[2] / "lab" / "scenarios"
 
 
 @pytest.mark.parametrize(
-    "profile_name", ["quiet_day", "match_night", "attack_day", "cascade_night"]
+    "profile_name",
+    ["quiet_day", "match_night", "attack_day", "cascade_night", "combo_night"],
 )
 def test_committed_profiles_have_disjoint_seed_sets_and_bounded_fixed_target_load(
     profile_name: str,
@@ -86,6 +93,96 @@ def test_cascade_night_keeps_volume_explained_while_a_downstream_fault_runs() ->
         }
     ]
     assert "symptom_intervals" not in schedule_payload(artifacts.schedule)
+
+
+def test_combo_night_compiles_attack_and_fault_without_claiming_unsupported_kinds() -> None:
+    profile = load_profile(SCENARIO_ROOT / "combo_night.yml")
+    artifacts = compile_profile(
+        profile,
+        seed=profile.seeds.development[0],
+        purpose=SeedPurpose.DEVELOPMENT,
+    )
+
+    assert len(profile.contexts) == 1
+    assert profile.contexts[0].expected_delta == {"frontend.request_rate": 2.5}
+    assert [stimulus.kind for stimulus in profile.stimuli] == [
+        "flagd",
+        "k6_path_attack",
+        "k6_journey",
+        "k6_journey",
+    ]
+    assert {label.kind for label in profile.symptom_labels} == {
+        SymptomKind.RATIO_DEFORM.value,
+        SymptomKind.LOG_BURST.value,
+        SymptomKind.EDGE_DEGRADED.value,
+    }
+    assert profile.residual_labels[0].stimulus_id == "behavior_attack"
+    assert missing_positive_kinds(profile) == (
+        SymptomKind.SATURATION,
+        SymptomKind.DROP,
+        SymptomKind.SILENCE,
+    )
+    validate_symptom_label_capabilities(profile)
+    assert "symptom_intervals" not in schedule_payload(artifacts.schedule)
+    assert "intervals" not in schedule_payload(artifacts.schedule)
+
+
+def test_combo_labels_follow_measured_attack_and_fault_execution() -> None:
+    profile = load_profile(SCENARIO_ROOT / "combo_night.yml")
+    artifacts = compile_profile(
+        profile,
+        seed=profile.seeds.development[0],
+        purpose=SeedPurpose.DEVELOPMENT,
+    )
+
+    materialized = materialize_symptom_labels(
+        artifacts,
+        stimulus_offsets={
+            "behavior_attack": (126.25, 306.75),
+            "payment_failure": (125.5, 305.5),
+        },
+    )
+
+    assert materialized["intervals"] == [
+        {
+            "end_offset_seconds": 306.75,
+            "label_id": "behavior-attack-volume",
+            "start_offset_seconds": 126.25,
+            "stimulus_id": "behavior_attack",
+        }
+    ]
+    symptom_intervals = cast(list[dict[str, object]], materialized["symptom_intervals"])
+    assert {
+        (item["kind"], item["service"], item["signal"], item["start_offset_seconds"])
+        for item in symptom_intervals
+    } == {
+        ("RATIO_DEFORM", "frontend", "path_entropy", 126.25),
+        ("LOG_BURST", "payment", "log_template_rate", 125.5),
+        ("EDGE_DEGRADED", "checkout", "dependency.payment", 125.5),
+    }
+
+
+def test_capability_oracle_rejects_unrelated_labels_and_missing_support_traffic() -> None:
+    profile = load_profile(SCENARIO_ROOT / "cascade_night.yml")
+    document = profile.model_dump(mode="json")
+    document["symptom_labels"][0]["kind"] = "SATURATION"
+    document["symptom_labels"][0]["service"] = "checkout"
+    document["symptom_labels"][0]["signal"] = "container_memory"
+    with pytest.raises(ValueError, match="does not prove SATURATION"):
+        compile_profile(
+            ScenarioProfile.model_validate(document),
+            seed=profile.seeds.development[0],
+            purpose=SeedPurpose.DEVELOPMENT,
+        )
+
+    document = profile.model_dump(mode="json")
+    document["stimuli"] = [item for item in document["stimuli"] if item["kind"] != "k6_journey"]
+    with pytest.raises(ValueError, match="overlapping checkout journey"):
+        compile_profile(
+            ScenarioProfile.model_validate(document),
+            seed=profile.seeds.development[0],
+            purpose=SeedPurpose.DEVELOPMENT,
+        )
 
 
 def test_capture_labels_follow_measured_stimulus_execution_not_planned_offsets() -> None:
@@ -159,12 +256,13 @@ def test_fault_stimuli_compile_publicly_while_symptom_labels_stay_private() -> N
     document = profile.model_dump(mode="json")
     document["stimuli"] = [
         {
-            "stimulus_id": "email-leak",
-            "kind": "flagd",
+            "stimulus_id": "path-attack",
+            "kind": "k6_path_attack",
             "start_offset_seconds": 64,
             "duration_seconds": 20,
-            "flag": "emailMemoryLeak",
-            "variant": "100x",
+            "attack": "single_path",
+            "path": "/",
+            "rate_rps": 10,
         },
         {
             "stimulus_id": "ad-pressure",
@@ -184,10 +282,11 @@ def test_fault_stimuli_compile_publicly_while_symptom_labels_stay_private() -> N
     ]
     document["symptom_labels"] = [
         {
-            "label_id": "email-saturation",
-            "kind": "SATURATION",
-            "service": "email",
-            "signal": "process.runtime.jvm.memory.usage",
+            "label_id": "path-deformation",
+            "kind": "RATIO_DEFORM",
+            "service": "frontend",
+            "signal": "path_entropy",
+            "stimulus_id": "path-attack",
             "start_offset_seconds": 64,
             "end_offset_seconds": 84,
         }
@@ -201,7 +300,7 @@ def test_fault_stimuli_compile_publicly_while_symptom_labels_stay_private() -> N
     public_schedule = schedule_payload(artifacts.schedule)
     stimuli = cast(list[dict[str, object]], public_schedule["stimuli"])
     assert [item["kind"] for item in stimuli] == [
-        "flagd",
+        "k6_path_attack",
         "chaos_mesh",
         "k6_journey",
     ]

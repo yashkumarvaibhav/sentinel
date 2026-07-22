@@ -23,6 +23,7 @@ from lab.scenarios.models import (
     ChaosMeshStimulus,
     FlagdStimulus,
     K6JourneyStimulus,
+    K6PathAttackStimulus,
     Stimulus,
     stimulus_target,
 )
@@ -59,7 +60,7 @@ class LiveTelemetry:
 @dataclass(frozen=True)
 class StimulusExecution:
     stimulus_id: str
-    kind: Literal["flagd", "chaos_mesh", "k6_journey"]
+    kind: Literal["flagd", "chaos_mesh", "k6_journey", "k6_path_attack"]
     target: str
     setting: str
     requested_start_offset_seconds: int
@@ -115,7 +116,13 @@ def render_stimulus_executions(executions: tuple[StimulusExecution, ...]) -> byt
 
 
 def expected_request_count(schedule: CompiledSchedule) -> int:
-    return sum(phase.rate_rps * phase.duration_seconds for phase in schedule.phases)
+    primary = sum(phase.rate_rps * phase.duration_seconds for phase in schedule.phases)
+    attack = sum(
+        stimulus.rate_rps * stimulus.duration_seconds
+        for stimulus in schedule.stimuli
+        if isinstance(stimulus, K6PathAttackStimulus)
+    )
+    return primary + attack
 
 
 def build_k6_job(
@@ -218,6 +225,63 @@ def build_checkout_journey_job(
     }
 
 
+def build_path_attack_job(
+    stimulus: K6PathAttackStimulus,
+    *,
+    job_name: str,
+    run_id: str,
+    user_agent: str,
+) -> dict[str, Any]:
+    """Build a fixed-path workload that remains part of primary scored volume."""
+    _require_safe(job_name, "job_name")
+    _require_safe(run_id, "run_id")
+    if not user_agent.startswith("sentinel-score/"):
+        raise ValueError("path attack user agent must remain in the scored scenario")
+    return {
+        "apiVersion": "batch/v1",
+        "kind": "Job",
+        "metadata": {
+            "name": job_name,
+            "namespace": _NAMESPACE,
+            "labels": {"sentinel.dev/role": "loadgen"},
+        },
+        "spec": {
+            "backoffLimit": 0,
+            "ttlSecondsAfterFinished": 600,
+            "template": {
+                "metadata": {"labels": {"sentinel.dev/role": "loadgen"}},
+                "spec": {
+                    "restartPolicy": "Never",
+                    "containers": [
+                        {
+                            "name": "k6",
+                            "image": "grafana/k6:0.55.0",
+                            "args": ["run", "/scripts/scenario.js"],
+                            "env": [
+                                {"name": "SENTINEL_JOURNEY", "value": "path_attack"},
+                                {"name": "SENTINEL_RATE_RPS", "value": str(stimulus.rate_rps)},
+                                {
+                                    "name": "SENTINEL_DURATION_SECONDS",
+                                    "value": str(stimulus.duration_seconds),
+                                },
+                                {"name": "SENTINEL_ATTACK_PATH", "value": stimulus.path},
+                                {"name": "SENTINEL_RUN_ID", "value": run_id},
+                                {"name": "SENTINEL_USER_AGENT", "value": user_agent},
+                            ],
+                            "resources": {
+                                "limits": {"cpu": "1", "memory": "256Mi"},
+                                "requests": {"cpu": "100m", "memory": "64Mi"},
+                            },
+                            "volumeMounts": [{"name": "script", "mountPath": "/scripts"}],
+                        }
+                    ],
+                    "volumes": [{"name": "script", "configMap": {"name": job_name}}],
+                },
+            },
+        },
+    }
+
+
 def run_live_scenario(
     *,
     repo_root: Path,
@@ -226,9 +290,8 @@ def run_live_scenario(
 ) -> LiveTelemetry:
     _require_safe(invocation, "invocation")
     schedule = artifacts.schedule
-    stem = f"{schedule.scenario_id.replace('_', '-')}-{schedule.seed}-{invocation}"
-    job_name = f"score-{stem}"
-    run_id = f"run-{stem}"
+    run_id = _primary_run_id(schedule, invocation)
+    job_name = f"score-{run_id.removeprefix('run-')}"
     job = build_k6_job(schedule, job_name=job_name, run_id=run_id)
     script = repo_root / "lab" / "loadgen" / "scenario.js"
     _preflight(repo_root)
@@ -355,7 +418,7 @@ def execute_stimuli(
                         active_chaos[stimulus.stimulus_id] = manifest
                         _apply_chaos(command, manifest)
                     else:
-                        journey = _start_checkout_journey(
+                        journey = _start_k6_stimulus(
                             command,
                             repo_root=repo_root,
                             schedule=schedule,
@@ -592,25 +655,39 @@ def _stimulus_setting(stimulus: Stimulus) -> str:
         return stimulus.variant
     if isinstance(stimulus, ChaosMeshStimulus):
         return stimulus.experiment
-    return f"{stimulus.journey}@{stimulus.rate_rps}rps"
+    if isinstance(stimulus, K6JourneyStimulus):
+        return f"{stimulus.journey}@{stimulus.rate_rps}rps"
+    return f"{stimulus.attack}:{stimulus.path}@{stimulus.rate_rps}rps"
 
 
-def _start_checkout_journey(
+def _start_k6_stimulus(
     runner: CommandRunner,
     *,
     repo_root: Path,
     schedule: CompiledSchedule,
-    stimulus: K6JourneyStimulus,
+    stimulus: K6JourneyStimulus | K6PathAttackStimulus,
     invocation: str,
 ) -> _JourneyRun:
     identity = f"{schedule.scenario_id}:{schedule.seed}:{stimulus.stimulus_id}:{invocation}"
     suffix = hashlib.sha256(identity.encode()).hexdigest()[:20]
     job_name = f"stim-{suffix}"
     run_id = f"journey-{suffix}"
-    job = build_checkout_journey_job(stimulus, job_name=job_name, run_id=run_id)
+    if isinstance(stimulus, K6PathAttackStimulus):
+        user_agent = f"sentinel-score/{_primary_run_id(schedule, invocation)}/attack/{suffix}"
+        job = build_path_attack_job(
+            stimulus,
+            job_name=job_name,
+            run_id=run_id,
+            user_agent=user_agent,
+        )
+        expected_spans = stimulus.rate_rps * stimulus.duration_seconds
+    else:
+        user_agent = f"sentinel-stimulus/{run_id}"
+        job = build_checkout_journey_job(stimulus, job_name=job_name, run_id=run_id)
+        expected_spans = stimulus.rate_rps * stimulus.duration_seconds * 3
     script = repo_root / "lab" / "loadgen" / "scenario.js"
     if not script.is_file():
-        raise ValueError("checkout journey script is missing")
+        raise ValueError("contained k6 stimulus script is missing")
     _delete_owned(job_name, runner=runner)
     try:
         runner(
@@ -638,10 +715,15 @@ def _start_checkout_journey(
         raise
     return _JourneyRun(
         job_name=job_name,
-        user_agent=f"sentinel-stimulus/{run_id}",
-        expected_spans=stimulus.rate_rps * stimulus.duration_seconds * 3,
+        user_agent=user_agent,
+        expected_spans=expected_spans,
         timeout_seconds=stimulus.duration_seconds + 90,
     )
+
+
+def _primary_run_id(schedule: CompiledSchedule, invocation: str) -> str:
+    stem = f"{schedule.scenario_id.replace('_', '-')}-{schedule.seed}-{invocation}"
+    return f"run-{stem}"
 
 
 def _finish_checkout_journey(
@@ -903,7 +985,13 @@ def _query_spans(*, repo_root: Path, user_agent: str) -> tuple[datetime, ...]:
         PREWHERE service = 'frontend-proxy'
           AND signal = 'span.duration_ms'
         WHERE JSONExtractInt(attributes_json, 'span.kind') = 2
-          AND JSONExtractString(attributes_json, 'user_agent') = {user_agent:String}
+          AND (
+            JSONExtractString(attributes_json, 'user_agent') = {user_agent:String}
+            OR startsWith(
+              JSONExtractString(attributes_json, 'user_agent'),
+              concat({user_agent:String}, '/')
+            )
+          )
         GROUP BY observation_id
         ORDER BY ts_us, observation_id
         FORMAT JSONEachRow

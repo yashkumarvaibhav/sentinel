@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
 
+from lab.scenarios.capabilities import validate_symptom_label_capabilities
 from lab.scenarios.models import ScenarioProfile, Stimulus, SymptomLabelInterval
 
 
@@ -88,6 +89,7 @@ def compile_profile(
     seed: int,
     purpose: SeedPurpose,
 ) -> ScenarioArtifacts:
+    validate_symptom_label_capabilities(profile)
     allowed = {
         SeedPurpose.DEVELOPMENT: profile.seeds.development,
         SeedPurpose.HELD_OUT: profile.seeds.held_out,
@@ -131,7 +133,9 @@ def compile_profile(
         "scenario_id": profile.scenario_id,
         "seed": seed,
         "seed_purpose": purpose.value,
-        "intervals": [label.model_dump(mode="json") for label in profile.residual_labels],
+        "intervals": [
+            label.model_dump(mode="json", exclude_none=True) for label in profile.residual_labels
+        ],
         "symptom_intervals": [
             label.model_dump(mode="json", exclude_none=True) for label in profile.symptom_labels
         ],
@@ -161,7 +165,18 @@ def materialize_symptom_labels(
     *,
     stimulus_offsets: Mapping[str, tuple[float, float]],
 ) -> dict[str, object]:
-    """Shift stimulus-backed private labels to measured live execution offsets."""
+    """Shift every stimulus-backed private label to measured execution offsets."""
+    raw_residual = artifacts.labels.get("intervals")
+    if not isinstance(raw_residual, list):
+        raise ValueError("compiled labels lack intervals")
+    residual_intervals: list[dict[str, object]] = []
+    for raw_interval in raw_residual:
+        if not isinstance(raw_interval, dict):
+            raise ValueError("compiled residual interval is not an object")
+        payload = cast(dict[str, object], dict(raw_interval))
+        _apply_measured_offset(payload, stimulus_offsets=stimulus_offsets)
+        residual_intervals.append(payload)
+
     raw_intervals = artifacts.labels.get("symptom_intervals")
     if not isinstance(raw_intervals, list):
         raise ValueError("compiled labels lack symptom_intervals")
@@ -170,19 +185,29 @@ def materialize_symptom_labels(
         if not isinstance(raw_interval, dict):
             raise ValueError("compiled symptom interval is not an object")
         payload = cast(dict[str, object], dict(raw_interval))
-        stimulus_id = payload.get("stimulus_id")
-        if stimulus_id is not None:
-            if not isinstance(stimulus_id, str) or stimulus_id not in stimulus_offsets:
-                raise ValueError(f"missing measured execution for stimulus: {stimulus_id}")
-            start, end = stimulus_offsets[stimulus_id]
-            payload["start_offset_seconds"] = start
-            payload["end_offset_seconds"] = end
+        _apply_measured_offset(payload, stimulus_offsets=stimulus_offsets)
         intervals.append(
             SymptomLabelInterval.model_validate(payload).model_dump(mode="json", exclude_none=True)
         )
     labels = dict(artifacts.labels)
+    labels["intervals"] = residual_intervals
     labels["symptom_intervals"] = intervals
     return labels
+
+
+def _apply_measured_offset(
+    payload: dict[str, object],
+    *,
+    stimulus_offsets: Mapping[str, tuple[float, float]],
+) -> None:
+    stimulus_id = payload.get("stimulus_id")
+    if stimulus_id is None:
+        return
+    if not isinstance(stimulus_id, str) or stimulus_id not in stimulus_offsets:
+        raise ValueError(f"missing measured execution for stimulus: {stimulus_id}")
+    start, end = stimulus_offsets[stimulus_id]
+    payload["start_offset_seconds"] = start
+    payload["end_offset_seconds"] = end
 
 
 def _schedule_payload(schedule: CompiledSchedule) -> dict[str, object]:

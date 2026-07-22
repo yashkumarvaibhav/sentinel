@@ -174,7 +174,11 @@ def _trace_payload() -> bytes:
         spans.append(
             _span(
                 start + timedelta(seconds=index * 2, milliseconds=100),
-                user_agent="sentinel-score/run-capture",
+                user_agent=(
+                    "sentinel-score/run-capture/attack/measured"
+                    if index == 3
+                    else "sentinel-score/run-capture"
+                ),
                 identity=f"c{index:015x}",
             )
         )

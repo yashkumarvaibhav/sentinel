@@ -28,6 +28,7 @@ type OffsetSeconds = Annotated[int, Field(ge=0, le=3600)]
 type MeasuredOffsetSeconds = Annotated[float, Field(ge=0.0, le=3600.0)]
 type SafeRate = Annotated[int, Field(ge=1, le=50)]
 type SafeJourneyRate = Annotated[int, Field(ge=1, le=5)]
+type SafeAttackRate = Annotated[int, Field(ge=1, le=20)]
 type Probability = Annotated[float, Field(ge=0.0, le=1.0, allow_inf_nan=False)]
 type PositiveMultiplier = Annotated[float, Field(ge=1.0, le=20.0, allow_inf_nan=False)]
 type FlagName = Annotated[
@@ -124,8 +125,9 @@ class RelativeContext(LabModel):
 
 class ResidualLabelInterval(LabModel):
     label_id: Identifier
-    start_offset_seconds: OffsetSeconds
-    end_offset_seconds: PositiveSeconds
+    stimulus_id: Identifier | None = None
+    start_offset_seconds: MeasuredOffsetSeconds
+    end_offset_seconds: MeasuredOffsetSeconds
 
     @model_validator(mode="after")
     def forward_interval(self) -> Self:
@@ -176,7 +178,17 @@ class K6JourneyStimulus(LabModel):
     rate_rps: SafeJourneyRate
 
 
-type Stimulus = FlagdStimulus | ChaosMeshStimulus | K6JourneyStimulus
+class K6PathAttackStimulus(LabModel):
+    stimulus_id: Identifier
+    kind: Literal["k6_path_attack"]
+    start_offset_seconds: OffsetSeconds
+    duration_seconds: PositiveSeconds
+    attack: Literal["single_path"]
+    path: Literal["/"]
+    rate_rps: SafeAttackRate
+
+
+type Stimulus = FlagdStimulus | ChaosMeshStimulus | K6JourneyStimulus | K6PathAttackStimulus
 
 
 class ScenarioProfile(LabModel):
@@ -218,6 +230,28 @@ class ScenarioProfile(LabModel):
         for residual_label in self.residual_labels:
             if residual_label.end_offset_seconds > duration:
                 raise ValueError(f"label exceeds scenario duration: {residual_label.label_id}")
+            if residual_label.stimulus_id is not None:
+                stimulus = next(
+                    (
+                        item
+                        for item in self.stimuli
+                        if item.stimulus_id == residual_label.stimulus_id
+                    ),
+                    None,
+                )
+                if stimulus is None:
+                    raise ValueError(
+                        f"residual label references unknown stimulus: {residual_label.stimulus_id}"
+                    )
+                if (
+                    residual_label.start_offset_seconds != stimulus.start_offset_seconds
+                    or residual_label.end_offset_seconds
+                    != stimulus.start_offset_seconds + stimulus.duration_seconds
+                ):
+                    raise ValueError(
+                        "stimulus-backed residual label must match planned interval: "
+                        f"{residual_label.label_id}"
+                    )
         for symptom_label in self.symptom_labels:
             if symptom_label.end_offset_seconds > duration:
                 raise ValueError(f"label exceeds scenario duration: {symptom_label.label_id}")
@@ -254,6 +288,18 @@ class ScenarioProfile(LabModel):
                 previous_end = previous.start_offset_seconds + previous.duration_seconds
                 if current.start_offset_seconds < previous_end:
                     raise ValueError(f"overlapping stimuli for {target}")
+        for stimulus in self.stimuli:
+            if not isinstance(stimulus, K6PathAttackStimulus):
+                continue
+            attack_start = stimulus.start_offset_seconds
+            attack_end = attack_start + stimulus.duration_seconds
+            for phase_start, phase in _phase_offsets(self.load_phases):
+                phase_end = phase_start + phase.duration_seconds
+                if (
+                    max(attack_start, phase_start) < min(attack_end, phase_end)
+                    and stimulus.rate_rps + phase.rate_rps > 50
+                ):
+                    raise ValueError("combined primary and path-attack rate exceeds 50 rps")
         return self
 
 
@@ -262,4 +308,15 @@ def stimulus_target(stimulus: Stimulus) -> str:
         return f"flagd:{stimulus.flag}"
     if isinstance(stimulus, ChaosMeshStimulus):
         return f"chaos_mesh:{stimulus.experiment}"
-    return f"k6_journey:{stimulus.journey}"
+    if isinstance(stimulus, K6JourneyStimulus):
+        return f"k6_journey:{stimulus.journey}"
+    return f"k6_path_attack:{stimulus.path}"
+
+
+def _phase_offsets(phases: tuple[LoadPhase, ...]) -> tuple[tuple[int, LoadPhase], ...]:
+    offset = 0
+    values: list[tuple[int, LoadPhase]] = []
+    for phase in phases:
+        values.append((offset, phase))
+        offset += phase.duration_seconds
+    return tuple(values)

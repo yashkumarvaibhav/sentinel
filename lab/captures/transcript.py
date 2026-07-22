@@ -21,7 +21,7 @@ from detection.decompose import (
 from lab.captures.models import CaptureModel
 from lab.captures.replay import RawReplay, replay_raw
 from lab.captures.store import RuntimeCapture
-from lab.scenarios.models import RelativeContext, Stimulus
+from lab.scenarios.models import K6PathAttackStimulus, RelativeContext, Stimulus
 
 
 class CapturedLoadPhase(CaptureModel):
@@ -68,7 +68,13 @@ class CapturedSchedule(CaptureModel):
 
     @property
     def expected_request_count(self) -> int:
-        return sum(item.duration_seconds * item.rate_rps for item in self.phases)
+        primary = sum(item.duration_seconds * item.rate_rps for item in self.phases)
+        attack = sum(
+            item.duration_seconds * item.rate_rps
+            for item in self.stimuli
+            if isinstance(item, K6PathAttackStimulus)
+        )
+        return primary + attack
 
 
 class CapturedContextFeed(CaptureModel):
@@ -230,7 +236,10 @@ def _scenario_spans(
             (
                 item
                 for item in ingress
-                if item.attributes.get("user_agent") == capture.manifest.correlation_user_agent
+                if _matches_correlation_user_agent(
+                    item.attributes.get("user_agent"),
+                    capture.manifest.correlation_user_agent,
+                )
             ),
             key=lambda item: (item.ts, item.observation_id),
         )
@@ -246,6 +255,10 @@ def _scenario_spans(
         )
     )
     return spans, anchors
+
+
+def _matches_correlation_user_agent(value: object, root: str) -> bool:
+    return isinstance(value, str) and (value == root or value.startswith(f"{root}/"))
 
 
 def _rate_observations(

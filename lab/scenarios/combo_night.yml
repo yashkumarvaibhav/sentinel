@@ -1,0 +1,90 @@
+version: 1
+scenario_id: combo_night
+description: A behaviorally deformed attack and payment fault run inside a fully explained match surge.
+honesty: SIMULATED
+telemetry:
+  target: astronomy-shop/frontend-proxy
+  source_service: frontend-proxy
+  logical_service: frontend
+  logical_signal: request_rate
+  tick_seconds: 2
+seeds:
+  development: [503, 509]
+  held_out: [9209, 9221]
+load_phases:
+  - name: warmup
+    duration_seconds: 64
+    rate_rps: 4
+  - name: explained_event
+    duration_seconds: 60
+    rate_rps: 10
+  - name: event_with_attack_and_fault
+    duration_seconds: 180
+    rate_rps: 10
+  - name: event_recovery
+    duration_seconds: 60
+    rate_rps: 10
+contexts:
+  - context_id: simulated_match
+    name: Simulated championship match
+    event_type: sports_fixture
+    source: scenario_compiler
+    honesty: SIMULATED
+    start_offset_seconds: 64
+    duration_seconds: 300
+    expected_delta:
+      frontend.request_rate: 2.5
+    trust_score: 1.0
+stimuli:
+  - stimulus_id: payment_failure
+    kind: flagd
+    start_offset_seconds: 124
+    duration_seconds: 180
+    flag: paymentFailure
+    variant: 100%
+  - stimulus_id: behavior_attack
+    kind: k6_path_attack
+    start_offset_seconds: 124
+    duration_seconds: 180
+    attack: single_path
+    path: /
+    rate_rps: 20
+  - stimulus_id: checkout_fault_traffic
+    kind: k6_journey
+    start_offset_seconds: 124
+    duration_seconds: 180
+    journey: checkout
+    rate_rps: 2
+  - stimulus_id: checkout_recovery_traffic
+    kind: k6_journey
+    start_offset_seconds: 304
+    duration_seconds: 30
+    journey: checkout
+    rate_rps: 2
+residual_labels:
+  - label_id: behavior-attack-volume
+    stimulus_id: behavior_attack
+    start_offset_seconds: 124
+    end_offset_seconds: 304
+symptom_labels:
+  - label_id: behavior-attack-path-entropy
+    kind: RATIO_DEFORM
+    service: frontend
+    signal: path_entropy
+    stimulus_id: behavior_attack
+    start_offset_seconds: 124
+    end_offset_seconds: 304
+  - label_id: payment-failure-log-burst
+    kind: LOG_BURST
+    service: payment
+    signal: log_template_rate
+    stimulus_id: payment_failure
+    start_offset_seconds: 124
+    end_offset_seconds: 304
+  - label_id: checkout-payment-failure
+    kind: EDGE_DEGRADED
+    service: checkout
+    signal: dependency.payment
+    stimulus_id: payment_failure
+    start_offset_seconds: 124
+    end_offset_seconds: 304

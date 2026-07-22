@@ -445,8 +445,8 @@ def _is_labeled(offset: float, labels: tuple[ResidualLabelInterval, ...]) -> boo
 def _first_detection_latency(
     predicted_offsets: tuple[float, ...],
     *,
-    start_offset: int,
-    end_offset: int,
+    start_offset: float,
+    end_offset: float,
 ) -> float | None:
     first = next(
         (offset for offset in predicted_offsets if start_offset <= offset < end_offset),

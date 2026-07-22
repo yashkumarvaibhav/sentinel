@@ -6,6 +6,7 @@ import { check, randomSeed } from 'k6';
 const TARGET = 'http://frontend-proxy:8080';
 const runId = __ENV.SENTINEL_RUN_ID;
 const journey = __ENV.SENTINEL_JOURNEY || 'browse';
+const userAgent = __ENV.SENTINEL_USER_AGENT;
 const schedule = journey === 'checkout'
   ? {
       target: 'astronomy-shop/frontend-proxy',
@@ -17,12 +18,23 @@ const schedule = journey === 'checkout'
         start_offset_seconds: 0,
       }],
     }
-  : JSON.parse(__ENV.SENTINEL_SCHEDULE);
+  : journey === 'path_attack'
+    ? {
+        target: 'astronomy-shop/frontend-proxy',
+        request_mix_seed: 1,
+        phases: [{
+          name: 'path_attack',
+          rate_rps: Number(__ENV.SENTINEL_RATE_RPS),
+          duration_seconds: Number(__ENV.SENTINEL_DURATION_SECONDS),
+          start_offset_seconds: 0,
+        }],
+      }
+    : JSON.parse(__ENV.SENTINEL_SCHEDULE);
 
 if (schedule.target !== 'astronomy-shop/frontend-proxy') {
   throw new Error(`unsupported contained target: ${schedule.target}`);
 }
-if (!['browse', 'checkout'].includes(journey)) {
+if (!['browse', 'checkout', 'path_attack'].includes(journey)) {
   throw new Error(`unsupported contained journey: ${journey}`);
 }
 
@@ -80,11 +92,26 @@ export default function () {
     checkout();
     return;
   }
+  if (journey === 'path_attack') {
+    pathAttack();
+    return;
+  }
   const path = paths[Math.floor(Math.random() * paths.length)];
   const response = http.get(`${TARGET}${path}`, {
     headers: { 'User-Agent': `sentinel-score/${runId}` },
   });
   check(response, { 'testbed response below 500': (result) => result.status < 500 });
+}
+
+function pathAttack() {
+  const path = __ENV.SENTINEL_ATTACK_PATH;
+  if (path !== '/' || !userAgent || !userAgent.startsWith('sentinel-score/')) {
+    throw new Error('invalid contained path-attack input');
+  }
+  const response = http.get(`${TARGET}${path}`, {
+    headers: { 'User-Agent': userAgent },
+  });
+  check(response, { 'path attack response below 500': (result) => result.status < 500 });
 }
 
 function checkout() {
