@@ -1,6 +1,6 @@
 version: 1
 scenario_id: combo_night
-description: A bounded attack, payment fault, resource leak, measured rate drop, and emitter silence run inside an explained match surge.
+description: A bounded attack, payment fault, resource pressure, measured rate drop, and emitter silence run inside an explained match surge.
 honesty: SIMULATED
 telemetry:
   target: astronomy-shop/frontend-proxy
@@ -45,6 +45,12 @@ contexts:
       frontend.request_rate: 2.5
     trust_score: 1.0
 stimuli:
+  - stimulus_id: checkout_traffic
+    kind: k6_journey
+    start_offset_seconds: 64
+    duration_seconds: 420
+    journey: checkout
+    rate_rps: 2
   - stimulus_id: payment_failure
     kind: flagd
     start_offset_seconds: 124
@@ -54,28 +60,10 @@ stimuli:
   - stimulus_id: behavior_attack
     kind: k6_path_attack
     start_offset_seconds: 124
-    duration_seconds: 180
+    duration_seconds: 240
     attack: single_path
     path: /
     rate_rps: 20
-  - stimulus_id: checkout_fault_traffic
-    kind: k6_journey
-    start_offset_seconds: 124
-    duration_seconds: 180
-    journey: checkout
-    rate_rps: 2
-  - stimulus_id: checkout_recovery_traffic
-    kind: k6_journey
-    start_offset_seconds: 304
-    duration_seconds: 180
-    journey: checkout
-    rate_rps: 2
-  - stimulus_id: email_memory_leak
-    kind: flagd
-    start_offset_seconds: 304
-    duration_seconds: 180
-    flag: emailMemoryLeak
-    variant: 100x
   - stimulus_id: measured_rate_drop
     kind: k6_rate_phase
     start_offset_seconds: 484
@@ -90,7 +78,7 @@ residual_labels:
   - label_id: behavior-attack-volume
     stimulus_id: behavior_attack
     start_offset_seconds: 124
-    end_offset_seconds: 304
+    end_offset_seconds: 364
 symptom_labels:
   - label_id: behavior-attack-path-entropy
     kind: RATIO_DEFORM
@@ -98,10 +86,31 @@ symptom_labels:
     signal: path_entropy
     stimulus_id: behavior_attack
     start_offset_seconds: 124
-    end_offset_seconds: 304
+    end_offset_seconds: 364
   - label_id: payment-failure-log-burst
     kind: LOG_BURST
     service: payment
+    signal: log_template_rate
+    stimulus_id: payment_failure
+    start_offset_seconds: 124
+    end_offset_seconds: 304
+  - label_id: checkout-payment-log-burst
+    kind: LOG_BURST
+    service: checkout
+    signal: log_template_rate
+    stimulus_id: payment_failure
+    start_offset_seconds: 124
+    end_offset_seconds: 304
+  - label_id: cart-payment-log-burst
+    kind: LOG_BURST
+    service: cart
+    signal: log_template_rate
+    stimulus_id: payment_failure
+    start_offset_seconds: 124
+    end_offset_seconds: 304
+  - label_id: frontend-payment-log-burst
+    kind: LOG_BURST
+    service: frontend
     signal: log_template_rate
     stimulus_id: payment_failure
     start_offset_seconds: 124
@@ -113,12 +122,12 @@ symptom_labels:
     stimulus_id: payment_failure
     start_offset_seconds: 124
     end_offset_seconds: 304
-  - label_id: email-memory-saturation
+  - label_id: checkout-memory-saturation
     kind: SATURATION
-    service: email
+    service: checkout
     signal: container_memory
-    stimulus_id: email_memory_leak
-    start_offset_seconds: 304
+    stimulus_id: checkout_traffic
+    start_offset_seconds: 64
     end_offset_seconds: 484
   - label_id: frontend-measured-rate-drop
     kind: DROP

@@ -43,6 +43,27 @@ _PAYMENT_FAILURE_CAPABILITIES = (
         evidence="service-local payment log records",
         requires_checkout_journey=True,
     ),
+    SymptomCapability(
+        kind=SymptomKind.LOG_BURST,
+        service="checkout",
+        signal="log_template_rate",
+        evidence="service-local checkout log records",
+        requires_checkout_journey=True,
+    ),
+    SymptomCapability(
+        kind=SymptomKind.LOG_BURST,
+        service="cart",
+        signal="log_template_rate",
+        evidence="service-local cart log records",
+        requires_checkout_journey=True,
+    ),
+    SymptomCapability(
+        kind=SymptomKind.LOG_BURST,
+        service="frontend",
+        signal="log_template_rate",
+        evidence="service-local frontend log records",
+        requires_checkout_journey=True,
+    ),
 )
 
 _PATH_ATTACK_CAPABILITIES = (
@@ -82,6 +103,15 @@ _FRONTEND_FAILURE_CAPABILITIES = (
     ),
 )
 
+_CHECKOUT_JOURNEY_CAPABILITIES = (
+    SymptomCapability(
+        kind=SymptomKind.SATURATION,
+        service="checkout",
+        signal="container_memory",
+        evidence="checkout container working-set and Kubernetes hard-limit gauges",
+    ),
+)
+
 _POSITIVE_KINDS = (
     SymptomKind.RATIO_DEFORM,
     SymptomKind.LOG_BURST,
@@ -110,6 +140,8 @@ def capabilities_for(stimulus: Stimulus) -> tuple[SymptomCapability, ...]:
         return _EMAIL_MEMORY_LEAK_CAPABILITIES
     if isinstance(stimulus, K6RatePhaseStimulus):
         return _RATE_DROP_CAPABILITIES
+    if isinstance(stimulus, K6JourneyStimulus):
+        return _CHECKOUT_JOURNEY_CAPABILITIES
     if (
         isinstance(stimulus, ChaosMeshStimulus)
         and stimulus.experiment == "frontend-proxy-pod-failure"
@@ -148,6 +180,14 @@ def validate_symptom_label_capabilities(profile: ScenarioProfile) -> None:
         ):
             raise ValueError(
                 f"stimulus {label.stimulus_id} is too short to prove configured silence"
+            )
+        if (
+            isinstance(stimulus, K6JourneyStimulus)
+            and capability.kind is SymptomKind.SATURATION
+            and stimulus.duration_seconds < 180
+        ):
+            raise ValueError(
+                f"stimulus {label.stimulus_id} is too short to prove resource saturation"
             )
 
     for residual_label in profile.residual_labels:

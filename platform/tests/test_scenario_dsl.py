@@ -106,11 +106,9 @@ def test_combo_night_compiles_attack_and_fault_without_claiming_unsupported_kind
     assert len(profile.contexts) == 1
     assert profile.contexts[0].expected_delta == {"frontend.request_rate": 2.5}
     assert [stimulus.kind for stimulus in profile.stimuli] == [
+        "k6_journey",
         "flagd",
         "k6_path_attack",
-        "k6_journey",
-        "k6_journey",
-        "flagd",
         "k6_rate_phase",
         "chaos_mesh",
     ]
@@ -140,9 +138,9 @@ def test_combo_labels_follow_measured_attack_and_fault_execution() -> None:
     materialized = materialize_symptom_labels(
         artifacts,
         stimulus_offsets={
-            "behavior_attack": (126.25, 306.75),
+            "behavior_attack": (126.25, 366.75),
             "payment_failure": (125.5, 305.5),
-            "email_memory_leak": (307.0, 487.25),
+            "checkout_traffic": (65.0, 487.25),
             "measured_rate_drop": (487.25, 547.5),
             "frontend_emitter_silence": (547.5, 767.75),
         },
@@ -150,7 +148,7 @@ def test_combo_labels_follow_measured_attack_and_fault_execution() -> None:
 
     assert materialized["intervals"] == [
         {
-            "end_offset_seconds": 306.75,
+            "end_offset_seconds": 366.75,
             "label_id": "behavior-attack-volume",
             "start_offset_seconds": 126.25,
             "stimulus_id": "behavior_attack",
@@ -163,8 +161,11 @@ def test_combo_labels_follow_measured_attack_and_fault_execution() -> None:
     } == {
         ("RATIO_DEFORM", "frontend", "path_entropy", 126.25),
         ("LOG_BURST", "payment", "log_template_rate", 125.5),
+        ("LOG_BURST", "checkout", "log_template_rate", 125.5),
+        ("LOG_BURST", "cart", "log_template_rate", 125.5),
+        ("LOG_BURST", "frontend", "log_template_rate", 125.5),
         ("EDGE_DEGRADED", "checkout", "dependency.payment", 125.5),
-        ("SATURATION", "email", "container_memory", 307.0),
+        ("SATURATION", "checkout", "container_memory", 65.0),
         ("DROP", "frontend", "request_rate", 487.25),
         ("SILENCE", "frontend", "request_rate", 547.5),
     }
@@ -199,17 +200,6 @@ def test_capability_oracle_rejects_unrelated_labels_and_missing_support_traffic(
     ] = 3
     with pytest.raises(ValueError, match="must exactly match one load phase"):
         ScenarioProfile.model_validate(document)
-
-    document = combo.model_dump(mode="json")
-    next(item for item in document["stimuli"] if item["stimulus_id"] == "email_memory_leak")[
-        "variant"
-    ] = "10x"
-    with pytest.raises(ValueError, match="does not prove SATURATION"):
-        compile_profile(
-            ScenarioProfile.model_validate(document),
-            seed=combo.seeds.development[0],
-            purpose=SeedPurpose.DEVELOPMENT,
-        )
 
 
 def test_capture_labels_follow_measured_stimulus_execution_not_planned_offsets() -> None:
