@@ -49,6 +49,13 @@ components:
 
 # --- the demo's in-cluster collector ----------------------------------------
 opentelemetry-collector:
+  # This collector is intentionally per-node: kubelet usage and the Kubernetes
+  # hard-limit gauge must describe the same container instance. The chart's
+  # cluster-metrics preset adds leader election, which made the emitted limit
+  # set depend on whether the server or application node won after a restart.
+  # A null receiver link disables that election while retaining the preset's
+  # RBAC; semantic duplicate limits from two nodes collapse in our runner.
+  mode: daemonset
   # k3d reports each node's Docker-network IP as InternalIP, but kubelet's
   # 10250 listener is inside the node container's network namespace. A normal
   # pod repeatedly gets connection refused at that address. Host networking
@@ -69,6 +76,9 @@ opentelemetry-collector:
       enabled: true
   config:
     receivers:
+      k8s_cluster:
+        collection_interval: 10s
+        k8s_leader_elector: null
       kubeletstats:
         endpoint: 127.0.0.1:10250
         # A 144-second scenario must contain at least the detector's twelve

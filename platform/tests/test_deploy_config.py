@@ -31,6 +31,18 @@ def test_k3d_collector_can_reach_local_kubelet_at_detector_cadence() -> None:
     assert kubelet["collection_interval"] == "10s"
 
 
+def test_each_k3d_node_exports_its_own_container_limit_evidence() -> None:
+    document = yaml.safe_load(
+        (REPO_ROOT / "lab" / "testbed" / "otel-demo-values.yaml").read_text(encoding="utf-8")
+    )
+
+    collector = document["opentelemetry-collector"]
+    cluster = collector["config"]["receivers"]["k8s_cluster"]
+    assert collector["mode"] == "daemonset"
+    assert cluster["collection_interval"] == "10s"
+    assert cluster.get("k8s_leader_elector") is None
+
+
 def test_checkout_journey_preallocates_for_slow_successful_iterations() -> None:
     script = (REPO_ROOT / "lab" / "loadgen" / "scenario.js").read_text(encoding="utf-8")
 
