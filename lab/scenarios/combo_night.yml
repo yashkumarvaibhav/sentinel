@@ -18,9 +18,12 @@ load_phases:
   - name: explained_event
     duration_seconds: 60
     rate_rps: 10
-  - name: event_with_attack_and_fault
+  - name: event_with_behavior_attack
     duration_seconds: 180
     rate_rps: 1
+  - name: event_with_payment_fault
+    duration_seconds: 180
+    rate_rps: 10
   - name: event_with_resource_pressure
     duration_seconds: 180
     rate_rps: 10
@@ -40,51 +43,57 @@ contexts:
     source: scenario_compiler
     honesty: SIMULATED
     start_offset_seconds: 64
-    duration_seconds: 760
+    duration_seconds: 940
     expected_delta:
       frontend.request_rate: 2.5
     trust_score: 1.0
 stimuli:
-  - stimulus_id: checkout_fault_traffic
+  - stimulus_id: checkout_baseline_traffic
     kind: k6_journey
-    start_offset_seconds: 64
-    duration_seconds: 240
+    start_offset_seconds: 0
+    duration_seconds: 484
     journey: checkout
-    rate_rps: 2
-  - stimulus_id: checkout_pressure_traffic
-    kind: k6_journey
-    start_offset_seconds: 304
-    duration_seconds: 180
-    journey: checkout
-    rate_rps: 2
-  - stimulus_id: payment_failure
-    kind: flagd
-    start_offset_seconds: 124
-    duration_seconds: 180
-    flag: paymentFailure
-    variant: 100%
+    rate_rps: 1
   - stimulus_id: behavior_attack
     kind: k6_path_attack
     start_offset_seconds: 124
-    duration_seconds: 240
+    duration_seconds: 180
     attack: single_path
     path: /
     rate_rps: 15
+  - stimulus_id: payment_failure
+    kind: flagd
+    start_offset_seconds: 304
+    duration_seconds: 180
+    flag: paymentFailure
+    variant: 100%
+  - stimulus_id: checkout_pressure_traffic
+    kind: k6_journey
+    start_offset_seconds: 484
+    duration_seconds: 180
+    journey: checkout
+    rate_rps: 2
+  - stimulus_id: email_memory_leak
+    kind: flagd
+    start_offset_seconds: 484
+    duration_seconds: 180
+    flag: emailMemoryLeak
+    variant: 100x
   - stimulus_id: measured_rate_drop
     kind: k6_rate_phase
-    start_offset_seconds: 484
+    start_offset_seconds: 664
     duration_seconds: 60
     rate_rps: 2
   - stimulus_id: frontend_emitter_silence
     kind: chaos_mesh
-    start_offset_seconds: 544
+    start_offset_seconds: 724
     duration_seconds: 220
     experiment: frontend-proxy-pod-failure
 residual_labels:
   - label_id: behavior-attack-volume
     stimulus_id: behavior_attack
     start_offset_seconds: 124
-    end_offset_seconds: 364
+    end_offset_seconds: 304
 symptom_labels:
   - label_id: behavior-attack-path-entropy
     kind: RATIO_DEFORM
@@ -92,67 +101,46 @@ symptom_labels:
     signal: path_entropy
     stimulus_id: behavior_attack
     start_offset_seconds: 124
-    end_offset_seconds: 364
+    end_offset_seconds: 304
   - label_id: payment-failure-log-burst
     kind: LOG_BURST
     service: payment
     signal: log_template_rate
     stimulus_id: payment_failure
-    start_offset_seconds: 124
-    end_offset_seconds: 304
+    start_offset_seconds: 304
+    end_offset_seconds: 484
   - label_id: checkout-payment-log-burst
     kind: LOG_BURST
     service: checkout
     signal: log_template_rate
     stimulus_id: payment_failure
-    start_offset_seconds: 124
-    end_offset_seconds: 304
-  - label_id: cart-payment-log-burst
-    kind: LOG_BURST
-    service: cart
-    signal: log_template_rate
-    stimulus_id: payment_failure
-    start_offset_seconds: 124
-    end_offset_seconds: 304
-  - label_id: frontend-payment-log-burst
-    kind: LOG_BURST
-    service: frontend
-    signal: log_template_rate
-    stimulus_id: payment_failure
-    start_offset_seconds: 124
-    end_offset_seconds: 304
+    start_offset_seconds: 304
+    end_offset_seconds: 484
   - label_id: checkout-payment-failure
     kind: EDGE_DEGRADED
     service: checkout
     signal: dependency.payment
     stimulus_id: payment_failure
-    start_offset_seconds: 124
-    end_offset_seconds: 304
-  - label_id: checkout-fault-traffic-saturation
-    kind: SATURATION
-    service: checkout
-    signal: container_memory
-    stimulus_id: checkout_fault_traffic
-    start_offset_seconds: 64
-    end_offset_seconds: 304
-  - label_id: checkout-pressure-saturation
-    kind: SATURATION
-    service: checkout
-    signal: container_memory
-    stimulus_id: checkout_pressure_traffic
     start_offset_seconds: 304
     end_offset_seconds: 484
+  - label_id: email-memory-saturation
+    kind: SATURATION
+    service: email
+    signal: container_memory
+    stimulus_id: email_memory_leak
+    start_offset_seconds: 484
+    end_offset_seconds: 664
   - label_id: frontend-measured-rate-drop
     kind: DROP
     service: frontend
     signal: request_rate
     stimulus_id: measured_rate_drop
-    start_offset_seconds: 484
-    end_offset_seconds: 544
+    start_offset_seconds: 664
+    end_offset_seconds: 724
   - label_id: frontend-emitter-silence
     kind: SILENCE
     service: frontend
     signal: request_rate
     stimulus_id: frontend_emitter_silence
-    start_offset_seconds: 544
-    end_offset_seconds: 764
+    start_offset_seconds: 724
+    end_offset_seconds: 944

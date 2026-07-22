@@ -105,14 +105,37 @@ def test_combo_night_compiles_attack_and_fault_without_claiming_unsupported_kind
 
     assert len(profile.contexts) == 1
     assert profile.contexts[0].expected_delta == {"frontend.request_rate": 2.5}
+    assert profile.duration_seconds == 1004
+    assert (
+        profile.contexts[0].start_offset_seconds + profile.contexts[0].duration_seconds
+        == profile.duration_seconds
+    )
     assert [stimulus.kind for stimulus in profile.stimuli] == [
         "k6_journey",
+        "k6_path_attack",
+        "flagd",
         "k6_journey",
         "flagd",
-        "k6_path_attack",
         "k6_rate_phase",
         "chaos_mesh",
     ]
+    stimuli = {stimulus.stimulus_id: stimulus for stimulus in profile.stimuli}
+    assert (
+        stimuli["checkout_baseline_traffic"].start_offset_seconds,
+        stimuli["checkout_baseline_traffic"].duration_seconds,
+    ) == (0, 484)
+    assert (
+        stimuli["behavior_attack"].start_offset_seconds,
+        stimuli["behavior_attack"].duration_seconds,
+    ) == (124, 180)
+    assert (
+        stimuli["payment_failure"].start_offset_seconds,
+        stimuli["payment_failure"].duration_seconds,
+    ) == (304, 180)
+    assert (
+        stimuli["email_memory_leak"].start_offset_seconds,
+        stimuli["email_memory_leak"].duration_seconds,
+    ) == (484, 180)
     assert {label.kind for label in profile.symptom_labels} == {
         SymptomKind.RATIO_DEFORM.value,
         SymptomKind.LOG_BURST.value,
@@ -139,18 +162,17 @@ def test_combo_labels_follow_measured_attack_and_fault_execution() -> None:
     materialized = materialize_symptom_labels(
         artifacts,
         stimulus_offsets={
-            "behavior_attack": (126.25, 366.75),
-            "payment_failure": (125.5, 305.5),
-            "checkout_fault_traffic": (65.0, 307.0),
-            "checkout_pressure_traffic": (307.0, 489.25),
-            "measured_rate_drop": (487.25, 547.5),
-            "frontend_emitter_silence": (547.5, 767.75),
+            "behavior_attack": (126.25, 306.75),
+            "payment_failure": (305.5, 485.5),
+            "email_memory_leak": (487.0, 667.25),
+            "measured_rate_drop": (667.25, 727.5),
+            "frontend_emitter_silence": (727.5, 947.75),
         },
     )
 
     assert materialized["intervals"] == [
         {
-            "end_offset_seconds": 366.75,
+            "end_offset_seconds": 306.75,
             "label_id": "behavior-attack-volume",
             "start_offset_seconds": 126.25,
             "stimulus_id": "behavior_attack",
@@ -162,15 +184,12 @@ def test_combo_labels_follow_measured_attack_and_fault_execution() -> None:
         for item in symptom_intervals
     } == {
         ("RATIO_DEFORM", "frontend", "path_entropy", 126.25),
-        ("LOG_BURST", "payment", "log_template_rate", 125.5),
-        ("LOG_BURST", "checkout", "log_template_rate", 125.5),
-        ("LOG_BURST", "cart", "log_template_rate", 125.5),
-        ("LOG_BURST", "frontend", "log_template_rate", 125.5),
-        ("EDGE_DEGRADED", "checkout", "dependency.payment", 125.5),
-        ("SATURATION", "checkout", "container_memory", 65.0),
-        ("SATURATION", "checkout", "container_memory", 307.0),
-        ("DROP", "frontend", "request_rate", 487.25),
-        ("SILENCE", "frontend", "request_rate", 547.5),
+        ("LOG_BURST", "payment", "log_template_rate", 305.5),
+        ("LOG_BURST", "checkout", "log_template_rate", 305.5),
+        ("EDGE_DEGRADED", "checkout", "dependency.payment", 305.5),
+        ("SATURATION", "email", "container_memory", 487.0),
+        ("DROP", "frontend", "request_rate", 667.25),
+        ("SILENCE", "frontend", "request_rate", 727.5),
     }
 
 
