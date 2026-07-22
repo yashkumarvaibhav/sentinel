@@ -13,7 +13,10 @@ receivers:
 processors:
   batch:
     timeout: 5s
-    send_batch_size: 1024
+    # Raw OTLP is one Kafka record per batch. Bound both the trigger and hard
+    # item ceiling so normal mesh bursts stay below Redpanda's 1 MiB limit.
+    send_batch_size: 256
+    send_batch_max_size: 256
   # A collector that OOMs takes the whole telemetry path down with it, so it
   # sheds load before it hits the container limit.
   memory_limiter:

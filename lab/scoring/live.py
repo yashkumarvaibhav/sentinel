@@ -898,13 +898,14 @@ def _wait_for_anchor(*, repo_root: Path, user_agent: str) -> datetime:
 
 def _query_spans(*, repo_root: Path, user_agent: str) -> tuple[datetime, ...]:
     query = """
-        SELECT toUnixTimestamp64Micro(ts) AS ts_us
-        FROM sentinel.observations FINAL
-        WHERE service = 'frontend-proxy'
+        SELECT observation_id, toUnixTimestamp64Micro(min(ts)) AS ts_us
+        FROM sentinel.observations
+        PREWHERE service = 'frontend-proxy'
           AND signal = 'span.duration_ms'
-          AND JSONExtractInt(attributes_json, 'span.kind') = 2
+        WHERE JSONExtractInt(attributes_json, 'span.kind') = 2
           AND JSONExtractString(attributes_json, 'user_agent') = {user_agent:String}
-        ORDER BY ts, observation_id
+        GROUP BY observation_id
+        ORDER BY ts_us, observation_id
         FORMAT JSONEachRow
     """
     output = _run(

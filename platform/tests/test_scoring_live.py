@@ -108,6 +108,32 @@ def test_live_anchor_accepts_a_stable_partial_marker_burst(monkeypatch: pytest.M
     assert responses == []
 
 
+def test_span_query_deduplicates_by_observation_without_unbounded_final(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands: list[list[str]] = []
+
+    def run(command: list[str], **_: object) -> str:
+        commands.append(command)
+        return (
+            '{"observation_id":"one","ts_us":"1784721600000000"}\n'
+            '{"observation_id":"two","ts_us":"1784721601000000"}\n'
+        )
+
+    monkeypatch.setattr(live_module, "_run", run)
+
+    timestamps = live_module._query_spans(
+        repo_root=SCENARIO_ROOT.parents[1],
+        user_agent="sentinel-stimulus/journey-bounded",
+    )
+
+    query = commands[0][-1]
+    assert " FINAL" not in query
+    assert "PREWHERE service = 'frontend-proxy'" in query
+    assert "GROUP BY observation_id" in query
+    assert timestamps[1] - timestamps[0] == timedelta(seconds=1)
+
+
 def test_live_stimuli_use_fixed_owned_resources_and_restore_flagd() -> None:
     schedule = _fault_schedule(flag_variant="100x", include_journey=True)
     commands: list[list[str]] = []
