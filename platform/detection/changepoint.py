@@ -150,7 +150,7 @@ class SaturationDetector:
             if min(len(before), len(after)) < self._configuration.minimum_segment_points:
                 continue
             increasing_fraction = sum(
-                current.used > previous.used for previous, current in pairwise(after)
+                current.used >= previous.used for previous, current in pairwise(after)
             ) / (len(after) - 1)
             if increasing_fraction < self._configuration.minimum_increasing_fraction:
                 continue

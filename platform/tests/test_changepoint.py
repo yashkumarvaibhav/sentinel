@@ -40,6 +40,34 @@ def test_monotonic_heap_leak_fires_under_flat_traffic_with_raw_evidence() -> Non
     assert "headroom_ratio=0.125" in result.symptom.note
 
 
+def test_monotonic_scrape_plateaus_do_not_hide_low_headroom_growth() -> None:
+    working_set = (50.0,) * 8 + (
+        58.0,
+        62.0,
+        62.0,
+        69.0,
+        72.0,
+        72.0,
+        76.0,
+        76.0,
+        81.0,
+        81.0,
+        85.0,
+        94.0,
+        94.0,
+        97.0,
+    )
+
+    result = _detector().evaluate(_samples(working_set, capacity=100.0))
+
+    assert result.change_index is not None
+    assert result.growth_slope_per_second is not None
+    assert result.growth_slope_per_second > 0.0
+    assert result.headroom_ratio == pytest.approx(0.03)
+    assert result.symptom is not None
+    assert "increasing_fraction=1" in result.symptom.note
+
+
 def test_flat_resource_and_traffic_only_surge_do_not_emit_saturation() -> None:
     traffic_requests = (100.0,) * 8 + (150.0, 220.0, 350.0, 500.0, 700.0, 900.0, 1_100.0, 1_300.0)
     flat_resource = _samples((400.0,) * len(traffic_requests), capacity=800.0)
