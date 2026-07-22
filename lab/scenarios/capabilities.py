@@ -6,9 +6,11 @@ from dataclasses import dataclass
 
 from contracts import SymptomKind
 from lab.scenarios.models import (
+    ChaosMeshStimulus,
     FlagdStimulus,
     K6JourneyStimulus,
     K6PathAttackStimulus,
+    K6RatePhaseStimulus,
     ScenarioProfile,
     Stimulus,
     SymptomLabelInterval,
@@ -52,6 +54,34 @@ _PATH_ATTACK_CAPABILITIES = (
     ),
 )
 
+_EMAIL_MEMORY_LEAK_CAPABILITIES = (
+    SymptomCapability(
+        kind=SymptomKind.SATURATION,
+        service="email",
+        signal="container_memory",
+        evidence="email container working-set and Kubernetes hard-limit gauges",
+        requires_checkout_journey=True,
+    ),
+)
+
+_RATE_DROP_CAPABILITIES = (
+    SymptomCapability(
+        kind=SymptomKind.DROP,
+        service="frontend",
+        signal="request_rate",
+        evidence="low-but-present fixed-target primary ingress spans under event expectation",
+    ),
+)
+
+_FRONTEND_FAILURE_CAPABILITIES = (
+    SymptomCapability(
+        kind=SymptomKind.SILENCE,
+        service="frontend",
+        signal="request_rate",
+        evidence="continuing fixed-target workload with absent frontend-proxy ingress spans",
+    ),
+)
+
 _POSITIVE_KINDS = (
     SymptomKind.RATIO_DEFORM,
     SymptomKind.LOG_BURST,
@@ -72,6 +102,19 @@ def capabilities_for(stimulus: Stimulus) -> tuple[SymptomCapability, ...]:
         return _PAYMENT_FAILURE_CAPABILITIES
     if isinstance(stimulus, K6PathAttackStimulus):
         return _PATH_ATTACK_CAPABILITIES
+    if (
+        isinstance(stimulus, FlagdStimulus)
+        and stimulus.flag == "emailMemoryLeak"
+        and stimulus.variant == "100x"
+    ):
+        return _EMAIL_MEMORY_LEAK_CAPABILITIES
+    if isinstance(stimulus, K6RatePhaseStimulus):
+        return _RATE_DROP_CAPABILITIES
+    if (
+        isinstance(stimulus, ChaosMeshStimulus)
+        and stimulus.experiment == "frontend-proxy-pod-failure"
+    ):
+        return _FRONTEND_FAILURE_CAPABILITIES
     return ()
 
 
@@ -91,6 +134,20 @@ def validate_symptom_label_capabilities(profile: ScenarioProfile) -> None:
         if capability.requires_checkout_journey and not _has_covering_checkout(profile, label):
             raise ValueError(
                 f"stimulus {label.stimulus_id} requires an overlapping checkout journey"
+            )
+        if isinstance(stimulus, K6RatePhaseStimulus) and not _proves_expected_drop(
+            profile, label, stimulus
+        ):
+            raise ValueError(
+                f"stimulus {label.stimulus_id} lacks a covering high-volume expectation"
+            )
+        if (
+            isinstance(stimulus, ChaosMeshStimulus)
+            and stimulus.experiment == "frontend-proxy-pod-failure"
+            and stimulus.duration_seconds < 160
+        ):
+            raise ValueError(
+                f"stimulus {label.stimulus_id} is too short to prove configured silence"
             )
 
     for residual_label in profile.residual_labels:
@@ -138,4 +195,19 @@ def _has_covering_checkout(
         and stimulus.start_offset_seconds <= label.start_offset_seconds
         and stimulus.start_offset_seconds + stimulus.duration_seconds >= label.end_offset_seconds
         for stimulus in profile.stimuli
+    )
+
+
+def _proves_expected_drop(
+    profile: ScenarioProfile,
+    label: SymptomLabelInterval,
+    stimulus: K6RatePhaseStimulus,
+) -> bool:
+    baseline_rate = profile.load_phases[0].rate_rps
+    return any(
+        context.start_offset_seconds <= label.start_offset_seconds
+        and context.start_offset_seconds + context.duration_seconds >= label.end_offset_seconds
+        and (multiplier := context.expected_delta.get("frontend.request_rate")) is not None
+        and stimulus.rate_rps * 2 <= baseline_rate * multiplier
+        for context in profile.contexts
     )

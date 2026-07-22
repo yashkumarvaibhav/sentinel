@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -89,7 +90,51 @@ def test_combo_path_attack_is_fixed_target_capped_and_counted_as_primary_volume(
     assert env["SENTINEL_ATTACK_PATH"] == "/"
     assert env["SENTINEL_RATE_RPS"] == "20"
     assert env["SENTINEL_USER_AGENT"] == "sentinel-score/run-combo/attack/abc"
-    assert expected_request_count(schedule) == 6_856
+    assert expected_request_count(schedule) == 10_376
+
+
+def test_primary_rate_phase_records_measured_boundaries_without_a_second_job() -> None:
+    profile = load_profile(SCENARIO_ROOT / "combo_night.yml")
+    schedule = compile_profile(
+        profile,
+        seed=profile.seeds.development[0],
+        purpose=SeedPurpose.DEVELOPMENT,
+    ).schedule
+    rate_phase = next(item for item in schedule.stimuli if item.kind == "k6_rate_phase")
+    minimal = replace(schedule, stimuli=(rate_phase,))
+    commands: list[list[str]] = []
+    anchor = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
+    times = iter(
+        (
+            anchor + timedelta(seconds=484, milliseconds=10),
+            anchor + timedelta(seconds=544, milliseconds=20),
+        )
+    )
+
+    def runner(
+        command: list[str],
+        *,
+        input_text: str | None = None,
+        timeout: int = 120,
+    ) -> str:
+        del input_text, timeout
+        commands.append(command)
+        return ""
+
+    executions = execute_stimuli(
+        repo_root=SCENARIO_ROOT.parents[1],
+        schedule=minimal,
+        anchor_ts=anchor,
+        runner=runner,
+        waiter=lambda _: None,
+        clock=lambda: next(times),
+    )
+
+    assert commands == []
+    assert executions[0].kind == "k6_rate_phase"
+    assert executions[0].setting == "primary@2rps"
+    assert executions[0].started_at == anchor + timedelta(seconds=484, milliseconds=10)
+    assert executions[0].ended_at == anchor + timedelta(seconds=544, milliseconds=20)
 
 
 def test_live_anchor_waits_for_the_complete_marker_burst(monkeypatch: pytest.MonkeyPatch) -> None:

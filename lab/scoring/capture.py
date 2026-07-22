@@ -285,7 +285,7 @@ def score_detection_episode_capture(
         )
         revisions.extend(replay.active_episodes)
     evaluation_end = decomposition.anchor_ts + timedelta(
-        seconds=len(decomposition.steps) * capture.manifest.telemetry.tick_seconds
+        seconds=len(liveness.steps) * capture.manifest.telemetry.tick_seconds
     )
 
     # The complete decomposition + edge/log/ratio/liveness/resource runtime replays

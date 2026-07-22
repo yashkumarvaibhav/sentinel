@@ -1,0 +1,17 @@
+# Suspend the single contained frontend-proxy emitter while the fixed-target
+# scenario workload continues. The experiment self-expires and the scenario
+# executor also deletes it at the measured interval boundary.
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: frontend-proxy-pod-failure
+  namespace: otel-demo
+spec:
+  action: pod-failure
+  mode: one
+  duration: 160s
+  selector:
+    namespaces:
+      - otel-demo
+    labelSelectors:
+      app.kubernetes.io/component: frontend-proxy

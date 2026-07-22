@@ -188,7 +188,21 @@ class K6PathAttackStimulus(LabModel):
     rate_rps: SafeAttackRate
 
 
-type Stimulus = FlagdStimulus | ChaosMeshStimulus | K6JourneyStimulus | K6PathAttackStimulus
+class K6RatePhaseStimulus(LabModel):
+    stimulus_id: Identifier
+    kind: Literal["k6_rate_phase"]
+    start_offset_seconds: OffsetSeconds
+    duration_seconds: PositiveSeconds
+    rate_rps: SafeRate
+
+
+type Stimulus = (
+    FlagdStimulus
+    | ChaosMeshStimulus
+    | K6JourneyStimulus
+    | K6PathAttackStimulus
+    | K6RatePhaseStimulus
+)
 
 
 class ScenarioProfile(LabModel):
@@ -300,6 +314,17 @@ class ScenarioProfile(LabModel):
                     and stimulus.rate_rps + phase.rate_rps > 50
                 ):
                     raise ValueError("combined primary and path-attack rate exceeds 50 rps")
+        phase_offsets = _phase_offsets(self.load_phases)
+        for stimulus in self.stimuli:
+            if not isinstance(stimulus, K6RatePhaseStimulus):
+                continue
+            if not any(
+                stimulus.start_offset_seconds == phase_start
+                and stimulus.duration_seconds == phase.duration_seconds
+                and stimulus.rate_rps == phase.rate_rps
+                for phase_start, phase in phase_offsets
+            ):
+                raise ValueError("k6 rate-phase stimulus must exactly match one load phase")
         return self
 
 
@@ -310,7 +335,9 @@ def stimulus_target(stimulus: Stimulus) -> str:
         return f"chaos_mesh:{stimulus.experiment}"
     if isinstance(stimulus, K6JourneyStimulus):
         return f"k6_journey:{stimulus.journey}"
-    return f"k6_path_attack:{stimulus.path}"
+    if isinstance(stimulus, K6PathAttackStimulus):
+        return f"k6_path_attack:{stimulus.path}"
+    return "k6_rate_phase:primary"
 
 
 def _phase_offsets(phases: tuple[LoadPhase, ...]) -> tuple[tuple[int, LoadPhase], ...]:

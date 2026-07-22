@@ -251,14 +251,14 @@ def test_real_v7_capture_materializes_all_topology_resources_stably() -> None:
     assert first.private_labels_read is False
     assert first.active_episodes == ()
     assert len(first.steps) == 14
-    assert all(len(step.results) == 4 for step in first.steps)
+    assert all(len(step.results) == 5 for step in first.steps)
     assert (
         sum(
             result.status is ResourceWindowStatus.WARMING
             for step in first.steps
             for result in step.results
         )
-        == 44
+        == 55
     )
     assert (
         sum(
@@ -266,14 +266,14 @@ def test_real_v7_capture_materializes_all_topology_resources_stably() -> None:
             for step in first.steps
             for result in step.results
         )
-        == 12
+        == 15
     )
     assert {
         result.key.service
         for step in first.steps
         for result in step.results
         if result.sample_count == 14
-    } == {"cart", "checkout", "frontend", "payment"}
+    } == {"cart", "checkout", "email", "frontend", "payment"}
 
 
 def _runner() -> ResourceDetectionRunner:

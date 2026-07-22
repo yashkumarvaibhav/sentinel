@@ -76,6 +76,7 @@ def test_committed_config_loads_with_cross_file_references_and_stable_fingerprin
     assert {rule.service for rule in resource_windows.rules} == {
         "cart",
         "checkout",
+        "email",
         "frontend",
         "payment",
     }

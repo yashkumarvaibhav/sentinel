@@ -110,18 +110,20 @@ def test_combo_night_compiles_attack_and_fault_without_claiming_unsupported_kind
         "k6_path_attack",
         "k6_journey",
         "k6_journey",
+        "flagd",
+        "k6_rate_phase",
+        "chaos_mesh",
     ]
     assert {label.kind for label in profile.symptom_labels} == {
         SymptomKind.RATIO_DEFORM.value,
         SymptomKind.LOG_BURST.value,
         SymptomKind.EDGE_DEGRADED.value,
+        SymptomKind.SATURATION.value,
+        SymptomKind.DROP.value,
+        SymptomKind.SILENCE.value,
     }
     assert profile.residual_labels[0].stimulus_id == "behavior_attack"
-    assert missing_positive_kinds(profile) == (
-        SymptomKind.SATURATION,
-        SymptomKind.DROP,
-        SymptomKind.SILENCE,
-    )
+    assert missing_positive_kinds(profile) == ()
     validate_symptom_label_capabilities(profile)
     assert "symptom_intervals" not in schedule_payload(artifacts.schedule)
     assert "intervals" not in schedule_payload(artifacts.schedule)
@@ -140,6 +142,9 @@ def test_combo_labels_follow_measured_attack_and_fault_execution() -> None:
         stimulus_offsets={
             "behavior_attack": (126.25, 306.75),
             "payment_failure": (125.5, 305.5),
+            "email_memory_leak": (307.0, 487.25),
+            "measured_rate_drop": (487.25, 547.5),
+            "frontend_emitter_silence": (547.5, 707.75),
         },
     )
 
@@ -159,6 +164,9 @@ def test_combo_labels_follow_measured_attack_and_fault_execution() -> None:
         ("RATIO_DEFORM", "frontend", "path_entropy", 126.25),
         ("LOG_BURST", "payment", "log_template_rate", 125.5),
         ("EDGE_DEGRADED", "checkout", "dependency.payment", 125.5),
+        ("SATURATION", "email", "container_memory", 307.0),
+        ("DROP", "frontend", "request_rate", 487.25),
+        ("SILENCE", "frontend", "request_rate", 547.5),
     }
 
 
@@ -181,6 +189,25 @@ def test_capability_oracle_rejects_unrelated_labels_and_missing_support_traffic(
         compile_profile(
             ScenarioProfile.model_validate(document),
             seed=profile.seeds.development[0],
+            purpose=SeedPurpose.DEVELOPMENT,
+        )
+
+    combo = load_profile(SCENARIO_ROOT / "combo_night.yml")
+    document = combo.model_dump(mode="json")
+    next(item for item in document["stimuli"] if item["stimulus_id"] == "measured_rate_drop")[
+        "rate_rps"
+    ] = 3
+    with pytest.raises(ValueError, match="must exactly match one load phase"):
+        ScenarioProfile.model_validate(document)
+
+    document = combo.model_dump(mode="json")
+    next(item for item in document["stimuli"] if item["stimulus_id"] == "email_memory_leak")[
+        "variant"
+    ] = "10x"
+    with pytest.raises(ValueError, match="does not prove SATURATION"):
+        compile_profile(
+            ScenarioProfile.model_validate(document),
+            seed=combo.seeds.development[0],
             purpose=SeedPurpose.DEVELOPMENT,
         )
 

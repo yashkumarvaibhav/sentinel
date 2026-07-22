@@ -7,7 +7,7 @@ services:
   - service: checkout
     tier: application
     criticality: critical
-    dependencies: [cart, payment]
+    dependencies: [cart, payment, email]
   - service: cart
     tier: application
     criticality: high
@@ -15,4 +15,8 @@ services:
   - service: payment
     tier: application
     criticality: critical
+    dependencies: []
+  - service: email
+    tier: application
+    criticality: high
     dependencies: []

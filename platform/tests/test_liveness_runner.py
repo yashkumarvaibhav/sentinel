@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
+import lab.captures.liveness_transcript as liveness_transcript
 import pytest
 from lab.captures import load_runtime_capture
 from lab.captures.liveness_transcript import replay_liveness_detection
+from lab.captures.store import RuntimeCapture
 
 from common.config import (
     EpisodeConfig,
@@ -275,6 +280,96 @@ def test_real_v6_capture_materializes_liveness_stably() -> None:
         for item in step.results
         if item.key.kind is SymptomKind.SILENCE
     )
+
+
+def test_capture_liveness_advances_missing_span_ticks_from_schedule_watermark(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    detector = load_config(REPO_ROOT / "config").detectors.model_copy(
+        update={
+            "liveness": liveness_config(
+                maximum_age_seconds=4.0,
+                full_score_age_seconds=8.0,
+            ),
+            "episodes": EpisodeConfig(
+                policies={
+                    kind: EpisodePolicyConfig(
+                        open_after_ticks=2,
+                        close_after_ticks=2,
+                        breach_score=0.5,
+                        clear_score=0.2,
+                    )
+                    for kind in ("DROP", "SILENCE")
+                }
+            ),
+        }
+    )
+    decomposition = SimpleNamespace(
+        anchor_ts=START,
+        steps=(
+            SimpleNamespace(
+                frame=_frame("seen", tick=0),
+                observation=SimpleNamespace(ts=START),
+            ),
+        ),
+        raw_replay_sha256="a" * 64,
+        raw_dead_letters=(),
+    )
+    monkeypatch.setattr(
+        liveness_transcript, "replay_decomposition", lambda *args, **kwargs: decomposition
+    )
+    capture = SimpleNamespace(
+        manifest=SimpleNamespace(
+            capture_id="sparse-capture",
+            scenario_id="combo_night",
+            seed=503,
+            seed_purpose="development",
+            config_fingerprint="b" * 64,
+            telemetry=SimpleNamespace(tick_seconds=2),
+        ),
+        schedule=json.dumps(
+            {
+                "version": 1,
+                "scenario_id": "combo_night",
+                "honesty": "SIMULATED",
+                "seed": 503,
+                "seed_purpose": "development",
+                "request_mix_seed": 1,
+                "target": "astronomy-shop/frontend-proxy",
+                "phases": [
+                    {
+                        "name": "warmup",
+                        "start_offset_seconds": 0,
+                        "duration_seconds": 4,
+                        "rate_rps": 4,
+                    },
+                    {
+                        "name": "silence",
+                        "start_offset_seconds": 4,
+                        "duration_seconds": 6,
+                        "rate_rps": 4,
+                    },
+                ],
+            }
+        ).encode(),
+    )
+
+    replay = replay_liveness_detection(
+        cast(RuntimeCapture, capture),
+        detector=detector,
+        replay_config_fingerprint="c" * 64,
+    )
+
+    assert [step.tick_ts for step in replay.steps] == [
+        START + timedelta(seconds=offset) for offset in range(0, 10, 2)
+    ]
+    assert replay.steps[0].results[0].frame_id == "seen"
+    assert all(
+        next(item for item in step.results if item.key.kind is SymptomKind.DROP).status
+        is LivenessWindowStatus.INSUFFICIENT
+        for step in replay.steps[1:]
+    )
+    assert replay.active_episodes[0].kind is SymptomKind.SILENCE
 
 
 def _runner(

@@ -24,6 +24,7 @@ from lab.scenarios.models import (
     FlagdStimulus,
     K6JourneyStimulus,
     K6PathAttackStimulus,
+    K6RatePhaseStimulus,
     Stimulus,
     stimulus_target,
 )
@@ -60,7 +61,13 @@ class LiveTelemetry:
 @dataclass(frozen=True)
 class StimulusExecution:
     stimulus_id: str
-    kind: Literal["flagd", "chaos_mesh", "k6_journey", "k6_path_attack"]
+    kind: Literal[
+        "flagd",
+        "chaos_mesh",
+        "k6_journey",
+        "k6_path_attack",
+        "k6_rate_phase",
+    ]
     target: str
     setting: str
     requested_start_offset_seconds: int
@@ -417,6 +424,8 @@ def execute_stimuli(
                         manifest = chaos[stimulus.stimulus_id]
                         active_chaos[stimulus.stimulus_id] = manifest
                         _apply_chaos(command, manifest)
+                    elif isinstance(stimulus, K6RatePhaseStimulus):
+                        pass
                     else:
                         journey = _start_k6_stimulus(
                             command,
@@ -439,6 +448,9 @@ def execute_stimuli(
                     manifest = active_chaos[stimulus.stimulus_id]
                     _delete_chaos(command, manifest)
                     del active_chaos[stimulus.stimulus_id]
+                    started_at = started.pop(stimulus.stimulus_id)
+                    ended_at = _require_utc(now(), "stimulus end")
+                elif isinstance(stimulus, K6RatePhaseStimulus):
                     started_at = started.pop(stimulus.stimulus_id)
                     ended_at = _require_utc(now(), "stimulus end")
                 else:
@@ -657,7 +669,9 @@ def _stimulus_setting(stimulus: Stimulus) -> str:
         return stimulus.experiment
     if isinstance(stimulus, K6JourneyStimulus):
         return f"{stimulus.journey}@{stimulus.rate_rps}rps"
-    return f"{stimulus.attack}:{stimulus.path}@{stimulus.rate_rps}rps"
+    if isinstance(stimulus, K6PathAttackStimulus):
+        return f"{stimulus.attack}:{stimulus.path}@{stimulus.rate_rps}rps"
+    return f"primary@{stimulus.rate_rps}rps"
 
 
 def _start_k6_stimulus(

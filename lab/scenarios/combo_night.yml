@@ -1,6 +1,6 @@
 version: 1
 scenario_id: combo_night
-description: A behaviorally deformed attack and payment fault run inside a fully explained match surge.
+description: A bounded attack, payment fault, resource leak, measured rate drop, and emitter silence run inside an explained match surge.
 honesty: SIMULATED
 telemetry:
   target: astronomy-shop/frontend-proxy
@@ -21,6 +21,15 @@ load_phases:
   - name: event_with_attack_and_fault
     duration_seconds: 180
     rate_rps: 10
+  - name: event_with_resource_pressure
+    duration_seconds: 180
+    rate_rps: 10
+  - name: event_with_measured_drop
+    duration_seconds: 60
+    rate_rps: 2
+  - name: event_with_emitter_silence
+    duration_seconds: 160
+    rate_rps: 10
   - name: event_recovery
     duration_seconds: 60
     rate_rps: 10
@@ -31,7 +40,7 @@ contexts:
     source: scenario_compiler
     honesty: SIMULATED
     start_offset_seconds: 64
-    duration_seconds: 300
+    duration_seconds: 700
     expected_delta:
       frontend.request_rate: 2.5
     trust_score: 1.0
@@ -58,9 +67,25 @@ stimuli:
   - stimulus_id: checkout_recovery_traffic
     kind: k6_journey
     start_offset_seconds: 304
-    duration_seconds: 30
+    duration_seconds: 180
     journey: checkout
     rate_rps: 2
+  - stimulus_id: email_memory_leak
+    kind: flagd
+    start_offset_seconds: 304
+    duration_seconds: 180
+    flag: emailMemoryLeak
+    variant: 100x
+  - stimulus_id: measured_rate_drop
+    kind: k6_rate_phase
+    start_offset_seconds: 484
+    duration_seconds: 60
+    rate_rps: 2
+  - stimulus_id: frontend_emitter_silence
+    kind: chaos_mesh
+    start_offset_seconds: 544
+    duration_seconds: 160
+    experiment: frontend-proxy-pod-failure
 residual_labels:
   - label_id: behavior-attack-volume
     stimulus_id: behavior_attack
@@ -88,3 +113,24 @@ symptom_labels:
     stimulus_id: payment_failure
     start_offset_seconds: 124
     end_offset_seconds: 304
+  - label_id: email-memory-saturation
+    kind: SATURATION
+    service: email
+    signal: container_memory
+    stimulus_id: email_memory_leak
+    start_offset_seconds: 304
+    end_offset_seconds: 484
+  - label_id: frontend-measured-rate-drop
+    kind: DROP
+    service: frontend
+    signal: request_rate
+    stimulus_id: measured_rate_drop
+    start_offset_seconds: 484
+    end_offset_seconds: 544
+  - label_id: frontend-emitter-silence
+    kind: SILENCE
+    service: frontend
+    signal: request_rate
+    stimulus_id: frontend_emitter_silence
+    start_offset_seconds: 544
+    end_offset_seconds: 704

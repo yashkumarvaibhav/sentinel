@@ -15,6 +15,7 @@ from lab.captures import (
     write_capture,
 )
 from lab.captures.models import CaptureTelemetry
+from lab.captures.transcript import CapturedSchedule, _rate_observations
 from lab.scoring.capture import score_decomposition_replay
 
 from common.config import DetectorConfig
@@ -117,6 +118,18 @@ def test_two_full_capture_replays_are_byte_identical_without_private_labels(
     assert first.stats.warming == 2
     assert first.stats.decomposed == 2
     assert len(first.steps) == 4
+
+    capture = load_runtime_capture(root)
+    sparse = _rate_observations(
+        capture=capture,
+        schedule=CapturedSchedule.model_validate_json(capture.schedule),
+        anchor_ts=first.anchor_ts,
+        span_timestamps=(first.anchor_ts, first.anchor_ts + timedelta(seconds=4)),
+    )
+    assert [(item.ts, item.value) for item in sparse] == [
+        (first.anchor_ts, 0.5),
+        (first.anchor_ts + timedelta(seconds=4), 0.5),
+    ]
 
     scored = score_decomposition_replay(
         first,

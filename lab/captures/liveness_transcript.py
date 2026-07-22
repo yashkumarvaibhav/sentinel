@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal
 
 from common.config import DetectorConfig
 from contracts import SymptomEpisode
 from detection.liveness_runner import LivenessDetectionRunner, LivenessWindowAdvance
 from lab.captures.store import RuntimeCapture
-from lab.captures.transcript import replay_decomposition
+from lab.captures.transcript import CapturedSchedule, replay_decomposition
 
 
 @dataclass(frozen=True)
@@ -87,15 +87,26 @@ def replay_liveness_detection(
         episodes=detector.episodes,
         expected_since_ts=decomposition.anchor_ts,
     )
+    schedule = CapturedSchedule.model_validate_json(capture.schedule)
+    frames_by_tick = {
+        step.frame.ts: step.frame for step in decomposition.steps if step.frame is not None
+    }
     steps = tuple(
         LivenessReplayStep(
-            tick_ts=step.observation.ts,
+            tick_ts=tick_ts,
             results=runner.advance(
-                frames=() if step.frame is None else (step.frame,),
-                tick_ts=step.observation.ts,
+                frames=(frames_by_tick[tick_ts],) if tick_ts in frames_by_tick else (),
+                tick_ts=tick_ts,
             ),
         )
-        for step in decomposition.steps
+        for tick_ts in (
+            decomposition.anchor_ts + timedelta(seconds=offset)
+            for offset in range(
+                0,
+                schedule.duration_seconds,
+                detector.liveness.window_seconds,
+            )
+        )
     )
     return LivenessDetectionReplay(
         capture_id=manifest.capture_id,

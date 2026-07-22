@@ -49,3 +49,24 @@ def test_checkout_journey_preallocates_for_slow_successful_iterations() -> None:
     assert "const preAllocatedVUs = journey === 'checkout'" in script
     assert "Math.min(Math.max(phase.rate_rps * 5, 10), 50)" in script
     assert "preAllocatedVUs," in script
+
+
+def test_frontend_emitter_failure_is_single_target_bounded_and_self_expiring() -> None:
+    document = yaml.safe_load(
+        (REPO_ROOT / "lab" / "testbed" / "chaos" / "frontend-proxy-pod-failure.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert document["kind"] == "PodChaos"
+    assert document["metadata"] == {
+        "name": "frontend-proxy-pod-failure",
+        "namespace": "otel-demo",
+    }
+    assert document["spec"]["action"] == "pod-failure"
+    assert document["spec"]["mode"] == "one"
+    assert document["spec"]["duration"] == "160s"
+    assert document["spec"]["selector"] == {
+        "namespaces": ["otel-demo"],
+        "labelSelectors": {"app.kubernetes.io/component": "frontend-proxy"},
+    }

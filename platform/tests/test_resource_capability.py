@@ -251,13 +251,14 @@ def test_v7_capture_qualifies_every_topology_resource_stream() -> None:
 
     assert first.canonical_bytes() == second.canonical_bytes()
     assert first.raw_dead_letters == ()
-    assert first.qualified_count == 4
+    assert first.qualified_count == 5
     assert all(item.status is ResourceCapabilityStatus.QUALIFIED for item in first.results)
     assert all(item.sample_count == 14 for item in first.results)
     assert all(item.capacity_observation_count == 15 for item in first.results)
     assert {item.service: item.capacity for item in first.results} == {
         "cart": 167_772_160.0,
         "checkout": 20_971_520.0,
+        "email": 104_857_600.0,
         "frontend": 262_144_000.0,
         "payment": 146_800_640.0,
     }

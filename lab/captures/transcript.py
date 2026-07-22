@@ -291,6 +291,7 @@ def _rate_observations(
             },
         )
         for index, count in enumerate(counts)
+        if count > 0
     )
 
 
