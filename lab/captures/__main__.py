@@ -41,7 +41,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     record = subparsers.add_parser("record", help="record one committed live scenario seed")
     record.add_argument("--repo-root", type=Path, required=True)
-    record.add_argument("--profile", choices=("quiet_day", "match_night"), required=True)
+    record.add_argument(
+        "--profile", choices=("quiet_day", "match_night", "attack_day"), required=True
+    )
     record.add_argument("--seed", type=int, required=True)
     record.add_argument("--purpose", choices=("development", "held_out"), default="held_out")
     record.add_argument("--capture-id", required=True)

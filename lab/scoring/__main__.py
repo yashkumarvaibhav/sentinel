@@ -14,7 +14,7 @@ from lab.scoring.gates import evaluate_gates, load_gate_config
 from lab.scoring.live import expected_request_count, run_live_scenario
 from lab.scoring.report import render_report
 
-_PROFILES = ("quiet_day", "match_night")
+_PROFILES = ("quiet_day", "match_night", "attack_day")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
