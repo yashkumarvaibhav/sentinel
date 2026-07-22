@@ -13,6 +13,7 @@ from common.config import DetectorConfig
 from tests.factories import (
     behavioral_ratio_config,
     change_point_saturation_config,
+    liveness_config,
     log_template_config,
 )
 
@@ -142,4 +143,5 @@ def _detector() -> DetectorConfig:
         behavioral_ratios=behavioral_ratio_config(),
         log_templates=log_template_config(),
         change_point_saturation=change_point_saturation_config(),
+        liveness=liveness_config(),
     )

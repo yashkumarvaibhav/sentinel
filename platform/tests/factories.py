@@ -4,8 +4,11 @@ from common.config import (
     BehavioralRatioConfig,
     BehavioralRatioRuleConfig,
     ChangePointSaturationConfig,
+    DropRuleConfig,
+    LivenessConfig,
     LogTemplateConfig,
     SequenceRatioRuleConfig,
+    SilenceRuleConfig,
 )
 
 
@@ -82,4 +85,22 @@ def change_point_saturation_config() -> ChangePointSaturationConfig:
         minimum_utilization_slope_per_second=0.0002,
         maximum_headroom_ratio=0.2,
         full_score_headroom_ratio=0.05,
+    )
+
+
+def liveness_config() -> LivenessConfig:
+    return LivenessConfig(
+        drop_rules={
+            "frontend.request_rate": DropRuleConfig(
+                minimum_expected_value=2.0,
+                trigger_relative_drop=0.5,
+                full_score_relative_drop=0.9,
+            )
+        },
+        silence_rules={
+            "frontend.request_rate": SilenceRuleConfig(
+                maximum_age_seconds=120.0,
+                full_score_age_seconds=300.0,
+            )
+        },
     )

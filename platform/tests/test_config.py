@@ -45,6 +45,12 @@ def test_committed_config_loads_with_cross_file_references_and_stable_fingerprin
     assert first.detectors.change_point_saturation.pelt_model == "l2"
     assert first.detectors.change_point_saturation.minimum_series_points == 12
     assert first.detectors.change_point_saturation.maximum_headroom_ratio == 0.2
+    assert (
+        first.detectors.liveness.drop_rules["frontend.request_rate"].minimum_expected_value == 1.5
+    )
+    assert (
+        first.detectors.liveness.silence_rules["frontend.request_rate"].maximum_age_seconds == 120.0
+    )
     assert any(cohort.protected for cohort in first.cohorts.cohorts)
     assert {slo.service for slo in first.slos.slos} <= {
         service.service for service in first.topology.services
@@ -129,6 +135,35 @@ def test_config_models_are_immutable() -> None:
                 "full_score_headroom_ratio", 0.2
             ),
             "less than maximum_headroom_ratio",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["liveness"]["drop_rules"][
+                "frontend.request_rate"
+            ].__setitem__("trigger_relative_drop", 0.0),
+            "trigger_relative_drop must be greater than zero",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["liveness"]["drop_rules"][
+                "frontend.request_rate"
+            ].__setitem__("full_score_relative_drop", 0.4),
+            "full_score_relative_drop",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["liveness"]["silence_rules"][
+                "frontend.request_rate"
+            ].__setitem__("full_score_age_seconds", 60.0),
+            "full_score_age_seconds",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["liveness"]["drop_rules"].__setitem__(
+                "missing.request_rate",
+                document["liveness"]["drop_rules"]["frontend.request_rate"],
+            ),
+            "unknown topology service",
         ),
     ],
 )

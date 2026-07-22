@@ -301,6 +301,46 @@ class ChangePointSaturationConfig(ConfigModel):
         return self
 
 
+class DropRuleConfig(ConfigModel):
+    """Per-stream expected-volume sufficiency and relative-drop policy."""
+
+    minimum_expected_value: PositiveFloat
+    trigger_relative_drop: Probability
+    full_score_relative_drop: Probability
+
+    @model_validator(mode="after")
+    def validate_drop_policy(self) -> Self:
+        if self.trigger_relative_drop == 0.0:
+            raise ValueError("trigger_relative_drop must be greater than zero")
+        if self.full_score_relative_drop < self.trigger_relative_drop:
+            raise ValueError(
+                "full_score_relative_drop must be greater than or equal to trigger_relative_drop"
+            )
+        return self
+
+
+class SilenceRuleConfig(ConfigModel):
+    """Per-stream event-time staleness policy."""
+
+    maximum_age_seconds: PositiveFloat
+    full_score_age_seconds: PositiveFloat
+
+    @model_validator(mode="after")
+    def validate_silence_policy(self) -> Self:
+        if self.full_score_age_seconds < self.maximum_age_seconds:
+            raise ValueError(
+                "full_score_age_seconds must be greater than or equal to maximum_age_seconds"
+            )
+        return self
+
+
+class LivenessConfig(ConfigModel):
+    """Configured volume-drop and telemetry-silence rules by service signal."""
+
+    drop_rules: dict[SignalName, DropRuleConfig] = Field(min_length=1)
+    silence_rules: dict[SignalName, SilenceRuleConfig] = Field(min_length=1)
+
+
 class DetectorConfig(ConfigModel):
     version: Literal[1]
     feature_window_seconds: int = Field(ge=1, le=3600)
@@ -313,6 +353,7 @@ class DetectorConfig(ConfigModel):
     behavioral_ratios: BehavioralRatioConfig
     log_templates: LogTemplateConfig
     change_point_saturation: ChangePointSaturationConfig
+    liveness: LivenessConfig
 
     @model_validator(mode="after")
     def validate_watermark(self) -> Self:
@@ -439,9 +480,14 @@ def _validate_references(config: SentinelConfig) -> None:
     event_signals = [signal for event in config.events.events for signal in event.expected_delta]
     if config.events.sports_connector is not None:
         event_signals.extend(config.events.sports_connector.expected_delta)
+    detector_signals = (
+        *config.detectors.absolute_noise_floors,
+        *config.detectors.liveness.drop_rules,
+        *config.detectors.liveness.silence_rules,
+    )
     for filename, signals in (
         ("event-calendar.yml", iter(event_signals)),
-        ("detector-params.yml", iter(config.detectors.absolute_noise_floors)),
+        ("detector-params.yml", iter(detector_signals)),
     ):
         for signal in signals:
             service, _ = signal.split(".", maxsplit=1)
