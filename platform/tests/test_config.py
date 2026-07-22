@@ -67,6 +67,18 @@ def test_committed_config_loads_with_cross_file_references_and_stable_fingerprin
     assert first.detectors.change_point_saturation.pelt_model == "l2"
     assert first.detectors.change_point_saturation.minimum_series_points == 12
     assert first.detectors.change_point_saturation.maximum_headroom_ratio == 0.2
+    resource_windows = first.detectors.change_point_saturation.resource_windows
+    assert resource_windows.advance_seconds == 10
+    assert resource_windows.maximum_series_points == 24
+    assert resource_windows.namespace == "otel-demo"
+    assert resource_windows.used_signal == "container.memory.working_set"
+    assert resource_windows.capacity_signal == "k8s.container.memory_limit"
+    assert {rule.service for rule in resource_windows.rules} == {
+        "cart",
+        "checkout",
+        "frontend",
+        "payment",
+    }
     assert first.detectors.liveness.window_seconds == 2
     assert first.detectors.liveness.streams[0].service == "frontend"
     assert first.detectors.liveness.streams[0].signal == "request_rate"
@@ -202,6 +214,20 @@ def test_config_models_are_immutable() -> None:
                 "full_score_headroom_ratio", 0.2
             ),
             "less than maximum_headroom_ratio",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["change_point_saturation"]["resource_windows"].__setitem__(
+                "maximum_series_points", 11
+            ),
+            "maximum_series_points must cover minimum_series_points",
+        ),
+        (
+            "detector-params.yml",
+            lambda document: document["change_point_saturation"]["resource_windows"]["rules"][
+                0
+            ].__setitem__("service", "missing"),
+            "resource window rule references an unknown topology service",
         ),
         (
             "detector-params.yml",

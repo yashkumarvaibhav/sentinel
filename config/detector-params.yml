@@ -72,6 +72,27 @@ log_templates:
   trigger_relative_deformation: 2.0
   full_score_relative_deformation: 10.0
 change_point_saturation:
+  resource_windows:
+    advance_seconds: 10
+    maximum_series_points: 24
+    dedup_capacity: 10000
+    namespace: otel-demo
+    used_signal: container.memory.working_set
+    capacity_signal: k8s.container.memory_limit
+    unit: By
+    rules:
+      - service: cart
+        container: cart
+        detector_signal: container_memory
+      - service: checkout
+        container: checkout
+        detector_signal: container_memory
+      - service: frontend
+        container: frontend
+        detector_signal: container_memory
+      - service: payment
+        container: payment
+        detector_signal: container_memory
   pelt_model: l2
   pelt_penalty: 0.01
   minimum_series_points: 12

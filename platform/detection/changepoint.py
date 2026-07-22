@@ -28,6 +28,7 @@ class ResourceSample:
     signal: str
     used: float
     capacity: float
+    capacity_evidence_id: str | None = None
 
     def __post_init__(self) -> None:
         for name in ("evidence_id", "service", "signal"):
@@ -35,6 +36,13 @@ class ResourceSample:
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{name} must be a non-empty string")
             object.__setattr__(self, name, value.strip())
+        if self.capacity_evidence_id is not None:
+            if (
+                not isinstance(self.capacity_evidence_id, str)
+                or not self.capacity_evidence_id.strip()
+            ):
+                raise ValueError("capacity_evidence_id must be a non-empty string when present")
+            object.__setattr__(self, "capacity_evidence_id", self.capacity_evidence_id.strip())
         if not isinstance(self.ts, datetime) or self.ts.utcoffset() != timedelta(0):
             raise ValueError("ts must be timezone-aware UTC")
         object.__setattr__(self, "ts", self.ts.astimezone(UTC))
@@ -178,7 +186,20 @@ class SaturationDetector:
         headroom_ratio: float,
     ) -> Symptom:
         onset = ordered[candidate.change_index]
-        evidence_refs = tuple(sample.evidence_id for sample in ordered)
+        evidence_refs = tuple(
+            dict.fromkeys(
+                evidence_ref
+                for sample in ordered
+                for evidence_ref in (
+                    sample.evidence_id,
+                    *(
+                        ()
+                        if sample.capacity_evidence_id is None
+                        else (sample.capacity_evidence_id,)
+                    ),
+                )
+            )
+        )
         score = _headroom_score(headroom_ratio, configuration=self._configuration)
         note = (
             f"resource saturation verified after PELT proposal: change_index="

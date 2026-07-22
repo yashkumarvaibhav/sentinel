@@ -13,6 +13,8 @@ from common.config import (
     LivenessConfig,
     LivenessStreamConfig,
     LogTemplateConfig,
+    ResourceWindowConfig,
+    ResourceWindowRuleConfig,
     SequenceRatioRuleConfig,
     SilenceRuleConfig,
 )
@@ -107,6 +109,22 @@ def log_template_config() -> LogTemplateConfig:
 
 def change_point_saturation_config() -> ChangePointSaturationConfig:
     return ChangePointSaturationConfig(
+        resource_windows=ResourceWindowConfig(
+            advance_seconds=10,
+            maximum_series_points=24,
+            dedup_capacity=1_000,
+            namespace="otel-demo",
+            used_signal="container.memory.working_set",
+            capacity_signal="k8s.container.memory_limit",
+            unit="By",
+            rules=(
+                ResourceWindowRuleConfig(
+                    service="frontend",
+                    container="frontend",
+                    detector_signal="container_memory",
+                ),
+            ),
+        ),
         pelt_model="l2",
         pelt_penalty=0.01,
         minimum_series_points=12,

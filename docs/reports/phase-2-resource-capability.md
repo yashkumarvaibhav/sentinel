@@ -23,6 +23,8 @@ hard capacity.
 | Capture config fingerprint | `645eada691f3098f73352d67040ac78e1f48f943f768209696ee558e531e1869` |
 | Raw replay SHA-256 | `4c234f6e159dbf0abe7153364cc983e202c6fddac637a184a7b79c954bd7ae26` |
 | Capability transcript SHA-256 | `18b78aadba560586849e6efd1796455a24af89e4920fb1eb8ef2f9a8cedba068` |
+| Resource replay SHA-256 | `7a101797495500a4678e0776301f5971883f36794d2bf4e99017f5066836a3d9` |
+| Replay config fingerprint | `29d0466ab1faec91c95a03daf1a6093e466aebdd2d220a654e29fa029fb19397` |
 | Raw dead letters | 0 |
 | Private labels read | **false** |
 
@@ -44,6 +46,20 @@ The prior accepted v6 capture remains an explicit negative oracle: all four topo
 `INSUFFICIENT/MISSING_USED_AND_CAPACITY`. Its kubelet receiver addressed the k3d node's Docker IP
 from the pod network and could not reach port 10250. The v7 collector DaemonSet uses the contained
 k3d node network and its local kubelet loopback; this publishes no physical-host port.
+
+## Materialization replay
+
+The configured runner advances every 10 seconds and retains at most 24 contiguous points per
+pod-instance resource series. Across v7's 14 complete ticks, all four services produced 11
+`WARMING` results followed by three detector-evaluated `CLEAR` results: 44 warmups and 12 clears in
+total, with no `SATURATION` episode. The last tick retained 14 measured working-set points and the
+verified hard limit for each service. This is the honest result for a no-leak capture.
+
+The byte-stable v6 negative replay produced 56 `INSUFFICIENT` results, zero clears, and zero active
+episodes (`a93139855a3aa4774c0d515b6748184a3ae725852bff646dfb5c19c3d80ae09c`). Missing data,
+malformed metrics, conflicting values, hard-limit changes, and overlapping pod identities never
+advance the episode machine. A pod restart resets the series, and an exact fixed capacity may be
+reused only for the same pod UID.
 
 ## Rejections and guardrails
 

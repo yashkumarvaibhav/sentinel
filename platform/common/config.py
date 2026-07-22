@@ -301,9 +301,41 @@ class LogTemplateConfig(ConfigModel):
         return self
 
 
+class ResourceWindowRuleConfig(ConfigModel):
+    """Explicit container-to-logical-service route for resource telemetry."""
+
+    service: Identifier
+    container: Identifier
+    detector_signal: Identifier
+
+
+class ResourceWindowConfig(ConfigModel):
+    """Event-time materialization policy for fixed-capacity container gauges."""
+
+    advance_seconds: int = Field(ge=1, le=3600)
+    maximum_series_points: int = Field(ge=6, le=100_000)
+    dedup_capacity: int = Field(ge=1, le=10_000_000)
+    namespace: Identifier
+    used_signal: Literal["container.memory.working_set"]
+    capacity_signal: Literal["k8s.container.memory_limit"]
+    unit: Literal["By"]
+    rules: tuple[ResourceWindowRuleConfig, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_resource_routes(self) -> Self:
+        service_signals = [(rule.service, rule.detector_signal) for rule in self.rules]
+        if len(service_signals) != len(set(service_signals)):
+            raise ValueError("resource rules must identify unique service/signal pairs")
+        containers = [rule.container for rule in self.rules]
+        if len(containers) != len(set(containers)):
+            raise ValueError("resource rules must identify unique containers")
+        return self
+
+
 class ChangePointSaturationConfig(ConfigModel):
     """PELT proposal and deterministic resource-saturation confirmation policy."""
 
+    resource_windows: ResourceWindowConfig
     pelt_model: Literal["l2"]
     pelt_penalty: PositiveFloat
     minimum_series_points: int = Field(ge=6, le=100_000)
@@ -315,6 +347,8 @@ class ChangePointSaturationConfig(ConfigModel):
 
     @model_validator(mode="after")
     def validate_saturation_policy(self) -> Self:
+        if self.resource_windows.maximum_series_points < self.minimum_series_points:
+            raise ValueError("maximum_series_points must cover minimum_series_points")
         if self.minimum_series_points < self.minimum_segment_points * 2:
             raise ValueError(
                 "minimum_series_points must contain at least two minimum-sized segments"
@@ -675,6 +709,12 @@ def _validate_references(config: SentinelConfig) -> None:
             raise ConfigLoadError(
                 "detector-params.yml: liveness stream references an unknown topology service: "
                 f"{stream.service}"
+            )
+    for resource_rule in config.detectors.change_point_saturation.resource_windows.rules:
+        if resource_rule.service not in services:
+            raise ConfigLoadError(
+                "detector-params.yml: resource window rule references an unknown topology "
+                f"service: {resource_rule.service}"
             )
 
 
