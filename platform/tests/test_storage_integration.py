@@ -34,6 +34,7 @@ from contracts import (
     SymptomKind,
 )
 from detection.decompose import DecompositionEngine, DecompositionWorker
+from detection.pipeline import ResidualEpisodePipeline, ResidualEpisodeWorker
 from tests.factories import (
     behavioral_ratio_config,
     change_point_saturation_config,
@@ -237,6 +238,53 @@ async def _round_trip_postgres(config: Settings, pool: PostgresPool, suffix: str
     assert await labels.get(label.label_id) == label
 
     await _round_trip_episode(repository, ts, suffix)
+    await _round_trip_pipeline_episode(repository, ts, suffix)
+
+
+async def _round_trip_pipeline_episode(
+    repository: PostgresRepository, ts: datetime, suffix: str
+) -> None:
+    """Drive real decomposition frames through the pipeline into real Postgres."""
+    detector = DetectorConfig(
+        version=1,
+        feature_window_seconds=60,
+        watermark_lateness_seconds=15,
+        ewma_alpha=0.15,
+        baseline_warmup_points=3,
+        baseline_update_gate_ratio=0.25,
+        expected_band_relative_tolerance=0.1,
+        absolute_noise_floors={"frontend.request_rate": 1.0},
+        behavioral_ratios=behavioral_ratio_config(),
+        log_templates=log_template_config(),
+        change_point_saturation=change_point_saturation_config(),
+        liveness=liveness_config(),
+        edge_degradation=edge_degradation_config(),
+        episodes=episode_config(open_after_ticks=3, close_after_ticks=3),
+    )
+    engine = DecompositionEngine(configuration=detector, dedup_capacity=64)
+    pipeline = ResidualEpisodePipeline(configuration=detector.episodes)
+    worker = ResidualEpisodeWorker(pipeline=pipeline, sink=repository)
+
+    values = [4.0, 4.0, 4.0] + [16.0] * 4 + [4.0] * 3
+    closed = None
+    for index, value in enumerate(values):
+        observation = Observation(
+            observation_id=f"pipe-{suffix}-{index}",
+            ts=ts + timedelta(seconds=2 * index),
+            service="frontend",
+            signal="request_rate",
+            value=value,
+            unit="requests/s",
+        )
+        result = engine.decompose(observation)
+        if result.frame is None:
+            continue
+        transition = await worker.handle(result.frame)
+        if transition.episode is not None and transition.episode.status is EpisodeStatus.CLOSED:
+            closed = transition.episode
+
+    assert closed is not None
+    assert await repository.get_episode(closed.episode_id) == closed
 
 
 async def _round_trip_episode(repository: PostgresRepository, ts: datetime, suffix: str) -> None:
