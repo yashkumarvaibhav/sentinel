@@ -10,7 +10,7 @@ telemetry:
   tick_seconds: 2
 seeds:
   development: [503, 509]
-  held_out: [9209, 9221]
+  held_out: [9439, 9457]
 load_phases:
   - name: warmup
     duration_seconds: 64

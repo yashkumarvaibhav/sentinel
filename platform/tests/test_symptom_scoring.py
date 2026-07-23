@@ -646,10 +646,10 @@ def _held_out_run(
 def test_held_out_symptom_matrix_is_the_sealed_cascade_and_combo_seeds() -> None:
     assert capture_scoring._held_out_symptom_matrix(REPO_ROOT) == frozenset(
         {
-            ("cascade_night", 9103),
-            ("cascade_night", 9127),
-            ("combo_night", 9209),
-            ("combo_night", 9221),
+            ("cascade_night", 9403),
+            ("cascade_night", 9421),
+            ("combo_night", 9439),
+            ("combo_night", 9457),
         }
     )
 
@@ -663,7 +663,7 @@ def test_held_out_symptom_matrix_accepts_the_exact_sealed_set() -> None:
 def test_held_out_symptom_matrix_rejects_a_development_capture() -> None:
     expected = capture_scoring._held_out_symptom_matrix(REPO_ROOT)
     runs = tuple(
-        _held_out_run(scenario, seed, "development" if seed == 9103 else "held_out")
+        _held_out_run(scenario, seed, "development" if seed == 9403 else "held_out")
         for scenario, seed in expected
     )
     with pytest.raises(ValueError, match="cannot consume development"):
@@ -675,7 +675,7 @@ def test_held_out_symptom_matrix_rejects_an_incomplete_seed_set() -> None:
     runs = tuple(
         _held_out_run(scenario, seed)
         for scenario, seed in expected
-        if (scenario, seed) != ("combo_night", 9221)
+        if (scenario, seed) != ("combo_night", 9457)
     )
     with pytest.raises(ValueError, match="missing="):
         capture_scoring._require_held_out_symptom_matrix(runs, expected)
@@ -685,7 +685,7 @@ def test_held_out_symptom_report_marks_the_sealed_scope() -> None:
     score = score_symptom_episodes(
         capture_id="held-out-capture",
         scenario_id="combo_night",
-        seed=9209,
+        seed=9439,
         seed_purpose="held_out",
         anchor_ts=START,
         evaluation_end_ts=START + timedelta(seconds=30),
