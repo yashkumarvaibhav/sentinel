@@ -36,24 +36,25 @@ contexts:
       frontend.request_rate: 2.5
     trust_score: 1.0
 stimuli:
+  # One continuous checkout journey establishes a clean context-blind edge
+  # baseline (0-84 s, before the fault) and then carries the failing and
+  # recovering checkout->payment calls. A single journey avoids the same-target
+  # handoff blocking that a separate pre-fault warmup job would introduce, so
+  # the edge detector never freezes its baseline on fault-contaminated calls.
+  # Journey traffic uses the sentinel-stimulus user agent and is excluded from
+  # the primary frontend volume, so it cannot create a spurious residual.
+  - stimulus_id: checkout_edge_traffic
+    kind: k6_journey
+    start_offset_seconds: 0
+    duration_seconds: 134
+    journey: checkout
+    rate_rps: 2
   - stimulus_id: payment_failure
     kind: flagd
     start_offset_seconds: 84
     duration_seconds: 20
     flag: paymentFailure
     variant: 100%
-  - stimulus_id: checkout_fault_traffic
-    kind: k6_journey
-    start_offset_seconds: 84
-    duration_seconds: 20
-    journey: checkout
-    rate_rps: 2
-  - stimulus_id: checkout_recovery_traffic
-    kind: k6_journey
-    start_offset_seconds: 104
-    duration_seconds: 20
-    journey: checkout
-    rate_rps: 2
 residual_labels: []
 symptom_labels:
   - label_id: checkout-payment-failure

@@ -71,16 +71,24 @@ def test_cascade_night_keeps_volume_explained_while_a_downstream_fault_runs() ->
     assert context.start_offset_seconds == 64
     assert context.start_offset_seconds + context.duration_seconds == profile.duration_seconds
     assert [stimulus.kind for stimulus in profile.stimuli] == [
+        "k6_journey",
         "flagd",
-        "k6_journey",
-        "k6_journey",
     ]
-    flag, fault_journey, recovery_journey = profile.stimuli
-    assert flag.start_offset_seconds == fault_journey.start_offset_seconds == 84
+    edge_journey, flag = profile.stimuli
+    # The checkout journey opens well before the fault so the context-blind edge
+    # baseline is established on healthy calls, then spans the fault and recovery.
+    assert edge_journey.start_offset_seconds == 0
+    assert edge_journey.start_offset_seconds < flag.start_offset_seconds
+    assert edge_journey.start_offset_seconds + edge_journey.duration_seconds == 134
+    assert flag.start_offset_seconds == 84
     assert flag.start_offset_seconds + flag.duration_seconds == 104
-    assert fault_journey.start_offset_seconds + fault_journey.duration_seconds == 104
-    assert recovery_journey.start_offset_seconds == 104
-    assert recovery_journey.start_offset_seconds + recovery_journey.duration_seconds == 124
+    # The single journey fully covers the labeled fault interval (84-104 s).
+    assert (
+        edge_journey.start_offset_seconds
+        <= flag.start_offset_seconds
+        < flag.start_offset_seconds + flag.duration_seconds
+        <= edge_journey.start_offset_seconds + edge_journey.duration_seconds
+    )
     assert artifacts.labels["symptom_intervals"] == [
         {
             "end_offset_seconds": 104,
