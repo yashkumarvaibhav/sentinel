@@ -185,7 +185,6 @@ def test_combo_labels_follow_measured_attack_and_fault_execution() -> None:
     } == {
         ("RATIO_DEFORM", "frontend", "path_entropy", 126.25),
         ("LOG_BURST", "payment", "log_template_rate", 305.5),
-        ("LOG_BURST", "checkout", "log_template_rate", 305.5),
         ("EDGE_DEGRADED", "checkout", "dependency.payment", 305.5),
         ("SATURATION", "email", "container_memory", 487.0),
         ("DROP", "frontend", "request_rate", 667.25),

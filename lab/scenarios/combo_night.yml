@@ -53,7 +53,7 @@ stimuli:
     start_offset_seconds: 0
     duration_seconds: 484
     journey: checkout
-    rate_rps: 1
+    rate_rps: 2
   - stimulus_id: behavior_attack
     kind: k6_path_attack
     start_offset_seconds: 124
@@ -105,13 +105,6 @@ symptom_labels:
   - label_id: payment-failure-log-burst
     kind: LOG_BURST
     service: payment
-    signal: log_template_rate
-    stimulus_id: payment_failure
-    start_offset_seconds: 304
-    end_offset_seconds: 484
-  - label_id: checkout-payment-log-burst
-    kind: LOG_BURST
-    service: checkout
     signal: log_template_rate
     stimulus_id: payment_failure
     start_offset_seconds: 304
