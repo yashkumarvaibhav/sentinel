@@ -13,8 +13,8 @@ def test_collector_raw_bus_batches_have_a_hard_item_ceiling() -> None:
     )
 
     batch = document["processors"]["batch"]
-    assert batch["send_batch_size"] == 256
-    assert batch["send_batch_max_size"] == 256
+    assert batch["send_batch_size"] == 128
+    assert batch["send_batch_max_size"] == 128
     assert batch["send_batch_max_size"] <= batch["send_batch_size"]
 
 
