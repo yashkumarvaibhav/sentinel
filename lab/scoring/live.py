@@ -918,8 +918,18 @@ def _wait_for_spans(
     previous_count = -1
     stable_polls = 0
     completeness_count = math.ceil(expected * 0.95)
+    query_error: RuntimeError | None = None
+    queried = False
     while time.monotonic() < deadline:
-        latest = _query_spans(repo_root=repo_root, user_agent=user_agent)
+        try:
+            latest = _query_spans(repo_root=repo_root, user_agent=user_agent)
+        except RuntimeError as exc:
+            # One failed poll (a transient docker/store hiccup) must not abort
+            # a multi-minute capture; an exhausted deadline still fails closed.
+            query_error = exc
+            time.sleep(2)
+            continue
+        queried = True
         if len(latest) >= expected:
             return latest
         if len(latest) == previous_count:
@@ -932,6 +942,8 @@ def _wait_for_spans(
         time.sleep(2)
     if latest:
         return latest
+    if not queried and query_error is not None:
+        raise RuntimeError(f"span evidence query never succeeded for {user_agent}") from query_error
     raise RuntimeError(f"no ingress spans arrived for {user_agent}")
 
 
@@ -978,7 +990,13 @@ def _wait_for_anchor(*, repo_root: Path, user_agent: str) -> datetime:
     previous_count = 0
     stable_polls = 0
     while time.monotonic() < deadline:
-        timestamps = _query_spans(repo_root=repo_root, user_agent=user_agent)
+        try:
+            timestamps = _query_spans(repo_root=repo_root, user_agent=user_agent)
+        except RuntimeError:
+            # Same transient-poll tolerance as _wait_for_spans; the deadline
+            # below still fails closed if the marker never becomes readable.
+            time.sleep(2)
+            continue
         if len(timestamps) >= 10:
             return timestamps[-1]
         if timestamps:

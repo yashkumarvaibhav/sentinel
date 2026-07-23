@@ -395,3 +395,81 @@ def _flag_config_map() -> str:
             "data": {"demo.flagd.json": json.dumps(config, indent=2) + "\n"},
         }
     )
+
+
+def test_span_wait_survives_a_transient_query_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    start = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
+    full = tuple(start + timedelta(seconds=index) for index in range(20))
+    responses: list[RuntimeError | tuple[datetime, ...]] = [
+        RuntimeError("command failed (docker): transient exec error"),
+        full,
+    ]
+
+    def query_spans(*, repo_root: Path, user_agent: str) -> tuple[datetime, ...]:
+        del repo_root, user_agent
+        item = responses.pop(0)
+        if isinstance(item, RuntimeError):
+            raise item
+        return item
+
+    monkeypatch.setattr(live_module, "_query_spans", query_spans)
+    monkeypatch.setattr("lab.scoring.live.time.sleep", lambda _: None)
+
+    timestamps = live_module._wait_for_spans(
+        repo_root=SCENARIO_ROOT.parents[1],
+        user_agent="sentinel-stimulus/journey-test",
+        expected=20,
+    )
+
+    assert timestamps == full
+    assert responses == []
+
+
+def test_span_wait_fails_closed_when_queries_never_succeed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ticks = (float(value) for value in range(0, 400, 10))
+
+    def query_spans(*, repo_root: Path, user_agent: str) -> tuple[datetime, ...]:
+        del repo_root, user_agent
+        raise RuntimeError("command failed (docker): exec error")
+
+    monkeypatch.setattr(live_module, "_query_spans", query_spans)
+    monkeypatch.setattr("lab.scoring.live.time.sleep", lambda _: None)
+    monkeypatch.setattr("lab.scoring.live.time.monotonic", lambda: next(ticks))
+
+    with pytest.raises(RuntimeError, match="never succeeded"):
+        live_module._wait_for_spans(
+            repo_root=SCENARIO_ROOT.parents[1],
+            user_agent="sentinel-stimulus/journey-test",
+            expected=5,
+        )
+
+
+def test_live_anchor_survives_a_transient_query_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    start = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
+    burst = tuple(start + timedelta(milliseconds=index) for index in range(10))
+    responses: list[RuntimeError | tuple[datetime, ...]] = [
+        RuntimeError("command failed (docker): transient exec error"),
+        burst,
+    ]
+
+    def query_spans(*, repo_root: Path, user_agent: str) -> tuple[datetime, ...]:
+        del repo_root, user_agent
+        item = responses.pop(0)
+        if isinstance(item, RuntimeError):
+            raise item
+        return item
+
+    monkeypatch.setattr(live_module, "_query_spans", query_spans)
+    monkeypatch.setattr("lab.scoring.live.time.sleep", lambda _: None)
+
+    anchor = live_module._wait_for_anchor(
+        repo_root=SCENARIO_ROOT.parents[1],
+        user_agent="sentinel-score-anchor/run-test",
+    )
+
+    assert anchor == start + timedelta(milliseconds=9)
+    assert responses == []
