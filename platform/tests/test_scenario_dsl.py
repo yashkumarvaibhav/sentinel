@@ -115,15 +115,16 @@ def test_combo_night_compiles_attack_and_fault_without_claiming_unsupported_kind
         "k6_path_attack",
         "flagd",
         "k6_journey",
+        "k6_journey",
         "flagd",
         "k6_rate_phase",
         "chaos_mesh",
     ]
     stimuli = {stimulus.stimulus_id: stimulus for stimulus in profile.stimuli}
     assert (
-        stimuli["checkout_baseline_traffic"].start_offset_seconds,
-        stimuli["checkout_baseline_traffic"].duration_seconds,
-    ) == (0, 484)
+        stimuli["checkout_edge_warmup"].start_offset_seconds,
+        stimuli["checkout_edge_warmup"].duration_seconds,
+    ) == (0, 124)
     assert (
         stimuli["behavior_attack"].start_offset_seconds,
         stimuli["behavior_attack"].duration_seconds,
@@ -131,6 +132,10 @@ def test_combo_night_compiles_attack_and_fault_without_claiming_unsupported_kind
     assert (
         stimuli["payment_failure"].start_offset_seconds,
         stimuli["payment_failure"].duration_seconds,
+    ) == (304, 180)
+    assert (
+        stimuli["checkout_payment_traffic"].start_offset_seconds,
+        stimuli["checkout_payment_traffic"].duration_seconds,
     ) == (304, 180)
     assert (
         stimuli["email_memory_leak"].start_offset_seconds,

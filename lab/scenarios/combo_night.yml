@@ -48,10 +48,10 @@ contexts:
       frontend.request_rate: 2.5
     trust_score: 1.0
 stimuli:
-  - stimulus_id: checkout_baseline_traffic
+  - stimulus_id: checkout_edge_warmup
     kind: k6_journey
     start_offset_seconds: 0
-    duration_seconds: 484
+    duration_seconds: 124
     journey: checkout
     rate_rps: 2
   - stimulus_id: behavior_attack
@@ -67,6 +67,12 @@ stimuli:
     duration_seconds: 180
     flag: paymentFailure
     variant: 100%
+  - stimulus_id: checkout_payment_traffic
+    kind: k6_journey
+    start_offset_seconds: 304
+    duration_seconds: 180
+    journey: checkout
+    rate_rps: 2
   - stimulus_id: checkout_pressure_traffic
     kind: k6_journey
     start_offset_seconds: 484
