@@ -98,7 +98,11 @@ def test_combo_path_attack_is_fixed_target_capped_and_counted_as_primary_volume(
     assert expected_request_count(schedule) == 10_796
 
 
-def test_primary_rate_phase_records_measured_boundaries_without_a_second_job() -> None:
+def test_primary_rate_phase_records_anchored_boundaries_without_a_second_job() -> None:
+    # 6d-3: the rate phase spawns no job and its DROP window is the primary's
+    # scheduled low-rate phase, which runs anchored to the marker burst. The
+    # execution must be recorded at anchor+offset (drift-free), NEVER from the
+    # loop's wall clock -- so a wildly wrong clock must be ignored entirely.
     profile = load_profile(SCENARIO_ROOT / "combo_night.yml")
     schedule = compile_profile(
         profile,
@@ -109,12 +113,6 @@ def test_primary_rate_phase_records_measured_boundaries_without_a_second_job() -
     minimal = replace(schedule, stimuli=(rate_phase,))
     commands: list[list[str]] = []
     anchor = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
-    times = iter(
-        (
-            anchor + timedelta(seconds=484, milliseconds=10),
-            anchor + timedelta(seconds=544, milliseconds=20),
-        )
-    )
 
     def runner(
         command: list[str],
@@ -126,20 +124,25 @@ def test_primary_rate_phase_records_measured_boundaries_without_a_second_job() -
         commands.append(command)
         return ""
 
+    def clock() -> datetime:
+        raise AssertionError("the anchored rate phase must not read the wall clock")
+
     executions = execute_stimuli(
         repo_root=SCENARIO_ROOT.parents[1],
         schedule=minimal,
         anchor_ts=anchor,
         runner=runner,
         waiter=lambda _: None,
-        clock=lambda: next(times),
+        clock=clock,
     )
 
     assert commands == []
     assert executions[0].kind == "k6_rate_phase"
     assert executions[0].setting == "primary@2rps"
-    assert executions[0].started_at == anchor + timedelta(seconds=484, milliseconds=10)
-    assert executions[0].ended_at == anchor + timedelta(seconds=544, milliseconds=20)
+    assert executions[0].started_at == anchor + timedelta(seconds=rate_phase.start_offset_seconds)
+    assert executions[0].ended_at == anchor + timedelta(
+        seconds=rate_phase.start_offset_seconds + rate_phase.duration_seconds
+    )
 
 
 def test_live_anchor_waits_for_the_complete_marker_burst(monkeypatch: pytest.MonkeyPatch) -> None:

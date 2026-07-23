@@ -492,7 +492,18 @@ def execute_stimuli(
                             invocation=invocation,
                         )
                         active_journeys[stimulus.stimulus_id] = journey
-                    started[stimulus.stimulus_id] = _require_utc(now(), "stimulus start")
+                    if isinstance(stimulus, K6RatePhaseStimulus):
+                        # The rate phase spawns no job: the low-rate traffic is a phase
+                        # of the primary k6 schedule, which runs anchored to the marker
+                        # burst. Record its window as anchor+offset so the DROP label is
+                        # drift-free -- the loop's now() only measured the EXECUTOR's
+                        # timing, not the primary's phase, and collapsed under back-half
+                        # drift on 9221.
+                        started[stimulus.stimulus_id] = anchor_ts + timedelta(
+                            seconds=stimulus.start_offset_seconds
+                        )
+                    else:
+                        started[stimulus.stimulus_id] = _require_utc(now(), "stimulus start")
                     continue
 
                 if isinstance(stimulus, FlagdStimulus):
@@ -508,8 +519,12 @@ def execute_stimuli(
                     started_at = started.pop(stimulus.stimulus_id)
                     ended_at = _require_utc(now(), "stimulus end")
                 elif isinstance(stimulus, K6RatePhaseStimulus):
+                    # Anchored end (see the start branch): the DROP window is the
+                    # primary's scheduled low-rate phase, not a drift-prone marker.
                     started_at = started.pop(stimulus.stimulus_id)
-                    ended_at = _require_utc(now(), "stimulus end")
+                    ended_at = anchor_ts + timedelta(
+                        seconds=stimulus.start_offset_seconds + stimulus.duration_seconds
+                    )
                 else:
                     # Record the end at the anchored offset and DEFER the blocking
                     # reap (_wait_for_job/log/delete) out of the transition loop: a
