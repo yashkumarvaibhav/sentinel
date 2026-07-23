@@ -24,16 +24,18 @@
 
 ## Per-kind development gates
 
-| Kind | Precision | Floor | Recall | Floor | Scope | Result |
-|---|---:|---:|---:|---:|---|---|
-| RESIDUAL_EXCEED | 1.000 | >= 0.900 | 1.000 | >= 0.900 | required | PASS |
-| RATIO_DEFORM | 1.000 | >= 0.900 | 1.000 | >= 0.900 | required | PASS |
-| LOG_BURST | 1.000 | >= 0.900 | 1.000 | >= 0.900 | required | PASS |
-| EDGE_DEGRADED | 0.500 | >= 0.500 | 1.000 | >= 0.900 | required | PASS |
-| SATURATION | 1.000 | >= 0.900 | 1.000 | >= 0.900 | required | PASS |
-| DROP | 1.000 | >= 0.900 | 1.000 | >= 0.900 | required | PASS |
-| SILENCE | 1.000 | >= 0.900 | 1.000 | >= 0.900 | required | PASS |
+Phase 2 gates on **recall/coverage** only: every labeled symptom must be caught. Precision is recorded for transparency but **not gated here** -- collapsing the topological storm one fault produces into a single incident (the precision/FP accounting) is Phase 4 causal-collapse's job. The precision floor column is the retained Phase-4 target.
+
+| Kind | Recall | Floor | Result | Precision | Phase-4 target |
+|---|---:|---:|---|---:|---:|
+| RESIDUAL_EXCEED | 1.000 | >= 0.900 | PASS | 1.000 | >= 0.900 |
+| RATIO_DEFORM | 1.000 | >= 0.900 | PASS | 1.000 | >= 0.900 |
+| LOG_BURST | 1.000 | >= 0.900 | PASS | 1.000 | >= 0.900 |
+| EDGE_DEGRADED | 1.000 | >= 0.900 | PASS | 0.500 | >= 0.500 |
+| SATURATION | 1.000 | >= 0.900 | PASS | 1.000 | >= 0.900 |
+| DROP | 1.000 | >= 0.900 | PASS | 1.000 | >= 0.900 |
+| SILENCE | 1.000 | >= 0.900 | PASS | 1.000 | >= 0.900 |
 
 ## Scope of this proof
 
-This development proof gates every kind listed above on measured development captures only. Kinds without an expected or predicted episode remain `insufficient`; they are not rendered as zero and are not release-gated until their development scenarios supply honest labels. The final Phase 2 gate still requires fresh held-out cascade/combo captures and every configured symptom kind.
+This development proof gates every kind listed above on **recall/coverage** over measured development captures only; precision is recorded but not gated at Phase 2 (deferred to Phase 4 causal collapse). Kinds without an expected or predicted episode remain `insufficient`; they are not rendered as zero and are not release-gated until their development scenarios supply honest labels. The final Phase 2 gate still requires fresh held-out cascade/combo captures and every configured symptom kind.

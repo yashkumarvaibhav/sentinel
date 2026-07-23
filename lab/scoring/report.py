@@ -201,8 +201,14 @@ def render_symptom_report(
             "",
             f"## Per-kind {'held-out' if held_out else 'development'} gates",
             "",
-            "| Kind | Precision | Floor | Recall | Floor | Scope | Result |",
-            "|---|---:|---:|---:|---:|---|---|",
+            "Phase 2 gates on **recall/coverage** only: every labeled symptom must be caught. "
+            "Precision is recorded for transparency but **not gated here** -- collapsing the "
+            "topological storm one fault produces into a single incident (the precision/FP "
+            "accounting) is Phase 4 causal-collapse's job. The precision floor column is the "
+            "retained Phase-4 target.",
+            "",
+            "| Kind | Recall | Floor | Result | Precision | Phase-4 target |",
+            "|---|---:|---:|---|---:|---:|",
         ]
     )
     for score in gate.by_kind:
@@ -211,17 +217,14 @@ def render_symptom_report(
         gated = score.kind in required
         passed = (
             gated
-            and score.metrics.precision.value is not None
-            and score.metrics.precision.value >= precision_floor
             and score.metrics.recall.value is not None
             and score.metrics.recall.value >= recall_floor
         )
         result = "PASS" if passed else ("FAIL" if gated else "NOT GATED")
         lines.append(
-            f"| {score.kind.value} | {_metric(score.metrics.precision)} | "
-            f">= {precision_floor:.3f} | {_metric(score.metrics.recall)} | "
-            f">= {recall_floor:.3f} | {'required' if gated else 'pending evidence'} | "
-            f"{result} |"
+            f"| {score.kind.value} | {_metric(score.metrics.recall)} | "
+            f">= {recall_floor:.3f} | {result} | {_metric(score.metrics.precision)} | "
+            f">= {precision_floor:.3f} |"
         )
     if gate.failures:
         lines.extend(["", "## Failures", ""])
@@ -233,22 +236,22 @@ def render_symptom_report(
     scope = (
         [
             "This held-out proof is the Phase 2 closure. It scores fresh `cascade_night` / "
-            "`combo_night` seeds that stayed sealed throughout development, applying every "
-            "committed per-kind floor unchanged. Detector parameters were frozen by development "
-            "evidence (fingerprint above) before these seeds were recorded, and no floor was "
-            "lowered from held-out results. A below-floor kind is reported honestly rather than "
-            "hidden; `cascade_night` seeds carry only residual/edge labels, so kinds they do not "
-            "exercise contribute their real predictions and any false positives to the pooled "
-            "score.",
+            "`combo_night` seeds that stayed sealed throughout development, gating each kind on "
+            "**recall/coverage** with the committed recall floors unchanged; precision is "
+            "recorded but deferred to Phase 4 causal collapse. Detector parameters were frozen "
+            "by development evidence (fingerprint above) before these seeds were recorded, and "
+            "no floor was lowered from held-out results. A below-floor kind is reported honestly "
+            "rather than hidden.",
         ]
         if held_out
         else [
-            "This development proof gates every kind listed above on measured development "
-            "captures only. Kinds without an expected or predicted episode remain "
-            "`insufficient`; they are not rendered as zero and are not release-gated until "
-            "their development scenarios supply honest labels. The final Phase 2 gate still "
-            "requires fresh held-out cascade/combo captures and every configured symptom "
-            "kind.",
+            "This development proof gates every kind listed above on **recall/coverage** over "
+            "measured development captures only; precision is recorded but not gated at Phase 2 "
+            "(deferred to Phase 4 causal collapse). Kinds without an expected or predicted "
+            "episode remain `insufficient`; they are not rendered as zero and are not "
+            "release-gated until their development scenarios supply honest labels. The final "
+            "Phase 2 gate still requires fresh held-out cascade/combo captures and every "
+            "configured symptom kind.",
         ]
     )
     lines.extend(

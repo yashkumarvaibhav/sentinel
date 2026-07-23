@@ -142,7 +142,7 @@ def test_duplicate_private_label_ids_fail_closed() -> None:
         )
 
 
-def test_symptom_gates_fail_closed_for_missing_or_below_floor_kinds() -> None:
+def test_symptom_gates_fail_closed_on_recall_only_never_precision() -> None:
     score = score_symptom_episodes(
         capture_id="gate-capture",
         scenario_id="cascade_night",
@@ -165,15 +165,43 @@ def test_symptom_gates_fail_closed_for_missing_or_below_floor_kinds() -> None:
         ),
     )
 
+    # Only recall gates: RESIDUAL/LOG_BURST have no predicted match (recall insufficient),
+    # EDGE_DEGRADED has an expected label with zero coverage (recall 0.0). No precision
+    # failure ever appears, even though LOG_BURST emitted a spurious episode (precision 0.0).
     assert not result.passed
-    assert {(failure.metric, failure.scope) for failure in result.failures} == {
-        ("symptom_precision", "RESIDUAL_EXCEED"),
-        ("symptom_recall", "RESIDUAL_EXCEED"),
-        ("symptom_precision", "LOG_BURST"),
-        ("symptom_recall", "LOG_BURST"),
-        ("symptom_precision", "EDGE_DEGRADED"),
-        ("symptom_recall", "EDGE_DEGRADED"),
+    assert {failure.metric for failure in result.failures} == {"symptom_recall"}
+    assert {failure.scope for failure in result.failures} == {
+        "RESIDUAL_EXCEED",
+        "LOG_BURST",
+        "EDGE_DEGRADED",
     }
+
+
+def test_low_precision_high_recall_passes_because_precision_is_not_gated() -> None:
+    # One labeled edge fault, caught by its direct episode AND a propagated one:
+    # recall 1.0, precision 0.5. Phase 2 must PASS -- the storm is Phase 4's to collapse.
+    score = score_symptom_episodes(
+        capture_id="storm-capture",
+        scenario_id="cascade_night",
+        seed=401,
+        seed_purpose="development",
+        anchor_ts=START,
+        evaluation_end_ts=START + timedelta(seconds=40),
+        episodes=(
+            _episode("edge-direct", SymptomKind.EDGE_DEGRADED, 10.0, 30.0),
+            _propagated_edge("edge-prop", 11.0, 30.0),
+        ),
+        labels=(_label("expected-edge", SymptomKind.EDGE_DEGRADED, 10.0, 20.0),),
+    )
+    config = load_gate_config(REPO_ROOT / "lab" / "scoring" / "config.yml")
+    edge = score.score_for(SymptomKind.EDGE_DEGRADED)
+    assert edge.metrics.recall.value == 1.0
+    assert edge.metrics.precision.value == 0.5
+
+    result = evaluate_symptom_gates((score,), config, required_kinds=(SymptomKind.EDGE_DEGRADED,))
+
+    assert result.passed
+    assert result.failures == ()
 
 
 def test_capture_scorer_opens_private_labels_only_after_runtime_replay(
@@ -356,6 +384,35 @@ def _episode(
         peak_score=0.9,
         breach_tick_count=3,
         revision=revision,
+        opening_symptom_id=f"{episode_id}-open",
+        peak_symptom_id=f"{episode_id}-peak",
+        latest_symptom_id=f"{episode_id}-latest",
+        evidence_refs=(f"{episode_id}-evidence",),
+    )
+
+
+def _propagated_edge(
+    episode_id: str,
+    opened: float,
+    closed: float | None,
+) -> SymptomEpisode:
+    """A frontend->checkout edge episode: one topology hop up from checkout->payment."""
+    opened_ts = START + timedelta(seconds=opened)
+    confirmed_ts = opened_ts + timedelta(seconds=1)
+    closed_ts = None if closed is None else START + timedelta(seconds=closed)
+    return SymptomEpisode(
+        episode_id=episode_id,
+        kind=SymptomKind.EDGE_DEGRADED,
+        service="frontend",
+        signal="dependency.checkout",
+        status=EpisodeStatus.ACTIVE if closed is None else EpisodeStatus.CLOSED,
+        opened_ts=opened_ts,
+        confirmed_ts=confirmed_ts,
+        last_breach_ts=confirmed_ts,
+        closed_ts=closed_ts,
+        peak_score=0.9,
+        breach_tick_count=3,
+        revision=1,
         opening_symptom_id=f"{episode_id}-open",
         peak_symptom_id=f"{episode_id}-peak",
         latest_symptom_id=f"{episode_id}-latest",

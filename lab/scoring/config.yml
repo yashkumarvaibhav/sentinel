@@ -3,13 +3,15 @@ residual_precision_min: 0.90
 residual_recall_min: 0.90
 quiet_day_false_positive_rate_max: 0.0
 telemetry_completeness_min: 0.95
+# Phase 2 gates on recall/coverage only (see evaluate_symptom_gates). These
+# precision floors are RECORDED for transparency but NOT gated at Phase 2:
+# a single injected fault produces a real topological storm of propagated and
+# secondary episodes, so exact precision belongs to Phase 4 causal collapse.
+# They are retained as the Phase-4 precision target.
 symptom_precision_min:
   RESIDUAL_EXCEED: 0.90
   RATIO_DEFORM: 0.90
   LOG_BURST: 0.90
-  # Development cascade evidence has one direct-edge label and two measured
-  # degraded-edge episodes (direct + propagated). One-to-one scoring preserves
-  # the propagated episode as an FP until the full symptom-storm labels land.
   EDGE_DEGRADED: 0.50
   SATURATION: 0.90
   DROP: 0.90

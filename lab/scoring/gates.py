@@ -142,7 +142,16 @@ def evaluate_symptom_gates(
     *,
     required_kinds: tuple[SymptomKind, ...] = SCORED_SYMPTOM_KINDS,
 ) -> SymptomGateResult:
-    """Aggregate event-level scores and fail closed for every required kind."""
+    """Gate each required kind on recall/coverage; record precision, do not gate it.
+
+    Phase 2's job is to *detect every real symptom* (recall). A single injected
+    fault legitimately produces a topological storm of propagated and secondary
+    episodes, so gating exact precision here would pressure the detectors to emit
+    fewer real symptoms, fighting "decompose, don't threshold". Collapsing that
+    storm into one incident with one root cause -- i.e. the precision/FP
+    accounting -- is Phase 4 causal-collapse's job. Precision stays in the score
+    and report for transparency but is not a Phase-2 gate.
+    """
     if not required_kinds or len(required_kinds) != len(set(required_kinds)):
         raise ValueError("required symptom kinds must be non-empty and unique")
     unsupported = tuple(kind for kind in required_kinds if kind not in SCORED_SYMPTOM_KINDS)
@@ -153,13 +162,6 @@ def evaluate_symptom_gates(
     failures: list[GateFailure] = []
     for kind in required_kinds:
         score = next(item for item in by_kind if item.kind is kind)
-        _minimum(
-            failures,
-            "symptom_precision",
-            score.metrics.precision,
-            config.symptom_precision_min[kind.value],
-            kind.value,
-        )
         _minimum(
             failures,
             "symptom_recall",
