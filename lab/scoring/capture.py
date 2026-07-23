@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
-from datetime import timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -39,6 +40,26 @@ class CaptureLabels(LabModel):
     seed_purpose: Literal["development", "held_out"]
     intervals: tuple[ResidualLabelInterval, ...]
     symptom_intervals: tuple[SymptomLabelInterval, ...] = ()
+
+
+@dataclass(frozen=True)
+class DetectionEpisodeReplay:
+    """The label-free episode stream from one capture's six detector paths.
+
+    Everything here is derived purely from public capture telemetry; no private
+    label artifact has been opened. Both the per-symptom scorer and the
+    characterization diagnostic build on this so the runtime replay is identical.
+    """
+
+    capture_id: str
+    scenario_id: str
+    seed: int
+    seed_purpose: Literal["development", "held_out"]
+    anchor_ts: datetime
+    evaluation_end_ts: datetime
+    logical_service: str
+    logical_signal: str
+    episodes: tuple[SymptomEpisode, ...]
 
 
 def score_capture(
@@ -209,13 +230,19 @@ def score_edge_episode_capture(
     )
 
 
-def score_detection_episode_capture(
+def replay_detection_episodes(
     root: Path,
     *,
     detector: DetectorConfig,
     replay_config_fingerprint: str,
-) -> EpisodeRunScore:
-    """Replay every public deterministic path before applying private labels once."""
+) -> DetectionEpisodeReplay:
+    """Replay every public deterministic detector path into one episode stream.
+
+    Runs decomposition + edge/log/ratio/liveness/resource replay and collects the
+    durable episode revisions each emits. This is deliberately label-free: no
+    private label artifact is opened, so the same stream can be scored or dumped
+    for characterization without any risk of leakage.
+    """
     capture = load_runtime_capture(root)
     decomposition = replay_decomposition(
         capture,
@@ -287,34 +314,59 @@ def score_detection_episode_capture(
     evaluation_end = decomposition.anchor_ts + timedelta(
         seconds=len(liveness.steps) * capture.manifest.telemetry.tick_seconds
     )
-
-    # The complete decomposition + edge/log/ratio/liveness/resource runtime replays
-    # above are label-free. Only the scorer crosses into the private artifact.
-    labels = _capture_labels(
-        load_private_labels(root),
-        scenario_id=decomposition.scenario_id,
-        seed=decomposition.seed,
-        seed_purpose=decomposition.seed_purpose,
-    )
-    residual_labels = tuple(
-        SymptomLabelInterval(
-            label_id=label.label_id,
-            kind=SymptomKind.RESIDUAL_EXCEED.value,
-            service=capture.manifest.telemetry.logical_service,
-            signal=capture.manifest.telemetry.logical_signal,
-            start_offset_seconds=float(label.start_offset_seconds),
-            end_offset_seconds=float(label.end_offset_seconds),
-        )
-        for label in labels.intervals
-    )
-    return score_symptom_episodes(
+    return DetectionEpisodeReplay(
         capture_id=decomposition.capture_id,
         scenario_id=decomposition.scenario_id,
         seed=decomposition.seed,
         seed_purpose=decomposition.seed_purpose,
         anchor_ts=decomposition.anchor_ts,
         evaluation_end_ts=evaluation_end,
+        logical_service=capture.manifest.telemetry.logical_service,
+        logical_signal=capture.manifest.telemetry.logical_signal,
         episodes=tuple(revisions),
+    )
+
+
+def score_detection_episode_capture(
+    root: Path,
+    *,
+    detector: DetectorConfig,
+    replay_config_fingerprint: str,
+) -> EpisodeRunScore:
+    """Replay every public deterministic path before applying private labels once."""
+    replay = replay_detection_episodes(
+        root,
+        detector=detector,
+        replay_config_fingerprint=replay_config_fingerprint,
+    )
+
+    # The complete decomposition + edge/log/ratio/liveness/resource runtime replay
+    # above is label-free. Only the scorer crosses into the private artifact.
+    labels = _capture_labels(
+        load_private_labels(root),
+        scenario_id=replay.scenario_id,
+        seed=replay.seed,
+        seed_purpose=replay.seed_purpose,
+    )
+    residual_labels = tuple(
+        SymptomLabelInterval(
+            label_id=label.label_id,
+            kind=SymptomKind.RESIDUAL_EXCEED.value,
+            service=replay.logical_service,
+            signal=replay.logical_signal,
+            start_offset_seconds=float(label.start_offset_seconds),
+            end_offset_seconds=float(label.end_offset_seconds),
+        )
+        for label in labels.intervals
+    )
+    return score_symptom_episodes(
+        capture_id=replay.capture_id,
+        scenario_id=replay.scenario_id,
+        seed=replay.seed,
+        seed_purpose=replay.seed_purpose,
+        anchor_ts=replay.anchor_ts,
+        evaluation_end_ts=replay.evaluation_end_ts,
+        episodes=replay.episodes,
         labels=residual_labels + labels.symptom_intervals,
     )
 

@@ -250,7 +250,7 @@ def score_symptom_episodes(
     evaluation_end = _utc(evaluation_end_ts, name="evaluation_end_ts")
     if evaluation_end <= anchor:
         raise ValueError("evaluation_end_ts must be after anchor_ts")
-    latest_episodes = _latest_episode_revisions(episodes)
+    latest_episodes = latest_episode_revisions(episodes)
     _validate_episode_bounds(latest_episodes, start=anchor, end=evaluation_end)
     label_ids = tuple(label.label_id for label in labels)
     if len(label_ids) != len(set(label_ids)):
@@ -329,9 +329,15 @@ def _first_detection_latency(
     return None if first is None else first - start_offset
 
 
-def _latest_episode_revisions(
+def latest_episode_revisions(
     episodes: tuple[SymptomEpisode, ...],
 ) -> tuple[SymptomEpisode, ...]:
+    """Collapse repeated revisions of one durable episode to its latest state.
+
+    Conflicting identities or same-revision payloads fail closed, exactly as the
+    scorer requires. Ordered by ``(kind, opened_ts, episode_id)`` so callers get a
+    deterministic episode stream.
+    """
     latest: dict[str, SymptomEpisode] = {}
     for episode in episodes:
         if episode.kind not in SCORED_SYMPTOM_KINDS:
