@@ -169,6 +169,36 @@ class SymptomEpisodeMachine:
         state.last_transition = transition
         return transition
 
+    def hold(self, *, key: EpisodeKey, tick_ts: datetime) -> EpisodeTransition:
+        """Break unconfirmed persistence while preserving any active episode.
+
+        Callers use this for an explicit event-time tick whose detector evidence
+        is insufficient. It is neither a breach nor a clear: a pending opening
+        run is invalidated, while an already-open episode remains active.
+        """
+        if not isinstance(key, EpisodeKey):
+            raise TypeError("key must be an EpisodeKey")
+        tick = _utc(tick_ts, name="tick_ts")
+        policy = self._policies.get(key.kind.value)
+        if policy is None:
+            return EpisodeTransition(key, EpisodeAction.IGNORED, EpisodePhase.IDLE, None)
+
+        state = self._states.setdefault(key, _KeyState())
+        signature: tuple[object, ...] = (tick.isoformat(), "INSUFFICIENT")
+        if state.last_tick_ts is not None:
+            if tick < state.last_tick_ts:
+                raise ValueError("episode ticks must arrive in event-time order")
+            if tick == state.last_tick_ts:
+                if signature == state.last_signature and state.last_transition is not None:
+                    return state.last_transition
+                raise ValueError("conflicting episode tick at the same event time")
+
+        transition = self._on_hold(state, key, tick)
+        state.last_tick_ts = tick
+        state.last_signature = signature
+        state.last_transition = transition
+        return transition
+
     def active_episodes(self) -> tuple[SymptomEpisode, ...]:
         """Every currently open episode, ordered by stable id."""
         episodes = [

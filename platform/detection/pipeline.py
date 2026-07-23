@@ -69,6 +69,10 @@ class SymptomEpisodePipeline:
         """Route a detector's symptom under its own `(kind, service, signal)` key."""
         return self.observe(key=EpisodeKey.from_symptom(symptom), tick_ts=tick_ts, symptom=symptom)
 
+    def hold(self, *, key: EpisodeKey, tick_ts: datetime) -> EpisodeTransition:
+        """Record an insufficient tick without opening or clearing an episode."""
+        return self._machine.hold(key=key, tick_ts=tick_ts)
+
     def observe_frame(self, frame: DecompFrame) -> EpisodeTransition:
         """Turn one decomposition frame into a single residual episode tick."""
         symptom = residual_symptom(frame)

@@ -39,10 +39,13 @@ relative and age policies live under `liveness` in `config/detector-params.yml`.
 `CLEAR`/`BREACH` results advance independent `DROP` and `SILENCE` episode keys.
 
 No frame produces an explicit `DROP/INSUFFICIENT` result and cannot clear an active drop episode.
-The same missing tick may advance `SILENCE` using only the configured event-time registration,
-the last valid frame timestamp and the current watermark. A fresh frame clears silence. Duplicate
-frames for one stream/tick, negative volume, negative expectation, misaligned ticks, changed
-evidence-ID reuse and ordering gaps fail closed without advancing either episode.
+The insufficient tick does break an unconfirmed DROP persistence run, so two measured breaches
+before a telemetry gap cannot be stitched to a later recovery breach and presented as three
+consecutive measurements. The same missing tick may advance `SILENCE` using only the configured
+event-time registration, the last valid frame timestamp and the current watermark. A fresh frame
+clears silence. Duplicate frames for one stream/tick, negative volume, negative expectation,
+misaligned ticks, changed evidence-ID reuse and ordering gaps fail closed without opening or
+clearing an episode.
 
 The runner uses bounded semantic frame-ID deduplication and canonical input fingerprints. Exact
 redelivery of the latest tick is idempotent; a changed same-tick retry is rejected. Capture replay

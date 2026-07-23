@@ -219,6 +219,10 @@ class LivenessDetectionRunner:
                     tick=tick,
                     state=state,
                     ambiguous_ids=ambiguous_ids,
+                    transition=self._pipeline.hold(
+                        key=EpisodeKey(kind, service, signal),
+                        tick_ts=tick,
+                    ),
                 )
                 for kind in self._configured_kinds(service, signal)
             )
@@ -232,12 +236,14 @@ class LivenessDetectionRunner:
         drop_rule = self._configuration.drop_rules.get(stream_key)
         if drop_rule is not None:
             if frame is None:
+                key = EpisodeKey(SymptomKind.DROP, service, signal)
                 advances.append(
                     _insufficient_advance(
-                        key=EpisodeKey(SymptomKind.DROP, service, signal),
+                        key=key,
                         tick=tick,
                         state=state,
                         ambiguous_ids=(),
+                        transition=self._pipeline.hold(key=key, tick_ts=tick),
                     )
                 )
             else:
@@ -257,6 +263,11 @@ class LivenessDetectionRunner:
                         key=EpisodeKey(SymptomKind.DROP, service, signal),
                         tick_ts=tick,
                         symptom=drop_evaluation.symptom,
+                    )
+                else:
+                    transition = self._pipeline.hold(
+                        key=EpisodeKey(SymptomKind.DROP, service, signal),
+                        tick_ts=tick,
                     )
                 advances.append(
                     LivenessWindowAdvance(
@@ -346,6 +357,7 @@ def _insufficient_advance(
     tick: datetime,
     state: _StreamState,
     ambiguous_ids: tuple[str, ...],
+    transition: EpisodeTransition,
 ) -> LivenessWindowAdvance:
     return LivenessWindowAdvance(
         key=key,
@@ -356,7 +368,7 @@ def _insufficient_advance(
         last_seen_ts=state.last_seen_ts,
         ambiguous_frame_ids=ambiguous_ids,
         evaluation=None,
-        transition=None,
+        transition=transition,
     )
 
 

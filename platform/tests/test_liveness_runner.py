@@ -66,12 +66,17 @@ def test_drop_episode_uses_only_measured_sufficient_frames() -> None:
         tick_ts=_tick(4),
     )
     assert all(item.status is LivenessWindowStatus.INSUFFICIENT for item in ambiguous)
-    assert all(item.transition is None for item in ambiguous)
+    assert all(
+        item.transition is not None and item.transition.action is EpisodeAction.HELD
+        for item in ambiguous
+    )
     assert len(runner.active_episodes()) == 1
 
     missing = runner.advance(frames=(), tick_ts=_tick(5))
-    assert _result(missing, SymptomKind.DROP).status is LivenessWindowStatus.INSUFFICIENT
-    assert _result(missing, SymptomKind.DROP).transition is None
+    missing_drop = _result(missing, SymptomKind.DROP)
+    assert missing_drop.status is LivenessWindowStatus.INSUFFICIENT
+    assert missing_drop.transition is not None
+    assert missing_drop.transition.action is EpisodeAction.HELD
     assert len(runner.active_episodes()) == 1
 
     clears: list[EpisodeAction] = []
@@ -89,6 +94,56 @@ def test_drop_episode_uses_only_measured_sufficient_frames() -> None:
 
     assert clears == [EpisodeAction.CLEARING, EpisodeAction.CLEARING, EpisodeAction.CLOSED]
     assert runner.active_episodes() == ()
+
+
+def test_missing_tick_breaks_pending_drop_run_without_clearing_active_drop() -> None:
+    pending = _runner()
+    for tick in range(2):
+        result = _result(
+            pending.advance(
+                frames=(_frame(f"pending-{tick}", tick=tick, observed=2.0),),
+                tick_ts=_tick(tick),
+            ),
+            SymptomKind.DROP,
+        )
+        assert result.transition is not None
+        assert result.transition.action is EpisodeAction.PENDING
+
+    missing = _result(
+        pending.advance(frames=(), tick_ts=_tick(2)),
+        SymptomKind.DROP,
+    )
+    assert missing.status is LivenessWindowStatus.INSUFFICIENT
+    assert missing.transition is not None
+    assert missing.transition.action is EpisodeAction.HELD
+
+    restarted = _result(
+        pending.advance(
+            frames=(_frame("pending-restarted", tick=3, observed=2.0),),
+            tick_ts=_tick(3),
+        ),
+        SymptomKind.DROP,
+    )
+    assert restarted.transition is not None
+    assert restarted.transition.action is EpisodeAction.PENDING
+    assert pending.active_episodes() == ()
+
+    active = _runner()
+    for tick in range(3):
+        active.advance(
+            frames=(_frame(f"active-{tick}", tick=tick, observed=2.0),),
+            tick_ts=_tick(tick),
+        )
+    opened = active.active_episodes()[0]
+
+    held = _result(
+        active.advance(frames=(), tick_ts=_tick(3)),
+        SymptomKind.DROP,
+    )
+    assert held.status is LivenessWindowStatus.INSUFFICIENT
+    assert held.transition is not None
+    assert held.transition.action is EpisodeAction.HELD
+    assert active.active_episodes() == (opened,)
 
 
 def test_silence_episode_opens_from_event_time_and_closes_on_fresh_frames() -> None:
@@ -162,7 +217,8 @@ def test_low_expectation_is_insufficient_and_does_not_tick_drop_episode() -> Non
     assert drop.status is LivenessWindowStatus.INSUFFICIENT
     assert isinstance(drop.evaluation, DropEvaluation)
     assert drop.evaluation.relative_drop is None
-    assert drop.transition is None
+    assert drop.transition is not None
+    assert drop.transition.action is EpisodeAction.HELD
 
 
 def test_liveness_runner_is_service_scoped_and_input_order_stable() -> None:
