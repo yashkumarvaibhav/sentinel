@@ -36,6 +36,17 @@ _PAYMENT_FAILURE_CAPABILITIES = (
         evidence="trace-correlated checkout to payment calls",
         requires_checkout_journey=True,
     ),
+    # The payment fault provably propagates one hop up: it degrades the checkout
+    # service, so the frontend->checkout edge (traversed by the same checkout
+    # journey) slows and errors too. Measured from the same trace-correlated
+    # calls, so it needs a covering checkout journey exactly like the direct edge.
+    SymptomCapability(
+        kind=SymptomKind.EDGE_DEGRADED,
+        service="frontend",
+        signal="dependency.checkout",
+        evidence="trace-correlated frontend to checkout calls degraded by the downstream fault",
+        requires_checkout_journey=True,
+    ),
     SymptomCapability(
         kind=SymptomKind.LOG_BURST,
         service="payment",

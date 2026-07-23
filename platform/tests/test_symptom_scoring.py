@@ -204,6 +204,40 @@ def test_low_precision_high_recall_passes_because_precision_is_not_gated() -> No
     assert result.failures == ()
 
 
+def test_fuller_edge_labels_turn_the_propagation_into_a_matched_true_positive() -> None:
+    # 6c: with BOTH the direct and the propagated edge labeled, the two real edge
+    # episodes each match a label -- recall stays 1.0 and recorded precision rises to
+    # 1.0 (the propagation is a TP, no longer an accepted-unmatched false positive).
+    propagated_label = SymptomLabelInterval(
+        label_id="frontend-checkout-propagation",
+        kind=SymptomKind.EDGE_DEGRADED.value,
+        service="frontend",
+        signal="dependency.checkout",
+        start_offset_seconds=10.0,
+        end_offset_seconds=20.0,
+    )
+    edge = score_symptom_episodes(
+        capture_id="fuller-labels-capture",
+        scenario_id="cascade_night",
+        seed=401,
+        seed_purpose="development",
+        anchor_ts=START,
+        evaluation_end_ts=START + timedelta(seconds=40),
+        episodes=(
+            _episode("edge-direct", SymptomKind.EDGE_DEGRADED, 10.0, 30.0),
+            _propagated_edge("edge-prop", 11.0, 30.0),
+        ),
+        labels=(
+            _label("checkout-payment-failure", SymptomKind.EDGE_DEGRADED, 10.0, 20.0),
+            propagated_label,
+        ),
+    ).score_for(SymptomKind.EDGE_DEGRADED)
+
+    assert edge.metrics.recall.value == 1.0
+    assert edge.metrics.precision.value == 1.0
+    assert edge.metrics.false_positive == 0
+
+
 def test_capture_scorer_opens_private_labels_only_after_runtime_replay(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

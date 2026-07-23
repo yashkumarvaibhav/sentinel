@@ -64,3 +64,12 @@ symptom_labels:
     stimulus_id: payment_failure
     start_offset_seconds: 84
     end_offset_seconds: 104
+  # The fault propagates one hop up the checkout journey: the frontend->checkout
+  # edge degrades because checkout is slowed by the failing payment dependency.
+  - label_id: frontend-checkout-propagation
+    kind: EDGE_DEGRADED
+    service: frontend
+    signal: dependency.checkout
+    stimulus_id: payment_failure
+    start_offset_seconds: 84
+    end_offset_seconds: 104

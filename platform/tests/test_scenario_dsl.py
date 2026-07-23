@@ -98,7 +98,16 @@ def test_cascade_night_keeps_volume_explained_while_a_downstream_fault_runs() ->
             "signal": "dependency.payment",
             "start_offset_seconds": 84,
             "stimulus_id": "payment_failure",
-        }
+        },
+        {
+            "end_offset_seconds": 104,
+            "kind": "EDGE_DEGRADED",
+            "label_id": "frontend-checkout-propagation",
+            "service": "frontend",
+            "signal": "dependency.checkout",
+            "start_offset_seconds": 84,
+            "stimulus_id": "payment_failure",
+        },
     ]
     assert "symptom_intervals" not in schedule_payload(artifacts.schedule)
 
@@ -225,6 +234,7 @@ def test_combo_labels_follow_measured_attack_and_fault_execution() -> None:
         ("RATIO_DEFORM", "frontend", "path_entropy", 126.25),
         ("LOG_BURST", "payment", "log_template_rate", 305.5),
         ("EDGE_DEGRADED", "checkout", "dependency.payment", 305.5),
+        ("EDGE_DEGRADED", "frontend", "dependency.checkout", 305.5),
         ("SATURATION", "email", "container_memory", 487.0),
         ("DROP", "frontend", "request_rate", 667.25),
         ("SILENCE", "frontend", "request_rate", 727.5),
@@ -262,6 +272,32 @@ def test_capability_oracle_rejects_unrelated_labels_and_missing_support_traffic(
         ScenarioProfile.model_validate(document)
 
 
+def test_payment_fault_admits_the_propagated_frontend_checkout_edge() -> None:
+    for profile_name in ("cascade_night", "combo_night"):
+        profile = load_profile(SCENARIO_ROOT / f"{profile_name}.yml")
+        labels = {(label.service, label.signal) for label in profile.symptom_labels}
+        # Both the direct and the one-hop-propagated edge are labeled (6c).
+        assert ("checkout", "dependency.payment") in labels
+        assert ("frontend", "dependency.checkout") in labels
+        validate_symptom_label_capabilities(profile)  # capability-backed, does not raise
+
+        # An arbitrary edge the payment fault does not prove still fails compilation.
+        document = profile.model_dump(mode="json")
+        propagated = next(
+            item
+            for item in document["symptom_labels"]
+            if item["label_id"] == "frontend-checkout-propagation"
+        )
+        propagated["service"] = "cart"
+        propagated["signal"] = "dependency.email"
+        with pytest.raises(ValueError, match="does not prove EDGE_DEGRADED"):
+            compile_profile(
+                ScenarioProfile.model_validate(document),
+                seed=profile.seeds.development[0],
+                purpose=SeedPurpose.DEVELOPMENT,
+            )
+
+
 def test_capture_labels_follow_measured_stimulus_execution_not_planned_offsets() -> None:
     profile = load_profile(SCENARIO_ROOT / "cascade_night.yml")
     artifacts = compile_profile(
@@ -284,7 +320,16 @@ def test_capture_labels_follow_measured_stimulus_execution_not_planned_offsets()
             "signal": "dependency.payment",
             "start_offset_seconds": 87.901232,
             "stimulus_id": "payment_failure",
-        }
+        },
+        {
+            "end_offset_seconds": 107.929988,
+            "kind": "EDGE_DEGRADED",
+            "label_id": "frontend-checkout-propagation",
+            "service": "frontend",
+            "signal": "dependency.checkout",
+            "start_offset_seconds": 87.901232,
+            "stimulus_id": "payment_failure",
+        },
     ]
     with pytest.raises(ValueError, match="missing measured execution"):
         materialize_symptom_labels(artifacts, stimulus_offsets={})
