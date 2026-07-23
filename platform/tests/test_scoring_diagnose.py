@@ -9,8 +9,10 @@ import lab.scoring.capture as capture_scoring
 import pytest
 from lab.scoring.capture import DetectionEpisodeReplay
 from lab.scoring.diagnose import (
+    NEGATIVE_CONTROL_FAULT_KINDS,
     characterize_capture,
     characterize_replay,
+    negative_control_violations,
     render_characterization,
 )
 
@@ -176,3 +178,71 @@ def test_render_reports_empty_capture_without_a_table() -> None:
 
     assert "No episodes emitted." in report
     assert "| kind |" not in report
+
+
+def test_negative_control_fault_kinds_exclude_residual() -> None:
+    assert SymptomKind.RESIDUAL_EXCEED not in NEGATIVE_CONTROL_FAULT_KINDS
+    assert set(NEGATIVE_CONTROL_FAULT_KINDS) == {
+        SymptomKind.RATIO_DEFORM,
+        SymptomKind.LOG_BURST,
+        SymptomKind.EDGE_DEGRADED,
+        SymptomKind.SATURATION,
+        SymptomKind.DROP,
+        SymptomKind.SILENCE,
+    }
+
+
+def test_negative_control_passes_on_residual_only_and_empty_captures() -> None:
+    # A no-fault capture may legitimately emit RESIDUAL (attack surge / injected offset)
+    # but no fault kind. quiet-like emptiness passes too.
+    residual_only = characterize_replay(
+        _replay((_episode("res", SymptomKind.RESIDUAL_EXCEED, "frontend", "request_rate", 10, 40),))
+    )
+    empty = characterize_replay(_replay(()))
+
+    assert negative_control_violations((residual_only, empty)) == ()
+
+
+def test_negative_control_flags_any_fault_kind_episode() -> None:
+    contaminated = characterize_replay(
+        _replay(
+            (
+                _episode("res", SymptomKind.RESIDUAL_EXCEED, "frontend", "request_rate", 10, 40),
+                _episode("sat", SymptomKind.SATURATION, "email", "container_memory", 20, 40),
+            )
+        )
+    )
+
+    violations = negative_control_violations((contaminated,))
+
+    assert len(violations) == 1
+    assert violations[0].kind is SymptomKind.SATURATION
+    assert violations[0].count == 1
+    assert violations[0].capture_id == "phase2-combo-503-dev-vX"
+
+
+def test_render_declares_negative_control_verdict() -> None:
+    config = load_config(REPO_ROOT / "config")
+    clean = characterize_replay(_replay(()))
+
+    passing = render_characterization(
+        (clean,),
+        topology=config.topology,
+        config_fingerprint=config.fingerprint,
+        negative_control=(),
+    )
+    assert "Negative control: PASS" in passing
+
+    contaminated = characterize_replay(
+        _replay(
+            (_episode("edge", SymptomKind.EDGE_DEGRADED, "checkout", "dependency.payment", 5, 9),)
+        )
+    )
+    failing = render_characterization(
+        (contaminated,),
+        topology=config.topology,
+        config_fingerprint=config.fingerprint,
+        negative_control=negative_control_violations((contaminated,)),
+    )
+    assert "Negative control: FAIL" in failing
+    assert "EDGE_DEGRADED" in failing

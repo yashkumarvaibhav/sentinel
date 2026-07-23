@@ -104,6 +104,49 @@ def characterize_capture(
     )
 
 
+# Every scored kind except RESIDUAL_EXCEED is an injected fault/attack symptom.
+# RESIDUAL_EXCEED is a legitimate signal on match_night (injected residual offset)
+# and attack_day (the attack surge), so it is not part of the zero-emission check.
+NEGATIVE_CONTROL_FAULT_KINDS: tuple[SymptomKind, ...] = tuple(
+    kind for kind in SCORED_SYMPTOM_KINDS if kind is not SymptomKind.RESIDUAL_EXCEED
+)
+
+
+@dataclass(frozen=True)
+class NegativeControlViolation:
+    """A fault-kind episode emitted on a capture whose scenario ran no such fault."""
+
+    capture_id: str
+    kind: SymptomKind
+    count: int
+
+
+def negative_control_violations(
+    characterizations: Sequence[CaptureCharacterization],
+) -> tuple[NegativeControlViolation, ...]:
+    """Fault kinds must emit zero episodes on a no-fault capture; report every breach.
+
+    This is anti-spam guard (i): a detector that fires a fault symptom on quiet or
+    event-explained traffic is a false positive the recall gate (which only scores
+    fault captures) would never see. It is a pure prediction-side property, so it
+    reads no private label.
+    """
+    violations: list[NegativeControlViolation] = []
+    for characterization in characterizations:
+        counts = dict(characterization.counts_by_kind())
+        for kind in NEGATIVE_CONTROL_FAULT_KINDS:
+            count = counts[kind]
+            if count > 0:
+                violations.append(
+                    NegativeControlViolation(
+                        capture_id=characterization.capture_id,
+                        kind=kind,
+                        count=count,
+                    )
+                )
+    return tuple(violations)
+
+
 def _fmt_offset(value: float | None) -> str:
     return "active" if value is None else f"{value:.1f}"
 
@@ -160,11 +203,37 @@ def _render_capture(characterization: CaptureCharacterization) -> list[str]:
     return lines
 
 
+def _render_negative_control(
+    violations: tuple[NegativeControlViolation, ...],
+) -> list[str]:
+    verdict = "FAIL" if violations else "PASS"
+    lines = [
+        f"## Negative control: {verdict}",
+        "",
+        "Anti-spam guard (i): every fault kind "
+        f"({', '.join(kind.value for kind in NEGATIVE_CONTROL_FAULT_KINDS)}) must emit **zero** "
+        "episodes on these no-fault captures. RESIDUAL_EXCEED is exempt (a legitimate signal on "
+        "event-explained and attack traffic).",
+        "",
+    ]
+    if not violations:
+        lines.extend(["No fault-kind episode was emitted on any no-fault capture.", ""])
+        return lines
+    lines.extend(["| Capture | Kind | Episodes |", "|---|---|---:|"])
+    lines.extend(
+        f"| {violation.capture_id} | {violation.kind.value} | {violation.count} |"
+        for violation in violations
+    )
+    lines.append("")
+    return lines
+
+
 def render_characterization(
     characterizations: Sequence[CaptureCharacterization],
     *,
     topology: TopologyConfig,
     config_fingerprint: str,
+    negative_control: tuple[NegativeControlViolation, ...] | None = None,
 ) -> str:
     """Stable Markdown dump of the label-free episode stream for each capture."""
     lines = [
@@ -173,7 +242,7 @@ def render_characterization(
         "Every durable episode each deterministic detector emits on the captures below, "
         "collapsed to its latest revision. **No private label is read** — this is the "
         "prediction side only, the evidence base for the recall/coverage gate and the "
-        "fuller a-priori storm labels (BUILD_STATE 6a). It gates nothing.",
+        "fuller a-priori storm labels (BUILD_STATE 6a). It gates nothing on its own.",
         "",
         f"- Runtime config fingerprint: `{config_fingerprint}`.",
         "- Offsets are seconds from each capture's anchor; bit-exact replay keeps them stable.",
@@ -181,6 +250,8 @@ def render_characterization(
         "- `episode_id` is shown as a 12-char prefix of the deterministic identity hash.",
         "",
     ]
+    if negative_control is not None:
+        lines.extend(_render_negative_control(negative_control))
     lines.extend(_render_topology(topology))
     for characterization in characterizations:
         lines.extend(_render_capture(characterization))
@@ -199,6 +270,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="capture directory to characterize; repeat for several",
     )
     parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument(
+        "--assert-no-fault-episodes",
+        action="store_true",
+        help="treat the captures as no-fault negative controls: fail if any fault kind fires",
+    )
     args = parser.parse_args(argv)
     repo_root = args.repo_root.resolve()
     config = load_config(repo_root / "config")
@@ -210,15 +286,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         for capture in args.capture
     )
+    violations = (
+        negative_control_violations(characterizations) if args.assert_no_fault_episodes else None
+    )
     report = render_characterization(
         characterizations,
         topology=config.topology,
         config_fingerprint=config.fingerprint,
+        negative_control=violations,
     )
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(report, encoding="utf-8")
     print(report, flush=True)
-    return 0
+    return 1 if violations else 0
 
 
 if __name__ == "__main__":

@@ -202,6 +202,15 @@ diagnose-episodes: ## Dump the label-free episode stream for captures (CAPTURE_R
 		$(foreach root,$(CAPTURE_ROOTS),--capture "../$(root)") \
 		--report ../docs/reports/phase-2-episode-characterization.md
 
+.PHONY: score-negative-control
+score-negative-control: ## Assert no-fault captures emit zero fault-kind episodes (CAPTURE_ROOTS=)
+	@test -n "$(CAPTURE_ROOTS)" || { echo "CAPTURE_ROOTS is required" >&2; exit 2; }
+	cd platform && PYTHONPATH=.. uv run python -m lab.scoring.diagnose \
+		--repo-root .. \
+		$(foreach root,$(CAPTURE_ROOTS),--capture "../$(root)") \
+		--assert-no-fault-episodes \
+		--report ../docs/reports/phase-2-negative-control.md
+
 .PHONY: golden
 golden: data-pull ## Replay development goldens and diff semantic transcripts
 	cd platform && PYTHONPATH=.. uv run python -m lab.scoring.golden \
