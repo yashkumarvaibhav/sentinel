@@ -242,6 +242,7 @@ def build_checkout_journey_job(
     *,
     job_name: str,
     run_id: str,
+    ttl_seconds: int = 600,
 ) -> dict[str, Any]:
     _require_safe(job_name, "job_name")
     _require_safe(run_id, "run_id")
@@ -255,7 +256,7 @@ def build_checkout_journey_job(
         },
         "spec": {
             "backoffLimit": 0,
-            "ttlSecondsAfterFinished": 600,
+            "ttlSecondsAfterFinished": ttl_seconds,
             "template": {
                 "metadata": {"labels": {"sentinel.dev/role": "loadgen"}},
                 "spec": {
@@ -294,6 +295,7 @@ def build_path_attack_job(
     job_name: str,
     run_id: str,
     user_agent: str,
+    ttl_seconds: int = 600,
 ) -> dict[str, Any]:
     """Build a fixed-path workload that remains part of primary scored volume."""
     _require_safe(job_name, "job_name")
@@ -310,7 +312,7 @@ def build_path_attack_job(
         },
         "spec": {
             "backoffLimit": 0,
-            "ttlSecondsAfterFinished": 600,
+            "ttlSecondsAfterFinished": ttl_seconds,
             "template": {
                 "metadata": {"labels": {"sentinel.dev/role": "loadgen"}},
                 "spec": {
@@ -764,6 +766,12 @@ def _start_k6_stimulus(
     suffix = hashlib.sha256(identity.encode()).hexdigest()[:20]
     job_name = f"stim-{suffix}"
     run_id = f"journey-{suffix}"
+    # 6d-1 reaps journey jobs AFTER the whole scenario loop, so an early journey's
+    # job must outlive the entire run or kubernetes garbage-collects it before the
+    # deferred reap (observed: a first-journey job vanished mid-combo). Size the TTL
+    # from the scenario duration + a spin-up margin; the happy-path reap deletes the
+    # job explicitly, so this only bounds how long a job lingers on an error path.
+    ttl_seconds = sum(phase.duration_seconds for phase in schedule.phases) + 600
     if isinstance(stimulus, K6PathAttackStimulus):
         user_agent = f"sentinel-score/{_primary_run_id(schedule, invocation)}/attack/{suffix}"
         job = build_path_attack_job(
@@ -771,11 +779,14 @@ def _start_k6_stimulus(
             job_name=job_name,
             run_id=run_id,
             user_agent=user_agent,
+            ttl_seconds=ttl_seconds,
         )
         expected_spans = stimulus.rate_rps * stimulus.duration_seconds
     else:
         user_agent = f"sentinel-stimulus/{run_id}"
-        job = build_checkout_journey_job(stimulus, job_name=job_name, run_id=run_id)
+        job = build_checkout_journey_job(
+            stimulus, job_name=job_name, run_id=run_id, ttl_seconds=ttl_seconds
+        )
         expected_spans = stimulus.rate_rps * stimulus.duration_seconds * 3
     script = repo_root / "lab" / "loadgen" / "scenario.js"
     if not script.is_file():

@@ -7,9 +7,11 @@ import math
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import lab.scoring.live as live_module
 import pytest
+import yaml
 from lab.scenarios import SeedPurpose, compile_profile, load_profile
 from lab.scenarios.compiler import CompiledSchedule
 from lab.scenarios.models import ScenarioProfile
@@ -381,6 +383,55 @@ def test_live_stimuli_use_fixed_owned_resources_and_restore_flagd() -> None:
         for patch in patches
     )
     assert '"defaultVariant": "off"' in json.loads(patches[-1])["data"]["demo.flagd.json"]
+
+
+def test_journey_job_ttl_outlives_the_scenario_for_the_deferred_reap() -> None:
+    # 6d-1 reaps journey jobs AFTER the whole scenario loop, so a journey job must
+    # outlive the entire run or kubernetes garbage-collects it before the deferred
+    # reap (observed: a first-journey job vanished mid-combo, `stim-... not found`).
+    # Its TTL must therefore exceed the scenario duration.
+    profile = load_profile(SCENARIO_ROOT / "combo_night.yml")
+    schedule = compile_profile(
+        profile,
+        seed=profile.seeds.development[0],
+        purpose=SeedPurpose.DEVELOPMENT,
+    ).schedule
+    journey = next(item for item in schedule.stimuli if item.kind == "k6_journey")
+    minimal = replace(schedule, stimuli=(journey,))
+    scenario_duration = sum(phase.duration_seconds for phase in schedule.phases)
+    applied: list[Any] = []
+    anchor = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
+
+    def runner(command: list[str], *, input_text: str | None = None, timeout: int = 120) -> str:
+        del timeout
+        if "apply" in command and input_text is not None:
+            applied.append(yaml.safe_load(input_text))
+        if "get" in command and "job" in command:
+            return '{"status":{"succeeded":1}}'
+        if "logs" in command:
+            return "iterations dropped_iterations"
+        return ""
+
+    def read_spans(user_agent: str, expected: int) -> tuple[datetime, ...]:
+        del user_agent
+        return tuple(
+            anchor + timedelta(seconds=index) for index in range(math.ceil(expected * 0.95))
+        )
+
+    execute_stimuli(
+        repo_root=SCENARIO_ROOT.parents[1],
+        schedule=minimal,
+        anchor_ts=anchor,
+        runner=runner,
+        waiter=lambda _: None,
+        clock=lambda: anchor + timedelta(seconds=5),
+        journey_span_reader=read_spans,
+    )
+
+    job = next(doc for doc in applied if isinstance(doc, dict) and doc.get("kind") == "Job")
+    ttl = job["spec"]["ttlSecondsAfterFinished"]
+    assert ttl == scenario_duration + 600
+    assert ttl > scenario_duration
 
 
 def test_journey_reaping_is_deferred_past_the_transition_loop() -> None:
