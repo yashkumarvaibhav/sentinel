@@ -187,6 +187,13 @@ score-captures: ## Gate an exact four-seed capture matrix (CAPTURE_ROOT=)
 		--repo-root .. --captures-root "../$(CAPTURE_ROOT)" \
 		--report ../var/reports/phase-1-capture-score.md
 
+.PHONY: score-held-out-symptoms
+score-held-out-symptoms: ## Close Phase 2: score the sealed held-out cascade/combo captures (CAPTURE_ROOT=)
+	@test -n "$(CAPTURE_ROOT)" || { echo "CAPTURE_ROOT is required" >&2; exit 2; }
+	cd platform && PYTHONPATH=.. uv run python -m lab.scoring.capture \
+		--repo-root .. --held-out-symptom-captures-root "../$(CAPTURE_ROOT)" \
+		--report ../docs/reports/phase-2-held-out-score.md
+
 .PHONY: golden
 golden: data-pull ## Replay development goldens and diff semantic transcripts
 	cd platform && PYTHONPATH=.. uv run python -m lab.scoring.golden \

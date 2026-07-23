@@ -323,6 +323,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m lab.scoring.capture")
     parser.add_argument("--repo-root", type=Path, required=True)
     parser.add_argument("--captures-root", type=Path)
+    parser.add_argument("--held-out-symptom-captures-root", type=Path)
     parser.add_argument("--development-residual-capture", type=Path)
     parser.add_argument("--development-edge-capture", type=Path)
     parser.add_argument("--development-combo-capture", type=Path)
@@ -333,9 +334,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.development_residual_capture,
         args.development_edge_capture,
     )
-    if any(path is not None for path in development_paths) or (
+    development_requested = any(path is not None for path in development_paths) or (
         args.development_combo_capture is not None
-    ):
+    )
+    if args.held_out_symptom_captures_root is not None:
+        if development_requested or args.captures_root is not None:
+            parser.error(
+                "held-out symptom scoring takes only --held-out-symptom-captures-root and --report"
+            )
+        return _held_out_symptom_main(
+            repo_root=repo_root,
+            captures_root=args.held_out_symptom_captures_root.resolve(),
+            report_path=args.report.resolve(),
+        )
+    if development_requested:
         if (
             not all(path is not None for path in development_paths)
             or args.captures_root is not None
@@ -441,6 +453,79 @@ def _development_symptom_main(
         gate=gate,
         config=gate_config,
         config_fingerprint=config.fingerprint,
+    )
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(report, encoding="utf-8")
+    print(report, flush=True)
+    return 0 if gate.passed else 1
+
+
+_HELD_OUT_SYMPTOM_PROFILES = ("cascade_night", "combo_night")
+
+
+def _held_out_symptom_matrix(repo_root: Path) -> frozenset[tuple[str, int]]:
+    """The exact set of sealed (profile, seed) pairs the Phase 2 closure must score."""
+    return frozenset(
+        (profile_name, seed)
+        for profile_name in _HELD_OUT_SYMPTOM_PROFILES
+        for seed in load_profile(
+            repo_root / "lab" / "scenarios" / f"{profile_name}.yml"
+        ).seeds.held_out
+    )
+
+
+def _require_held_out_symptom_matrix(
+    runs: tuple[EpisodeRunScore, ...],
+    expected: frozenset[tuple[str, int]],
+) -> None:
+    """Fail closed unless the scored runs are exactly the sealed held-out seeds."""
+    if any(run.seed_purpose != "held_out" for run in runs):
+        raise ValueError("held-out symptom closure cannot consume development captures")
+    actual = tuple((run.scenario_id, run.seed) for run in runs)
+    if len(actual) != len(set(actual)) or set(actual) != expected:
+        raise ValueError(
+            "held-out symptom matrix must exactly match sealed seeds: "
+            f"missing={sorted(expected - set(actual))}, extra={sorted(set(actual) - expected)}"
+        )
+
+
+def _held_out_symptom_main(
+    *,
+    repo_root: Path,
+    captures_root: Path,
+    report_path: Path,
+) -> int:
+    """Score every sealed held-out cascade/combo capture through the combined scorer once."""
+    config = load_config(repo_root / "config")
+    capture_dirs = tuple(
+        sorted(
+            path
+            for path in captures_root.iterdir()
+            if path.is_dir() and (path / "manifest.json").is_file()
+        )
+    )
+    runs = tuple(
+        sorted(
+            (
+                score_detection_episode_capture(
+                    path,
+                    detector=config.detectors,
+                    replay_config_fingerprint=config.fingerprint,
+                )
+                for path in capture_dirs
+            ),
+            key=lambda item: (item.scenario_id, item.seed),
+        )
+    )
+    _require_held_out_symptom_matrix(runs, _held_out_symptom_matrix(repo_root))
+    gate_config = load_gate_config(repo_root / "lab" / "scoring" / "config.yml")
+    gate = evaluate_symptom_gates(runs, gate_config)
+    report = render_symptom_report(
+        runs=runs,
+        gate=gate,
+        config=gate_config,
+        config_fingerprint=config.fingerprint,
+        mode="held_out",
     )
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(report, encoding="utf-8")

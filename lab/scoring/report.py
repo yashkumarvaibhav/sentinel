@@ -134,26 +134,37 @@ def render_symptom_report(
     gate: SymptomGateResult,
     config: ScoreGateConfig,
     config_fingerprint: str,
+    mode: Literal["development", "held_out"] = "development",
 ) -> str:
-    """Render an honest development proof for episode-level symptom metrics."""
+    """Render an honest development or held-out proof for episode-level symptom metrics."""
+    held_out = mode == "held_out"
+    gate_label = "Held-out" if held_out else "Development"
+    verdict = "PASS" if gate.passed else "FAIL"
     required = set(gate.required_kinds)
+    seed_discipline = (
+        "- Seed discipline: every capture below is a **HELD-OUT** `cascade_night` / "
+        "`combo_night` seed, sealed and unused throughout development; detector parameters "
+        "were frozen by development evidence before these seeds were recorded."
+        if held_out
+        else "- Seed discipline: this proof uses **DEVELOPMENT** captures only. It neither runs "
+        "nor reads held-out `cascade_night` / `combo_night` seeds."
+    )
     lines = [
         "# Phase 2 per-symptom episode scoring proof",
         "",
-        f"**Development gate: {'PASS' if gate.passed else 'FAIL'}**",
+        f"**{gate_label} gate: {verdict}**",
         "",
         "- Telemetry evidence: **REAL** OpenTelemetry capture bytes replayed through the "
         "runtime detector and anti-flapping episode paths.",
         "- Workload, event context and injected faults: **SIMULATED** and bounded to the "
         "contained Astronomy Shop testbed.",
-        "- Seed discipline: this proof uses **DEVELOPMENT** captures only. It neither runs nor "
-        "reads held-out `cascade_night` / `combo_night` seeds.",
+        seed_discipline,
         "- Label discipline: public runtime replay completes before scorer-only private labels "
         "are opened. Predictions are matched one-to-one over half-open event-time intervals; "
         "retries of one `episode_id` count once.",
         f"- Runtime config fingerprint: `{config_fingerprint}`.",
         "",
-        "## Development captures",
+        f"## {gate_label} captures",
         "",
         "| Capture | Profile | Seed | Kind | Predicted | Expected | TP | FP | FN | Precision | "
         "Recall | Detect p50/p95 |",
@@ -188,7 +199,7 @@ def render_symptom_report(
     lines.extend(
         [
             "",
-            "## Per-kind development gates",
+            f"## Per-kind {'held-out' if held_out else 'development'} gates",
             "",
             "| Kind | Precision | Floor | Recall | Floor | Scope | Result |",
             "|---|---:|---:|---:|---:|---|---|",
@@ -219,17 +230,33 @@ def render_symptom_report(
             f"requires {failure.requirement}."
             for failure in gate.failures
         )
-    lines.extend(
+    scope = (
         [
-            "",
-            "## Scope of this proof",
-            "",
+            "This held-out proof is the Phase 2 closure. It scores fresh `cascade_night` / "
+            "`combo_night` seeds that stayed sealed throughout development, applying every "
+            "committed per-kind floor unchanged. Detector parameters were frozen by development "
+            "evidence (fingerprint above) before these seeds were recorded, and no floor was "
+            "lowered from held-out results. A below-floor kind is reported honestly rather than "
+            "hidden; `cascade_night` seeds carry only residual/edge labels, so kinds they do not "
+            "exercise contribute their real predictions and any false positives to the pooled "
+            "score.",
+        ]
+        if held_out
+        else [
             "This development proof gates every kind listed above on measured development "
             "captures only. Kinds without an expected or predicted episode remain "
             "`insufficient`; they are not rendered as zero and are not release-gated until "
             "their development scenarios supply honest labels. The final Phase 2 gate still "
             "requires fresh held-out cascade/combo captures and every configured symptom "
             "kind.",
+        ]
+    )
+    lines.extend(
+        [
+            "",
+            "## Scope of this proof",
+            "",
+            *scope,
             "",
         ]
     )

@@ -5,13 +5,14 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Literal, cast
 
 import lab.scoring.capture as capture_scoring
 import pytest
 from lab.scenarios.models import ScoredSymptomKind, SymptomLabelInterval
-from lab.scoring.evaluator import score_symptom_episodes
+from lab.scoring.evaluator import EpisodeRunScore, score_symptom_episodes
 from lab.scoring.gates import evaluate_symptom_gates, load_gate_config
+from lab.scoring.report import render_symptom_report
 
 from common.config import load_config
 from contracts import EpisodeStatus, SymptomEpisode, SymptomKind
@@ -370,6 +371,106 @@ def test_combo_development_scoring_requires_both_base_capture_paths() -> None:
                 str(REPO_ROOT),
                 "--development-combo-capture",
                 "var/captures/phase2-combo-503-dev-v10",
+                "--report",
+                "var/reports/never-written.md",
+            ]
+        )
+    assert excinfo.value.code == 2
+
+
+def _held_out_run(
+    scenario_id: str,
+    seed: int,
+    purpose: Literal["development", "held_out"] = "held_out",
+) -> EpisodeRunScore:
+    return EpisodeRunScore(
+        capture_id=f"{scenario_id}-{seed}",
+        scenario_id=scenario_id,
+        seed=seed,
+        seed_purpose=purpose,
+        evaluation_start_ts=START,
+        evaluation_end_ts=START + timedelta(seconds=30),
+        by_kind=(),
+    )
+
+
+def test_held_out_symptom_matrix_is_the_sealed_cascade_and_combo_seeds() -> None:
+    assert capture_scoring._held_out_symptom_matrix(REPO_ROOT) == frozenset(
+        {
+            ("cascade_night", 9103),
+            ("cascade_night", 9127),
+            ("combo_night", 9209),
+            ("combo_night", 9221),
+        }
+    )
+
+
+def test_held_out_symptom_matrix_accepts_the_exact_sealed_set() -> None:
+    expected = capture_scoring._held_out_symptom_matrix(REPO_ROOT)
+    runs = tuple(_held_out_run(scenario, seed) for scenario, seed in expected)
+    capture_scoring._require_held_out_symptom_matrix(runs, expected)
+
+
+def test_held_out_symptom_matrix_rejects_a_development_capture() -> None:
+    expected = capture_scoring._held_out_symptom_matrix(REPO_ROOT)
+    runs = tuple(
+        _held_out_run(scenario, seed, "development" if seed == 9103 else "held_out")
+        for scenario, seed in expected
+    )
+    with pytest.raises(ValueError, match="cannot consume development"):
+        capture_scoring._require_held_out_symptom_matrix(runs, expected)
+
+
+def test_held_out_symptom_matrix_rejects_an_incomplete_seed_set() -> None:
+    expected = capture_scoring._held_out_symptom_matrix(REPO_ROOT)
+    runs = tuple(
+        _held_out_run(scenario, seed)
+        for scenario, seed in expected
+        if (scenario, seed) != ("combo_night", 9221)
+    )
+    with pytest.raises(ValueError, match="missing="):
+        capture_scoring._require_held_out_symptom_matrix(runs, expected)
+
+
+def test_held_out_symptom_report_marks_the_sealed_scope() -> None:
+    score = score_symptom_episodes(
+        capture_id="held-out-capture",
+        scenario_id="combo_night",
+        seed=9209,
+        seed_purpose="held_out",
+        anchor_ts=START,
+        evaluation_end_ts=START + timedelta(seconds=30),
+        episodes=(_episode("edge", SymptomKind.EDGE_DEGRADED, 10.0, 20.0),),
+        labels=(_label("edge", SymptomKind.EDGE_DEGRADED, 10.0, 20.0),),
+    )
+    config = load_gate_config(REPO_ROOT / "lab" / "scoring" / "config.yml")
+    gate = evaluate_symptom_gates((score,), config)
+
+    report = render_symptom_report(
+        runs=(score,),
+        gate=gate,
+        config=config,
+        config_fingerprint="held-out-fingerprint",
+        mode="held_out",
+    )
+
+    assert "Held-out gate:" in report
+    assert "**HELD-OUT**" in report
+    assert "Held-out captures" in report
+    assert "Phase 2 closure" in report
+    assert "DEVELOPMENT** captures only" not in report
+
+
+def test_held_out_symptom_mode_rejects_development_flags() -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        capture_scoring.main(
+            [
+                "--repo-root",
+                str(REPO_ROOT),
+                "--held-out-symptom-captures-root",
+                "var/captures",
+                "--development-combo-capture",
+                "var/captures/x",
                 "--report",
                 "var/reports/never-written.md",
             ]
