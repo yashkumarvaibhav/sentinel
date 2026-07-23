@@ -65,6 +65,28 @@ class EpisodeMatch:
 
 
 @dataclass(frozen=True)
+class PredictedEpisode:
+    """A predicted episode's identity and window, for topology-relatedness checks."""
+
+    episode_id: str
+    service: str
+    signal: str
+    opened_ts: datetime
+    predicted_end_ts: datetime
+
+
+@dataclass(frozen=True)
+class FaultTarget:
+    """One labeled symptom's service and window — a real fault-caused location."""
+
+    label_id: str
+    kind: SymptomKind
+    service: str
+    start_ts: datetime
+    end_ts: datetime
+
+
+@dataclass(frozen=True)
 class SymptomKindScore:
     """Episode-level metrics for one symptom kind in one capture."""
 
@@ -73,6 +95,7 @@ class SymptomKindScore:
     expected_count: int
     metrics: EpisodeMetrics
     matches: tuple[EpisodeMatch, ...]
+    predicted_episodes: tuple[PredictedEpisode, ...] = ()
 
     @property
     def detection_latency_p50(self) -> float | None:
@@ -96,6 +119,7 @@ class EpisodeRunScore:
     evaluation_start_ts: datetime
     evaluation_end_ts: datetime
     by_kind: tuple[SymptomKindScore, ...]
+    fault_targets: tuple[FaultTarget, ...] = ()
 
     def score_for(self, kind: SymptomKind) -> SymptomKindScore:
         """Return one kind's explicit score, including its insufficient state."""
@@ -289,6 +313,16 @@ def score_symptom_episodes(
                     expected_count=len(expected_for_kind),
                 ),
                 matches=matches,
+                predicted_episodes=tuple(
+                    PredictedEpisode(
+                        episode_id=episode.episode_id,
+                        service=episode.service,
+                        signal=episode.signal,
+                        opened_ts=episode.opened_ts,
+                        predicted_end_ts=episode.closed_ts or evaluation_end,
+                    )
+                    for episode in predicted_for_kind
+                ),
             )
         )
     return EpisodeRunScore(
@@ -299,6 +333,16 @@ def score_symptom_episodes(
         evaluation_start_ts=anchor,
         evaluation_end_ts=evaluation_end,
         by_kind=tuple(scores),
+        fault_targets=tuple(
+            FaultTarget(
+                label_id=item.label_id,
+                kind=item.kind,
+                service=item.service,
+                start_ts=item.start_ts,
+                end_ts=item.end_ts,
+            )
+            for item in expected
+        ),
     )
 
 

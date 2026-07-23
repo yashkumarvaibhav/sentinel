@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -11,10 +12,13 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
 
+from common.config import TopologyConfig
 from contracts import SymptomKind
 from lab.scoring.evaluator import (
     SCORED_SYMPTOM_KINDS,
     EpisodeRunScore,
+    FaultTarget,
+    PredictedEpisode,
     RunScore,
     SymptomKindScore,
 )
@@ -33,6 +37,7 @@ class ScoreGateConfig(BaseModel):
     telemetry_completeness_min: Probability
     symptom_precision_min: dict[str, Probability]
     symptom_recall_min: dict[str, Probability]
+    unmatched_episode_max_hops: int = Field(ge=0)
 
     @model_validator(mode="after")
     def complete_symptom_floors(self) -> ScoreGateConfig:
@@ -141,6 +146,7 @@ def evaluate_symptom_gates(
     config: ScoreGateConfig,
     *,
     required_kinds: tuple[SymptomKind, ...] = SCORED_SYMPTOM_KINDS,
+    topology: TopologyConfig | None = None,
 ) -> SymptomGateResult:
     """Gate each required kind on recall/coverage; record precision, do not gate it.
 
@@ -151,6 +157,11 @@ def evaluate_symptom_gates(
     storm into one incident with one root cause -- i.e. the precision/FP
     accounting -- is Phase 4 causal-collapse's job. Precision stays in the score
     and report for transparency but is not a Phase-2 gate.
+
+    A recall-only gate would be gameable by spraying spurious episodes, so when a
+    ``topology`` is supplied every UNMATCHED predicted episode must still be a real
+    propagation: within ``unmatched_episode_max_hops`` of some labeled fault target
+    and concurrent with it. The unrelated-episode budget is 0.
     """
     if not required_kinds or len(required_kinds) != len(set(required_kinds)):
         raise ValueError("required symptom kinds must be non-empty and unique")
@@ -169,12 +180,89 @@ def evaluate_symptom_gates(
             config.symptom_recall_min[kind.value],
             kind.value,
         )
+    if topology is not None:
+        failures.extend(
+            _unrelated_episode_failures(
+                runs,
+                topology,
+                max_hops=config.unmatched_episode_max_hops,
+            )
+        )
     return SymptomGateResult(
         passed=not failures,
         by_kind=by_kind,
         required_kinds=required_kinds,
         failures=tuple(failures),
     )
+
+
+def _service_hops(topology: TopologyConfig) -> dict[str, dict[str, int]]:
+    """All-pairs undirected hop distances over the dependency graph."""
+    adjacency: dict[str, set[str]] = {service.service: set() for service in topology.services}
+    for service in topology.services:
+        for dependency in service.dependencies:
+            adjacency[service.service].add(dependency)
+            adjacency[dependency].add(service.service)
+    distances: dict[str, dict[str, int]] = {}
+    for source in adjacency:
+        hops = {source: 0}
+        queue: deque[str] = deque([source])
+        while queue:
+            current = queue.popleft()
+            for neighbour in sorted(adjacency[current]):
+                if neighbour not in hops:
+                    hops[neighbour] = hops[current] + 1
+                    queue.append(neighbour)
+        distances[source] = hops
+    return distances
+
+
+def _unrelated_episode_failures(
+    runs: tuple[EpisodeRunScore, ...],
+    topology: TopologyConfig,
+    *,
+    max_hops: int,
+) -> list[GateFailure]:
+    """Fail closed on any unmatched episode not near+concurrent with a fault target.
+
+    An unmatched (false-positive) episode is only legitimate propagation if it sits
+    within ``max_hops`` of a labeled fault target on the dependency graph and its
+    window overlaps that target's window. Anything else is a genuinely spurious
+    episode the recall gate would otherwise ignore.
+    """
+    distances = _service_hops(topology)
+    failures: list[GateFailure] = []
+    for run in runs:
+        for score in run.by_kind:
+            matched_ids = {match.episode_id for match in score.matches}
+            for episode in score.predicted_episodes:
+                if episode.episode_id in matched_ids:
+                    continue
+                if not _episode_is_related(episode, run.fault_targets, distances, max_hops):
+                    failures.append(
+                        GateFailure(
+                            metric="unrelated_episode",
+                            actual=None,
+                            requirement=f"within {max_hops} hop(s) of a concurrent fault target",
+                            scope=f"{run.capture_id}/{score.kind.value}/{episode.episode_id}",
+                        )
+                    )
+    return failures
+
+
+def _episode_is_related(
+    episode: PredictedEpisode,
+    fault_targets: tuple[FaultTarget, ...],
+    distances: dict[str, dict[str, int]],
+    max_hops: int,
+) -> bool:
+    for target in fault_targets:
+        hops = distances.get(episode.service, {}).get(target.service)
+        if hops is None or hops > max_hops:
+            continue
+        if episode.opened_ts < target.end_ts and target.start_ts < episode.predicted_end_ts:
+            return True
+    return False
 
 
 def _aggregate_kind(
@@ -195,6 +283,9 @@ def _aggregate_kind(
             expected_count=expected_count,
         ),
         matches=matches,
+        predicted_episodes=tuple(
+            episode for score in scores for episode in score.predicted_episodes
+        ),
     )
 
 

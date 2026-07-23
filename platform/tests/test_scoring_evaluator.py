@@ -180,6 +180,7 @@ def test_score_gates_fail_closed_on_insufficient_or_incomplete_evidence() -> Non
                 "DROP": 0.9,
                 "SILENCE": 0.9,
             },
+            unmatched_episode_max_hops=1,
         ),
     )
 

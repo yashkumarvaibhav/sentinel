@@ -496,9 +496,11 @@ def _development_symptom_main(
         (SymptomKind.RESIDUAL_EXCEED, SymptomKind.EDGE_DEGRADED) if combo_capture is None else None
     )
     gate = (
-        evaluate_symptom_gates(runs, gate_config, required_kinds=required_kinds)
+        evaluate_symptom_gates(
+            runs, gate_config, required_kinds=required_kinds, topology=config.topology
+        )
         if required_kinds is not None
-        else evaluate_symptom_gates(runs, gate_config)
+        else evaluate_symptom_gates(runs, gate_config, topology=config.topology)
     )
     report = render_symptom_report(
         runs=runs,
@@ -571,7 +573,7 @@ def _held_out_symptom_main(
     )
     _require_held_out_symptom_matrix(runs, _held_out_symptom_matrix(repo_root))
     gate_config = load_gate_config(repo_root / "lab" / "scoring" / "config.yml")
-    gate = evaluate_symptom_gates(runs, gate_config)
+    gate = evaluate_symptom_gates(runs, gate_config, topology=config.topology)
     report = render_symptom_report(
         runs=runs,
         gate=gate,

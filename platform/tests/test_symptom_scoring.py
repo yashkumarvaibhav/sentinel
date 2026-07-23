@@ -11,7 +11,7 @@ import lab.scoring.capture as capture_scoring
 import pytest
 from lab.scenarios.models import ScoredSymptomKind, SymptomLabelInterval
 from lab.scoring.evaluator import EpisodeRunScore, score_symptom_episodes
-from lab.scoring.gates import evaluate_symptom_gates, load_gate_config
+from lab.scoring.gates import _service_hops, evaluate_symptom_gates, load_gate_config
 from lab.scoring.report import render_symptom_report
 
 from common.config import load_config
@@ -418,6 +418,164 @@ def _propagated_edge(
         latest_symptom_id=f"{episode_id}-latest",
         evidence_refs=(f"{episode_id}-evidence",),
     )
+
+
+def _kind_episode(
+    episode_id: str,
+    kind: SymptomKind,
+    service: str,
+    signal: str,
+    opened: float,
+    closed: float | None,
+) -> SymptomEpisode:
+    opened_ts = START + timedelta(seconds=opened)
+    confirmed_ts = opened_ts + timedelta(seconds=1)
+    closed_ts = None if closed is None else START + timedelta(seconds=closed)
+    return SymptomEpisode(
+        episode_id=episode_id,
+        kind=kind,
+        service=service,
+        signal=signal,
+        status=EpisodeStatus.ACTIVE if closed is None else EpisodeStatus.CLOSED,
+        opened_ts=opened_ts,
+        confirmed_ts=confirmed_ts,
+        last_breach_ts=confirmed_ts,
+        closed_ts=closed_ts,
+        peak_score=0.9,
+        breach_tick_count=3,
+        revision=1,
+        opening_symptom_id=f"{episode_id}-open",
+        peak_symptom_id=f"{episode_id}-peak",
+        latest_symptom_id=f"{episode_id}-latest",
+        evidence_refs=(f"{episode_id}-evidence",),
+    )
+
+
+def test_service_hops_computes_undirected_dependency_distances() -> None:
+    distances = _service_hops(load_config(REPO_ROOT / "config").topology)
+
+    assert distances["frontend"]["frontend"] == 0
+    assert distances["frontend"]["checkout"] == 1
+    assert distances["checkout"]["payment"] == 1
+    assert distances["frontend"]["payment"] == 2  # frontend -> checkout -> payment
+    assert distances["cart"]["email"] == 2  # cart -> checkout -> email
+    assert "unknown" not in distances["frontend"]
+
+
+def test_unmatched_propagated_episode_passes_the_topology_guard() -> None:
+    # checkout->payment fault, caught by its direct edge AND a propagated frontend->checkout
+    # edge one hop up. Recall 1.0; the unmatched propagated episode is real propagation.
+    score = score_symptom_episodes(
+        capture_id="storm-capture",
+        scenario_id="cascade_night",
+        seed=401,
+        seed_purpose="development",
+        anchor_ts=START,
+        evaluation_end_ts=START + timedelta(seconds=40),
+        episodes=(
+            _episode("edge-direct", SymptomKind.EDGE_DEGRADED, 10.0, 30.0),
+            _propagated_edge("edge-prop", 11.0, 30.0),
+        ),
+        labels=(_label("expected-edge", SymptomKind.EDGE_DEGRADED, 10.0, 20.0),),
+    )
+    config = load_gate_config(REPO_ROOT / "lab" / "scoring" / "config.yml")
+
+    result = evaluate_symptom_gates(
+        (score,),
+        config,
+        required_kinds=(SymptomKind.EDGE_DEGRADED,),
+        topology=load_config(REPO_ROOT / "config").topology,
+    )
+
+    assert result.passed
+    assert result.failures == ()
+
+
+def test_unrelated_unmatched_episode_fails_the_topology_guard() -> None:
+    # A payment fault (LOG_BURST) plus a spurious SATURATION on cart. cart is 2 hops
+    # from payment (> the 1-hop bound), so the spurious episode fails closed.
+    score = score_symptom_episodes(
+        capture_id="spurious-capture",
+        scenario_id="combo_night",
+        seed=503,
+        seed_purpose="development",
+        anchor_ts=START,
+        evaluation_end_ts=START + timedelta(seconds=40),
+        episodes=(
+            _episode("log", SymptomKind.LOG_BURST, 10.0, 20.0),
+            _kind_episode(
+                "sat-cart", SymptomKind.SATURATION, "cart", "container_memory", 10.0, 20.0
+            ),
+        ),
+        labels=(_label("expected-log", SymptomKind.LOG_BURST, 10.0, 20.0),),
+    )
+    config = load_gate_config(REPO_ROOT / "lab" / "scoring" / "config.yml")
+
+    result = evaluate_symptom_gates(
+        (score,),
+        config,
+        required_kinds=(SymptomKind.LOG_BURST,),
+        topology=load_config(REPO_ROOT / "config").topology,
+    )
+
+    assert not result.passed
+    assert [failure.metric for failure in result.failures] == ["unrelated_episode"]
+    assert "sat-cart" in result.failures[0].scope
+
+
+def test_non_concurrent_unmatched_episode_fails_the_topology_guard() -> None:
+    # A propagated edge that is topologically adjacent but does NOT overlap the fault
+    # window in time is not credible propagation of that fault.
+    score = score_symptom_episodes(
+        capture_id="offset-capture",
+        scenario_id="cascade_night",
+        seed=401,
+        seed_purpose="development",
+        anchor_ts=START,
+        evaluation_end_ts=START + timedelta(seconds=60),
+        episodes=(
+            _episode("edge-direct", SymptomKind.EDGE_DEGRADED, 10.0, 20.0),
+            _propagated_edge("edge-late", 40.0, 50.0),
+        ),
+        labels=(_label("expected-edge", SymptomKind.EDGE_DEGRADED, 10.0, 20.0),),
+    )
+    config = load_gate_config(REPO_ROOT / "lab" / "scoring" / "config.yml")
+
+    result = evaluate_symptom_gates(
+        (score,),
+        config,
+        required_kinds=(SymptomKind.EDGE_DEGRADED,),
+        topology=load_config(REPO_ROOT / "config").topology,
+    )
+
+    assert not result.passed
+    assert [failure.metric for failure in result.failures] == ["unrelated_episode"]
+    assert "edge-late" in result.failures[0].scope
+
+
+def test_topology_guard_is_inactive_without_topology() -> None:
+    # The same spurious cart saturation passes when no topology is supplied, proving the
+    # guard is opt-in and the recall gate alone does not flag it.
+    score = score_symptom_episodes(
+        capture_id="spurious-capture",
+        scenario_id="combo_night",
+        seed=503,
+        seed_purpose="development",
+        anchor_ts=START,
+        evaluation_end_ts=START + timedelta(seconds=40),
+        episodes=(
+            _episode("log", SymptomKind.LOG_BURST, 10.0, 20.0),
+            _kind_episode(
+                "sat-cart", SymptomKind.SATURATION, "cart", "container_memory", 10.0, 20.0
+            ),
+        ),
+        labels=(_label("expected-log", SymptomKind.LOG_BURST, 10.0, 20.0),),
+    )
+    config = load_gate_config(REPO_ROOT / "lab" / "scoring" / "config.yml")
+
+    result = evaluate_symptom_gates((score,), config, required_kinds=(SymptomKind.LOG_BURST,))
+
+    assert result.passed
 
 
 def test_combo_development_scoring_requires_both_base_capture_paths() -> None:
