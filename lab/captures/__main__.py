@@ -36,7 +36,11 @@ from lab.scenarios import (
     materialize_symptom_labels,
     write_artifacts,
 )
-from lab.scoring.live import render_stimulus_executions, run_live_scenario
+from lab.scoring.live import (
+    render_stimulus_executions,
+    run_live_scenario,
+    validate_stimulus_drift,
+)
 
 _SAFE_ID = re.compile(r"^[a-z0-9](?:[-a-z0-9]{0,126}[a-z0-9])?$")
 _EMPTY_PHASE_ONE_ENRICHMENT = b'{"items":[],"version":1}\n'
@@ -113,6 +117,9 @@ def _record(args: argparse.Namespace) -> int:
     )
     stimulus_executions_path = work / "stimulus-executions.json"
     stimulus_executions_path.write_bytes(render_stimulus_executions(telemetry.stimulus_executions))
+    # Fail closed before spending the seed on a scored capture: a stimulus that
+    # drifted out of its scheduled window would carry mislabeled ground truth.
+    validate_stimulus_drift(telemetry.stimulus_executions, anchor=telemetry.start_at)
     measured_offsets = {
         execution.stimulus_id: (
             (execution.started_at - telemetry.start_at).total_seconds(),

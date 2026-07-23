@@ -122,6 +122,61 @@ def render_stimulus_executions(executions: tuple[StimulusExecution, ...]) -> byt
     ).encode()
 
 
+# A stimulus that runs this far from its requested anchored offset means the
+# executor's back-half drift moved it out of its scheduled label window, so the
+# capture's private labels no longer describe measured execution. We fail such a
+# capture closed at record time -- before its seed is scored -- rather than emit
+# mislabeled ground truth (a rejected-not-scored seed may be re-recorded as -vN).
+# 60 s admits the legitimate 14-40 s k6 job spin-up but rejects the ~90 s
+# compounding drift observed on the 9221 recording. Calibrate downward once the
+# non-blocking executor lands measured evidence.
+MAX_STIMULUS_DRIFT_SECONDS = 60.0
+
+
+class StimulusDriftError(ValueError):
+    """A stimulus executed too far from its requested anchored offset."""
+
+
+def stimulus_drift_seconds(
+    execution: StimulusExecution,
+    *,
+    anchor: datetime,
+) -> tuple[float, float]:
+    """Return (start_drift, end_drift): measured minus requested offset, seconds."""
+    start_offset = (execution.started_at - anchor).total_seconds()
+    end_offset = (execution.ended_at - anchor).total_seconds()
+    return (
+        start_offset - execution.requested_start_offset_seconds,
+        end_offset - execution.requested_end_offset_seconds,
+    )
+
+
+def validate_stimulus_drift(
+    executions: tuple[StimulusExecution, ...],
+    *,
+    anchor: datetime,
+    max_drift_seconds: float = MAX_STIMULUS_DRIFT_SECONDS,
+) -> None:
+    """Fail closed if any stimulus drifted past the isolation bound.
+
+    The recorder calls this before materializing labels: a drifted back half
+    silently moves a stimulus out of its scheduled label window, so the capture
+    must be rejected before its seed is scored rather than produce ground truth
+    that does not describe measured execution.
+    """
+    _require_utc(anchor, "drift anchor")
+    for execution in executions:
+        start_drift, end_drift = stimulus_drift_seconds(execution, anchor=anchor)
+        worst = max(abs(start_drift), abs(end_drift))
+        if worst > max_drift_seconds:
+            raise StimulusDriftError(
+                f"stimulus {execution.stimulus_id} drifted {worst:.1f}s beyond the "
+                f"{max_drift_seconds:.1f}s isolation bound "
+                f"(start {start_drift:+.1f}s, end {end_drift:+.1f}s); "
+                "the capture's labels would not describe measured execution"
+            )
+
+
 def expected_request_count(schedule: CompiledSchedule) -> int:
     primary = sum(phase.rate_rps * phase.duration_seconds for phase in schedule.phases)
     attack = sum(

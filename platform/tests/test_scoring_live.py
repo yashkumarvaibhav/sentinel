@@ -14,12 +14,17 @@ from lab.scenarios import SeedPurpose, compile_profile, load_profile
 from lab.scenarios.compiler import CompiledSchedule
 from lab.scenarios.models import ScenarioProfile
 from lab.scoring.live import (
+    MAX_STIMULUS_DRIFT_SECONDS,
+    StimulusDriftError,
+    StimulusExecution,
     build_checkout_journey_job,
     build_k6_job,
     build_path_attack_job,
     execute_stimuli,
     expected_request_count,
     render_stimulus_executions,
+    stimulus_drift_seconds,
+    validate_stimulus_drift,
 )
 
 SCENARIO_ROOT = Path(__file__).resolve().parents[2] / "lab" / "scenarios"
@@ -206,6 +211,104 @@ def test_span_query_deduplicates_by_observation_without_unbounded_final(
     assert "startsWith" in query
     assert "GROUP BY observation_id" in query
     assert timestamps[1] - timestamps[0] == timedelta(seconds=1)
+
+
+def _execution(
+    stimulus_id: str,
+    *,
+    anchor: datetime,
+    requested_start: int,
+    requested_end: int,
+    start_drift: float,
+    end_drift: float,
+) -> StimulusExecution:
+    return StimulusExecution(
+        stimulus_id=stimulus_id,
+        kind="flagd",
+        target="otel-demo/paymentFailure",
+        setting="100%",
+        requested_start_offset_seconds=requested_start,
+        requested_end_offset_seconds=requested_end,
+        started_at=anchor + timedelta(seconds=requested_start + start_drift),
+        ended_at=anchor + timedelta(seconds=requested_end + end_drift),
+    )
+
+
+def test_stimulus_drift_seconds_reports_signed_start_and_end_drift() -> None:
+    anchor = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
+    execution = _execution(
+        "payment_failure",
+        anchor=anchor,
+        requested_start=304,
+        requested_end=484,
+        start_drift=18.0,
+        end_drift=-3.0,
+    )
+
+    assert stimulus_drift_seconds(execution, anchor=anchor) == (18.0, -3.0)
+
+
+def test_legitimate_spin_up_drift_is_accepted() -> None:
+    anchor = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
+    # 14-40 s job spin-up is expected and must not fail the capture.
+    executions = (
+        _execution(
+            "payment_failure",
+            anchor=anchor,
+            requested_start=304,
+            requested_end=484,
+            start_drift=38.0,
+            end_drift=2.0,
+        ),
+    )
+
+    validate_stimulus_drift(executions, anchor=anchor)  # does not raise
+
+
+def test_compounding_back_half_drift_fails_the_capture_closed() -> None:
+    anchor = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
+    # The 9221 shape: the back-half stimulus ran ~90 s past its scheduled window.
+    executions = (
+        _execution(
+            "measured_rate_drop",
+            anchor=anchor,
+            requested_start=664,
+            requested_end=724,
+            start_drift=90.0,
+            end_drift=90.0,
+        ),
+    )
+
+    with pytest.raises(StimulusDriftError, match="isolation bound"):
+        validate_stimulus_drift(executions, anchor=anchor)
+
+
+def test_drift_bound_boundary_is_inclusive() -> None:
+    anchor = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
+    at_bound = (
+        _execution(
+            "payment_failure",
+            anchor=anchor,
+            requested_start=304,
+            requested_end=484,
+            start_drift=MAX_STIMULUS_DRIFT_SECONDS,
+            end_drift=0.0,
+        ),
+    )
+    validate_stimulus_drift(at_bound, anchor=anchor)  # exactly at the bound passes
+
+    over = (
+        _execution(
+            "payment_failure",
+            anchor=anchor,
+            requested_start=304,
+            requested_end=484,
+            start_drift=MAX_STIMULUS_DRIFT_SECONDS + 0.5,
+            end_drift=0.0,
+        ),
+    )
+    with pytest.raises(StimulusDriftError):
+        validate_stimulus_drift(over, anchor=anchor)
 
 
 def test_live_stimuli_use_fixed_owned_resources_and_restore_flagd() -> None:
