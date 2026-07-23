@@ -224,12 +224,12 @@ def render_symptom_report(
             "",
             "## Scope of this proof",
             "",
-            "This development slice freezes the generic evaluator and the first measured "
-            "RESIDUAL_EXCEED / EDGE_DEGRADED baselines. Kinds without an expected or predicted "
-            "episode remain `insufficient`; they are not rendered as zero and are not "
-            "release-gated until their development scenarios supply honest labels. The final "
-            "Phase 2 gate still requires fresh held-out cascade/combo captures and every "
-            "configured symptom kind.",
+            "This development proof gates every kind listed above on measured development "
+            "captures only. Kinds without an expected or predicted episode remain "
+            "`insufficient`; they are not rendered as zero and are not release-gated until "
+            "their development scenarios supply honest labels. The final Phase 2 gate still "
+            "requires fresh held-out cascade/combo captures and every configured symptom "
+            "kind.",
             "",
         ]
     )

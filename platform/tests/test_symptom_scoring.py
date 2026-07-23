@@ -360,3 +360,18 @@ def _episode(
         latest_symptom_id=f"{episode_id}-latest",
         evidence_refs=(f"{episode_id}-evidence",),
     )
+
+
+def test_combo_development_scoring_requires_both_base_capture_paths() -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        capture_scoring.main(
+            [
+                "--repo-root",
+                str(REPO_ROOT),
+                "--development-combo-capture",
+                "var/captures/phase2-combo-503-dev-v10",
+                "--report",
+                "var/reports/never-written.md",
+            ]
+        )
+    assert excinfo.value.code == 2

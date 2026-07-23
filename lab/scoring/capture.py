@@ -325,6 +325,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--captures-root", type=Path)
     parser.add_argument("--development-residual-capture", type=Path)
     parser.add_argument("--development-edge-capture", type=Path)
+    parser.add_argument("--development-combo-capture", type=Path)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args(argv)
     repo_root = args.repo_root.resolve()
@@ -332,7 +333,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.development_residual_capture,
         args.development_edge_capture,
     )
-    if any(path is not None for path in development_paths):
+    if any(path is not None for path in development_paths) or (
+        args.development_combo_capture is not None
+    ):
         if (
             not all(path is not None for path in development_paths)
             or args.captures_root is not None
@@ -345,6 +348,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             repo_root=repo_root,
             residual_capture=args.development_residual_capture,
             edge_capture=args.development_edge_capture,
+            combo_capture=args.development_combo_capture,
             report_path=args.report.resolve(),
         )
     if args.captures_root is None:
@@ -403,28 +407,34 @@ def _development_symptom_main(
     repo_root: Path,
     residual_capture: Path,
     edge_capture: Path,
+    combo_capture: Path | None,
     report_path: Path,
 ) -> int:
     config = load_config(repo_root / "config")
-    runs = (
+    capture_paths = (residual_capture, edge_capture) + (
+        () if combo_capture is None else (combo_capture,)
+    )
+    runs = tuple(
         score_detection_episode_capture(
-            residual_capture.resolve(),
+            path.resolve(),
             detector=config.detectors,
             replay_config_fingerprint=config.fingerprint,
-        ),
-        score_detection_episode_capture(
-            edge_capture.resolve(),
-            detector=config.detectors,
-            replay_config_fingerprint=config.fingerprint,
-        ),
+        )
+        for path in capture_paths
     )
     if any(run.seed_purpose != "development" for run in runs):
         raise ValueError("development symptom proof cannot consume held-out captures")
     gate_config = load_gate_config(repo_root / "lab" / "scoring" / "config.yml")
-    gate = evaluate_symptom_gates(
-        runs,
-        gate_config,
-        required_kinds=(SymptomKind.RESIDUAL_EXCEED, SymptomKind.EDGE_DEGRADED),
+    # A combined combo capture supplies honest labels for every runtime kind,
+    # so its presence gates all seven; without it only the two proven kinds
+    # are required, exactly as before.
+    required_kinds = (
+        (SymptomKind.RESIDUAL_EXCEED, SymptomKind.EDGE_DEGRADED) if combo_capture is None else None
+    )
+    gate = (
+        evaluate_symptom_gates(runs, gate_config, required_kinds=required_kinds)
+        if required_kinds is not None
+        else evaluate_symptom_gates(runs, gate_config)
     )
     report = render_symptom_report(
         runs=runs,
