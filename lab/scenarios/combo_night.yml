@@ -15,11 +15,14 @@ load_phases:
   - name: warmup
     duration_seconds: 64
     rate_rps: 4
+  # The explained phase holds 10 rps through the attack job's measured 14-19 s
+  # spin-up so the phase handoff cannot create a real unlabeled traffic drop;
+  # the attack stimulus still starts at offset 124 inside this phase.
   - name: explained_event
-    duration_seconds: 60
+    duration_seconds: 120
     rate_rps: 10
   - name: event_with_behavior_attack
-    duration_seconds: 180
+    duration_seconds: 120
     rate_rps: 1
   - name: event_with_payment_fault
     duration_seconds: 180

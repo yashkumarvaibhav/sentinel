@@ -156,6 +156,32 @@ def test_combo_night_compiles_attack_and_fault_without_claiming_unsupported_kind
     assert "intervals" not in schedule_payload(artifacts.schedule)
 
 
+def test_combo_night_holds_explained_volume_through_attack_spin_up() -> None:
+    """The phase handoff must not create a real, unlabeled traffic drop.
+
+    Accepted captures measure 14-19 seconds between a stimulus job's requested
+    start and its first delivered traffic. Every load phase overlapping that
+    spin-up window after the attack's requested start must keep the full
+    explained event rate flowing, otherwise the capture records a genuine
+    volume collapse that no private label explains.
+    """
+    profile = load_profile(SCENARIO_ROOT / "combo_night.yml")
+    attack = next(stimulus for stimulus in profile.stimuli if stimulus.kind == "k6_path_attack")
+    spin_up_guard_seconds = 38
+    explained_rate = max(phase.rate_rps for phase in profile.load_phases)
+    window_start = attack.start_offset_seconds
+    window_end = attack.start_offset_seconds + spin_up_guard_seconds
+    offset = 0
+    overlapping = []
+    for phase in profile.load_phases:
+        phase_start, phase_end = offset, offset + phase.duration_seconds
+        if phase_start < window_end and phase_end > window_start:
+            overlapping.append(phase)
+        offset = phase_end
+    assert overlapping
+    assert all(phase.rate_rps >= explained_rate for phase in overlapping)
+
+
 def test_combo_labels_follow_measured_attack_and_fault_execution() -> None:
     profile = load_profile(SCENARIO_ROOT / "combo_night.yml")
     artifacts = compile_profile(
