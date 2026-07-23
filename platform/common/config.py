@@ -436,6 +436,7 @@ class EdgeDegradationRuleConfig(ConfigModel):
     caller: Identifier
     downstream: Identifier
     rpc_service: Identifier
+    baseline_warmup_samples: int | None = Field(default=None, ge=3, le=1_000_000)
     minimum_samples: int = Field(ge=3, le=1_000_000)
     latency_baseline_floor_ms: PositiveFloat
     error_rate_baseline_floor: Probability

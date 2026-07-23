@@ -96,7 +96,11 @@ def test_committed_config_loads_with_cross_file_references_and_stable_fingerprin
     assert first.detectors.edge_degradation.rules[0].caller == "frontend"
     assert first.detectors.edge_degradation.rules[0].downstream == "checkout"
     assert first.detectors.edge_degradation.rules[0].rpc_service == "oteldemo.CheckoutService"
+    assert first.detectors.edge_degradation.rules[0].baseline_warmup_samples is None
     assert first.detectors.edge_degradation.rules[0].minimum_samples == 20
+    assert all(
+        rule.baseline_warmup_samples is None for rule in first.detectors.edge_degradation.rules
+    )
     assert set(first.detectors.episodes.policies) >= {
         "RESIDUAL_EXCEED",
         "SATURATION",

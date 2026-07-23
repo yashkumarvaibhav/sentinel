@@ -47,11 +47,15 @@ negative, missing-status or contradictory evidence is retained as ambiguous and
 makes the affected rolling window `INSUFFICIENT`.
 
 The first configured number of valid calls per edge forms an immutable
-context-blind bootstrap baseline. Later calls enter a fixed rolling window with
-a configured advance. Both policies are operator data under `edge_degradation`,
-as is the bounded observation-ID deduplication capacity. Exact re-delivery of a
-tick is idempotent; conflicting same-time input, out-of-order ticks, timestamp
-leakage and reused IDs with different evidence fail closed.
+context-blind bootstrap baseline. A rule-level `baseline_warmup_samples`
+overrides the global default when an edge has enough clean support traffic to
+form a representative baseline. This lets normal high-volume edges reject
+cold-start latency without starving an early sparse fault on another edge.
+Later calls enter a fixed rolling window with a configured advance. Both
+policies are operator data under `edge_degradation`, as is the bounded
+observation-ID deduplication capacity. Exact re-delivery of a tick is
+idempotent; conflicting same-time input, out-of-order ticks, timestamp leakage
+and reused IDs with different evidence fail closed.
 
 Every advance yields one auditable status for every configured edge:
 

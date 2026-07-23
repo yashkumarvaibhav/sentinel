@@ -201,7 +201,7 @@ class EdgeDetectionRunner:
             call = _dependency_call(observation, rule)
             if call is None:
                 state.ambiguous.append((observation.ts, observation.observation_id))
-            elif len(state.baseline) < self._configuration.baseline_warmup_samples:
+            elif len(state.baseline) < self._baseline_sample_target(rule):
                 state.baseline.append(call)
                 state.baseline.sort(key=lambda item: (item.ts, item.evidence_id))
             else:
@@ -239,9 +239,10 @@ class EdgeDetectionRunner:
         state.current = [call for call in state.current if call.ts > cutoff]
         state.ambiguous = [item for item in state.ambiguous if item[0] > cutoff]
         baseline_count = len(state.baseline)
+        baseline_sample_target = self._baseline_sample_target(rule)
         baseline_latency: float | None = None
         baseline_errors: float | None = None
-        if baseline_count >= self._configuration.baseline_warmup_samples:
+        if baseline_count >= baseline_sample_target:
             baseline_latency = _nearest_rank_p95(tuple(call.latency_ms for call in state.baseline))
             baseline_errors = sum(call.failed for call in state.baseline) / baseline_count
 
@@ -308,6 +309,13 @@ class EdgeDetectionRunner:
             ambiguous_observation_ids=(),
             evaluation=evaluation,
             transition=transition,
+        )
+
+    def _baseline_sample_target(self, rule: EdgeDegradationRuleConfig) -> int:
+        return (
+            self._configuration.baseline_warmup_samples
+            if rule.baseline_warmup_samples is None
+            else rule.baseline_warmup_samples
         )
 
     def _remember(self, observation_id: str, fingerprint: str) -> None:

@@ -61,6 +61,24 @@ def test_edge_runner_opens_and_closes_only_from_sufficient_measured_windows() ->
     assert runner.active_episodes() == ()
 
 
+def test_rule_baseline_warmup_override_takes_precedence_over_global_default() -> None:
+    runner = _runner(rule_baseline_warmup_samples=4)
+
+    warming = runner.advance(
+        observations=tuple(_span(f"baseline-{index}", 0.1 + index * 0.1) for index in range(3)),
+        tick_ts=START + timedelta(seconds=1),
+    )[0]
+    ready = runner.advance(
+        observations=(_span("baseline-3", 1.1),),
+        tick_ts=START + timedelta(seconds=2),
+    )[0]
+
+    assert warming.status is EdgeWindowStatus.WARMING
+    assert warming.baseline_sample_count == 3
+    assert ready.status is EdgeWindowStatus.INSUFFICIENT
+    assert ready.baseline_sample_count == 4
+
+
 def test_ambiguous_status_is_insufficient_and_never_clears_an_episode() -> None:
     runner = _runner()
     runner.advance(
@@ -216,9 +234,9 @@ def test_real_v6_capture_opens_and_closes_from_sufficient_measured_windows() -> 
 # mirror the committed checkout->payment rule (12 s window, 2 s advance, 20-sample
 # window) and vary only ``baseline_warmup_samples`` -- the knob under study -- so
 # the oracle cannot be satisfied by an unrepresentative short baseline. The
-# committed config value is not changed here: raising it globally would starve the
-# cascade_night early/sparse fault of a clean baseline, so calibration is settled
-# against a purpose-recorded combo capture, guarded by these oracles.
+# global default remains short because raising it globally would starve the
+# cascade_night early/sparse fault of a clean baseline. Representative warmup is
+# therefore an explicit per-edge override, guarded by these oracles.
 
 
 def test_representative_edge_baseline_absorbs_normal_latency() -> None:
@@ -386,7 +404,7 @@ def _payment_call(
     )
 
 
-def _runner() -> EdgeDetectionRunner:
+def _runner(*, rule_baseline_warmup_samples: int | None = None) -> EdgeDetectionRunner:
     edge = EdgeDegradationConfig(
         window_seconds=4,
         advance_seconds=1,
@@ -397,6 +415,7 @@ def _runner() -> EdgeDetectionRunner:
                 caller="checkout",
                 downstream="payment",
                 rpc_service="oteldemo.PaymentService",
+                baseline_warmup_samples=rule_baseline_warmup_samples,
                 minimum_samples=3,
                 latency_baseline_floor_ms=1.0,
                 error_rate_baseline_floor=0.01,
