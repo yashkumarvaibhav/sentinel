@@ -24,6 +24,12 @@ components:
   product-reviews:
     enabled: false
 
+  # Scenario traffic comes from short-lived, resource-capped k6 Jobs. The
+  # chart's always-on Locust component duplicates that load, consumes a 1.5Gi
+  # request, and makes capture volume depend on an uncontrolled workload.
+  load-generator:
+    enabled: false
+
   # The chart's 20Mi default repeatedly OOM-kills this instrumented Go service
   # before a scoring workload can read products. Keep it tightly bounded above
   # its measured footprint and inside the agent node's existing 8GiB cap.

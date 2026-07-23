@@ -51,6 +51,14 @@ def test_checkout_has_a_hard_limit_above_its_measured_oom_footprint() -> None:
     assert document["components"]["checkout"]["resources"]["limits"]["memory"] == "64Mi"
 
 
+def test_demo_load_generator_is_disabled_in_favor_of_capped_scenario_jobs() -> None:
+    document = yaml.safe_load(
+        (REPO_ROOT / "lab" / "testbed" / "otel-demo-values.yaml").read_text(encoding="utf-8")
+    )
+
+    assert document["components"]["load-generator"]["enabled"] is False
+
+
 def test_checkout_journey_preallocates_for_slow_successful_iterations() -> None:
     script = (REPO_ROOT / "lab" / "loadgen" / "scenario.js").read_text(encoding="utf-8")
 
