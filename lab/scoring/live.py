@@ -104,6 +104,7 @@ class _ChaosManifest:
 
 @dataclass(frozen=True)
 class _JourneyRun:
+    stimulus_id: str
     job_name: str
     user_agent: str
     expected_spans: int
@@ -510,9 +511,14 @@ def execute_stimuli(
                     started_at = started.pop(stimulus.stimulus_id)
                     ended_at = _require_utc(now(), "stimulus end")
                 else:
+                    # Record the end at the anchored offset and DEFER the blocking
+                    # reap (_wait_for_job/log/delete) out of the transition loop: a
+                    # stimulus starting at/after this offset must not be pushed late
+                    # by the ~15 s/journey job-completion wait (the 9221 back-half
+                    # drift that moved late stimuli out of their label windows). The
+                    # journey stays in active_journeys until the deferred reap
+                    # succeeds, so a failure anywhere still cleans it up.
                     journey = active_journeys[stimulus.stimulus_id]
-                    _finish_k6_stimulus(command, journey=journey)
-                    del active_journeys[stimulus.stimulus_id]
                     completed_journeys.append(journey)
                     started_at = started.pop(stimulus.stimulus_id)
                     ended_at = _require_utc(now(), "stimulus end")
@@ -530,6 +536,9 @@ def execute_stimuli(
                         ended_at=ended_at,
                     )
                 )
+        for journey in completed_journeys:
+            _finish_k6_stimulus(command, journey=journey)
+            del active_journeys[journey.stimulus_id]
         for journey in completed_journeys:
             _verify_k6_stimulus_spans(journey=journey, span_reader=read_journey_spans)
     except BaseException as exc:
@@ -782,6 +791,7 @@ def _start_k6_stimulus(
             exc.add_note(f"checkout journey cleanup also failed: {cleanup_error}")
         raise
     return _JourneyRun(
+        stimulus_id=stimulus.stimulus_id,
         job_name=job_name,
         user_agent=user_agent,
         expected_spans=expected_spans,

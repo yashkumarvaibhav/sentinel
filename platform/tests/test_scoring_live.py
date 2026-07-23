@@ -380,6 +380,54 @@ def test_live_stimuli_use_fixed_owned_resources_and_restore_flagd() -> None:
     assert '"defaultVariant": "off"' in json.loads(patches[-1])["data"]["demo.flagd.json"]
 
 
+def test_journey_reaping_is_deferred_past_the_transition_loop() -> None:
+    # 6d-1: a journey's blocking reap (_wait_for_job/log/delete) must not run inside
+    # the transition loop, or a stimulus starting at/after the journey's stop offset
+    # fires late -- the compounding back-half drift that broke combo-9221's isolation.
+    # Structural proof: a journey stops at 84 while a flag stops at 104, so the loop's
+    # last wait is 104. The journey reap (get job) must happen AFTER wait:104 (deferred
+    # past the loop), and span verification must still be the final action.
+    schedule = _journey_with_trailing_stop_schedule()
+    events: list[str] = []
+    anchor = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
+
+    def runner(command: list[str], *, input_text: str | None = None, timeout: int = 120) -> str:
+        del input_text, timeout
+        if "get" in command and "configmap" in command:
+            return _flag_config_map()
+        if "get" in command and "job" in command:
+            events.append("reap-getjob")
+            return '{"status":{"succeeded":1}}'
+        if "logs" in command:
+            return "iterations dropped_iterations"
+        return ""
+
+    def waiter(target: datetime) -> None:
+        events.append(f"wait:{int((target - anchor).total_seconds())}")
+
+    def read_spans(user_agent: str, expected: int) -> tuple[datetime, ...]:
+        del user_agent
+        events.append("read-spans")
+        return tuple(
+            anchor + timedelta(seconds=66, milliseconds=index)
+            for index in range(math.ceil(expected * 0.95))
+        )
+
+    execute_stimuli(
+        repo_root=SCENARIO_ROOT.parents[1],
+        schedule=schedule,
+        anchor_ts=anchor,
+        runner=runner,
+        waiter=waiter,
+        clock=lambda: anchor + timedelta(seconds=65),
+        journey_span_reader=read_spans,
+    )
+
+    assert "wait:104" in events
+    assert events.index("wait:104") < events.index("reap-getjob")
+    assert events[-1] == "read-spans"
+
+
 def test_live_stimulus_failure_still_restores_flagd() -> None:
     schedule = _fault_schedule(flag_variant="100x", flag_id="a-flag", chaos_id="z-chaos")
     commands: list[list[str]] = []
@@ -473,6 +521,41 @@ def _fault_schedule(
                 "rate_rps": 2,
             }
         )
+    return compile_profile(
+        ScenarioProfile.model_validate(document),
+        seed=profile.seeds.development[0],
+        purpose=SeedPurpose.DEVELOPMENT,
+    ).schedule
+
+
+def _journey_with_trailing_stop_schedule() -> CompiledSchedule:
+    # A checkout journey [64,84] plus an emailMemoryLeak flag [64,104]; the extended
+    # observe phase keeps both stimulus windows inside the scenario duration so the
+    # loop has a stop offset (104) after the journey's (84).
+    profile = load_profile(SCENARIO_ROOT / "quiet_day.yml")
+    document = profile.model_dump(mode="json")
+    document["load_phases"] = [
+        {"name": "warmup", "duration_seconds": 64, "rate_rps": 4},
+        {"name": "observe", "duration_seconds": 60, "rate_rps": 4},
+    ]
+    document["stimuli"] = [
+        {
+            "stimulus_id": "checkout-traffic",
+            "kind": "k6_journey",
+            "start_offset_seconds": 64,
+            "duration_seconds": 20,
+            "journey": "checkout",
+            "rate_rps": 2,
+        },
+        {
+            "stimulus_id": "email-leak",
+            "kind": "flagd",
+            "start_offset_seconds": 64,
+            "duration_seconds": 40,
+            "flag": "emailMemoryLeak",
+            "variant": "100x",
+        },
+    ]
     return compile_profile(
         ScenarioProfile.model_validate(document),
         seed=profile.seeds.development[0],
