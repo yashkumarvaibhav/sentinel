@@ -35,6 +35,7 @@ detection = [
 ml = [
     "lightgbm>=4.5,<5",
     "numpy>=2.1,<3",
+    "statsmodels>=0.14,<0.15",
 ]
 
 [dependency-groups]
@@ -115,6 +116,10 @@ follow_untyped_imports = true
 
 [[tool.mypy.overrides]]
 module = ["lightgbm", "lightgbm.*"]
+follow_untyped_imports = true
+
+[[tool.mypy.overrides]]
+module = ["statsmodels", "statsmodels.*"]
 follow_untyped_imports = true
 
 # --- tests ------------------------------------------------------------------

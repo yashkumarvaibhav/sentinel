@@ -8,11 +8,14 @@ from the shipped bundle, so the numbers describe generalization rather than fit.
 
 from __future__ import annotations
 
+import math
+from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from ml.config import EnvelopeParamsConfig
+from ml.config import EnvelopeParamsConfig, ForecastParamsConfig
 from ml.envelopes import SignalEnvelope, train_envelopes
+from ml.forecast import ForecastModel, fit_forecasters, seasonal_history_frames
 from ml.frames import TrainingFrame
 
 
@@ -104,3 +107,65 @@ def holdout_metrics(
         for signal_key in sorted(model.signals)
         if any(frame.signal_key == signal_key for frame in holdout)
     )
+
+
+@dataclass(frozen=True)
+class ForecastMetric:
+    """Point-forecast error for one signal's seasonal baseline on held-out frames."""
+
+    signal_key: str
+    eval_rows: int
+    mae: float  # mean absolute error
+    rmse: float  # root mean squared error
+    nrmse: float  # rmse normalized by the mean observed value (0 when that mean is 0)
+    bias: float  # mean signed error (predicted minus observed)
+
+
+def evaluate_forecast(
+    model: ForecastModel,
+    frames: Sequence[TrainingFrame],
+) -> tuple[ForecastMetric, ...]:
+    """Score a forecast model's point predictions against held-out frames, per signal."""
+    grouped: dict[str, list[TrainingFrame]] = defaultdict(list)
+    for frame in frames:
+        if frame.signal_key in model.signals:
+            grouped[frame.signal_key].append(frame)
+    metrics: list[ForecastMetric] = []
+    for signal_key in sorted(grouped):
+        rows = grouped[signal_key]
+        forecaster = model.signals[signal_key]
+        errors = [
+            forecaster.predict(frame.ts, frame.features["event_lift"]) - frame.value
+            for frame in rows
+        ]
+        values = [frame.value for frame in rows]
+        count = len(rows)
+        rmse = math.sqrt(math.fsum(error * error for error in errors) / count)
+        mean_value = math.fsum(values) / count
+        metrics.append(
+            ForecastMetric(
+                signal_key=signal_key,
+                eval_rows=count,
+                mae=math.fsum(abs(error) for error in errors) / count,
+                rmse=rmse,
+                nrmse=rmse / mean_value if mean_value > 0.0 else 0.0,
+                bias=math.fsum(errors) / count,
+            )
+        )
+    return tuple(metrics)
+
+
+def forecast_holdout_metrics(
+    frames: Sequence[TrainingFrame],
+    *,
+    params: ForecastParamsConfig,
+    holdout_fraction: float = 0.2,
+) -> tuple[ForecastMetric, ...]:
+    """Fit forecasters on the earlier regular history and score the later holdout, per signal.
+
+    Only the synthetic history carries a series long enough for seasonal forecasting;
+    the short development-capture baselines are excluded before the temporal split.
+    """
+    train, holdout = time_split(seasonal_history_frames(frames), holdout_fraction=holdout_fraction)
+    model = fit_forecasters(train, params=params)
+    return evaluate_forecast(model, holdout)

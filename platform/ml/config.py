@@ -183,6 +183,42 @@ class EnvelopeParamsConfig(MlConfigModel):
         return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
 
 
+class ForecastParamsConfig(MlConfigModel):
+    """Seasonal STL/MSTL forecast-baseline hyperparameters."""
+
+    version: Literal[1]
+    seasonal_periods_days: tuple[int, ...] = Field(min_length=1)
+    min_cycles_per_period: int = Field(ge=2, le=100)
+    robust: bool
+    seasonal_smoother: int = Field(ge=7, le=1001)
+    trend_level_days: int = Field(ge=1, le=366)
+    min_rows_per_signal: int = Field(ge=2, le=10_000_000)
+    floor: NonNegativeFloat
+    holdout_fraction: Quantile
+
+    @model_validator(mode="after")
+    def validate_forecast(self) -> Self:
+        days = self.seasonal_periods_days
+        if len(days) != len(set(days)):
+            raise ValueError("seasonal_periods_days must be unique")
+        if list(days) != sorted(days):
+            raise ValueError("seasonal_periods_days must be listed in ascending order")
+        if self.seasonal_smoother % 2 == 0:
+            raise ValueError("seasonal_smoother must be an odd window length")
+        return self
+
+    @property
+    def fingerprint(self) -> str:
+        """Content hash recorded inside any forecast bundle trained with these params."""
+        rendered = json.dumps(
+            self.model_dump(mode="json"),
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+
+
 def _load_yaml_mapping(path: Path) -> dict[str, object]:
     if not path.is_file():
         raise MlConfigLoadError(f"{path.name}: required configuration file is missing")
@@ -211,18 +247,29 @@ def load_envelope_params(path: Path) -> EnvelopeParamsConfig:
         raise MlConfigLoadError(f"{path.name}: {error}") from error
 
 
+def load_forecast_params(path: Path) -> ForecastParamsConfig:
+    """Load and strictly validate the seasonal forecast hyperparameter configuration."""
+    try:
+        return ForecastParamsConfig.model_validate(_load_yaml_mapping(path))
+    except ValidationError as error:
+        raise MlConfigLoadError(f"{path.name}: {error}") from error
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Validate ml configuration file(s) and print their reproducibility fingerprints."""
     parser = argparse.ArgumentParser(prog="python -m ml.config")
     parser.add_argument("--path", type=Path, help="synthetic-history training configuration")
     parser.add_argument("--envelopes", type=Path, help="envelope hyperparameter configuration")
+    parser.add_argument("--forecast", type=Path, help="seasonal forecast hyperparameters")
     args = parser.parse_args(argv)
-    if args.path is None and args.envelopes is None:
-        parser.error("at least one of --path or --envelopes is required")
+    if args.path is None and args.envelopes is None and args.forecast is None:
+        parser.error("at least one of --path, --envelopes or --forecast is required")
     if args.path is not None:
         print(f"training configuration valid: {load_training_config(args.path).fingerprint}")
     if args.envelopes is not None:
         print(f"envelope configuration valid: {load_envelope_params(args.envelopes).fingerprint}")
+    if args.forecast is not None:
+        print(f"forecast configuration valid: {load_forecast_params(args.forecast).fingerprint}")
     return 0
 
 

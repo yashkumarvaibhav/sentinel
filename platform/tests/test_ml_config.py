@@ -9,9 +9,16 @@ from typing import Any, cast
 import pytest
 import yaml
 
-from ml.config import MlConfigLoadError, MlTrainingConfig, load_training_config
+from ml.config import (
+    ForecastParamsConfig,
+    MlConfigLoadError,
+    MlTrainingConfig,
+    load_forecast_params,
+    load_training_config,
+)
 
 CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "ml-training.yml"
+FORECAST_PATH = Path(__file__).resolve().parents[2] / "config" / "ml-forecast.yml"
 
 
 def _document() -> dict[str, Any]:
@@ -86,3 +93,42 @@ def test_fingerprint_changes_when_a_number_changes(tmp_path: Path) -> None:
     document["signals"][0]["base_level"] = 9.0
     mutated = _load_document(document, tmp_path)
     assert mutated.fingerprint != baseline.fingerprint
+
+
+def _forecast_document() -> dict[str, Any]:
+    return cast("dict[str, Any]", yaml.safe_load(FORECAST_PATH.read_text(encoding="utf-8")))
+
+
+def _load_forecast(document: dict[str, Any], tmp_path: Path) -> ForecastParamsConfig:
+    path = tmp_path / "ml-forecast.yml"
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    return load_forecast_params(path)
+
+
+def test_forecast_config_loads_and_fingerprint_is_deterministic() -> None:
+    first = load_forecast_params(FORECAST_PATH)
+    second = load_forecast_params(FORECAST_PATH)
+    assert first.version == 1
+    assert first.seasonal_periods_days == (1, 7)
+    assert first.fingerprint == second.fingerprint
+
+
+def test_forecast_even_seasonal_smoother_is_rejected(tmp_path: Path) -> None:
+    document = _forecast_document()
+    document["seasonal_smoother"] = 8
+    with pytest.raises(MlConfigLoadError):
+        _load_forecast(document, tmp_path)
+
+
+def test_forecast_unordered_periods_are_rejected(tmp_path: Path) -> None:
+    document = _forecast_document()
+    document["seasonal_periods_days"] = [7, 1]
+    with pytest.raises(MlConfigLoadError):
+        _load_forecast(document, tmp_path)
+
+
+def test_forecast_holdout_fraction_must_be_a_proper_fraction(tmp_path: Path) -> None:
+    document = _forecast_document()
+    document["holdout_fraction"] = 1.0
+    with pytest.raises(MlConfigLoadError):
+        _load_forecast(document, tmp_path)

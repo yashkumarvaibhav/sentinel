@@ -1,0 +1,38 @@
+# Seasonal STL forecast-baseline hyperparameters (Phase 3.4). Config-as-data:
+# the forecaster reads every knob from here and this file's content hash is
+# recorded inside each trained forecast bundle, so a bundle is always traceable
+# to the exact parameters that produced it. Kept in a SEPARATE file from
+# ml-envelopes.yml / ml-training.yml so the dataset and envelope fingerprints
+# stay stable when only the forecast knobs change.
+version: 1
+
+# Candidate seasonal cycle lengths in DAYS. The fitter converts each to a tick
+# count using the series' own cadence and keeps only the cycles with enough
+# history (strictly more than min_cycles_per_period full cycles); a signal too
+# short for any cycle falls back to a flat seasonal-mean baseline. [1, 7] models
+# the diurnal cycle and the weekday/weekend cycle.
+seasonal_periods_days: [1, 7]
+min_cycles_per_period: 2
+
+# STL LOESS knobs. robust down-weights outliers via ~15 extra LOESS iterations
+# (about 6x the cost); the synthetic history the forecaster fits is clean — events
+# are removed by the regressor, no anomalies are injected — and serving only reads
+# fixed profiles, so robustness buys little here. Enable it when fitting on real
+# anomaly-bearing history. seasonal_smoother is the odd window STL uses to smooth
+# each seasonal sub-series.
+robust: false
+seasonal_smoother: 7
+
+# The forecast's forward level is the median of the STL trend over the last N
+# days of history — robust to the LOESS endpoint wobble a single last-point read
+# would inherit.
+trend_level_days: 1
+
+# Refuse to fit a signal with less than two diurnal cycles of history.
+min_rows_per_signal: 288
+
+# Generated expected values are clamped at or above this floor.
+floor: 0.0
+
+# Default temporal-holdout fraction for `make forecast` quality reporting.
+holdout_fraction: 0.2
