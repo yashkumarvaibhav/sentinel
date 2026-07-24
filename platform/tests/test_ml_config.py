@@ -10,15 +10,18 @@ import pytest
 import yaml
 
 from ml.config import (
+    AnomalyParamsConfig,
     ForecastParamsConfig,
     MlConfigLoadError,
     MlTrainingConfig,
+    load_anomaly_params,
     load_forecast_params,
     load_training_config,
 )
 
 CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "ml-training.yml"
 FORECAST_PATH = Path(__file__).resolve().parents[2] / "config" / "ml-forecast.yml"
+ANOMALY_PATH = Path(__file__).resolve().parents[2] / "config" / "ml-anomaly.yml"
 
 
 def _document() -> dict[str, Any]:
@@ -132,3 +135,35 @@ def test_forecast_holdout_fraction_must_be_a_proper_fraction(tmp_path: Path) -> 
     document["holdout_fraction"] = 1.0
     with pytest.raises(MlConfigLoadError):
         _load_forecast(document, tmp_path)
+
+
+def _anomaly_document() -> dict[str, Any]:
+    return cast("dict[str, Any]", yaml.safe_load(ANOMALY_PATH.read_text(encoding="utf-8")))
+
+
+def _load_anomaly(document: dict[str, Any], tmp_path: Path) -> AnomalyParamsConfig:
+    path = tmp_path / "ml-anomaly.yml"
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    return load_anomaly_params(path)
+
+
+def test_anomaly_config_loads_and_fingerprint_is_deterministic() -> None:
+    first = load_anomaly_params(ANOMALY_PATH)
+    second = load_anomaly_params(ANOMALY_PATH)
+    assert first.version == 1
+    assert "source_entropy" in first.features
+    assert first.fingerprint == second.fingerprint
+
+
+def test_anomaly_regimes_must_cover_features(tmp_path: Path) -> None:
+    document = _anomaly_document()
+    document["simulation"]["regimes"].pop()  # drop a regime so coverage breaks
+    with pytest.raises(MlConfigLoadError):
+        _load_anomaly(document, tmp_path)
+
+
+def test_anomaly_duplicate_feature_is_rejected(tmp_path: Path) -> None:
+    document = _anomaly_document()
+    document["features"] = [*document["features"], "source_entropy"]
+    with pytest.raises(MlConfigLoadError):
+        _load_anomaly(document, tmp_path)

@@ -40,7 +40,7 @@ verify-py: ## Lint, typecheck and test the Python planes
 	$(PY) mypy $(PY_PATHS)
 	$(PY) python -m contracts export --check
 	$(PY) python -m common.config --path ../config
-	$(PY) python -m ml.config --path ../config/ml-training.yml --envelopes ../config/ml-envelopes.yml --forecast ../config/ml-forecast.yml
+	$(PY) python -m ml.config --path ../config/ml-training.yml --envelopes ../config/ml-envelopes.yml --forecast ../config/ml-forecast.yml --anomaly ../config/ml-anomaly.yml
 	$(PY) pytest
 
 .PHONY: verify-web
@@ -69,7 +69,7 @@ contracts: ## Export JSON Schema and regenerate TypeScript contracts
 .PHONY: config-check
 config-check: ## Validate all versioned operator configuration
 	$(PY) python -m common.config --path ../config
-	$(PY) python -m ml.config --path ../config/ml-training.yml --envelopes ../config/ml-envelopes.yml --forecast ../config/ml-forecast.yml
+	$(PY) python -m ml.config --path ../config/ml-training.yml --envelopes ../config/ml-envelopes.yml --forecast ../config/ml-forecast.yml --anomaly ../config/ml-anomaly.yml
 
 .PHONY: migrate
 migrate: ## Apply idempotent ClickHouse and Postgres migrations
@@ -171,6 +171,11 @@ forecast: ## Fit the seasonal STL forecast baselines to a local bundle
 	$(PY) python -m ml.forecast_train \
 		--repo-root .. --captures-root ../var/captures \
 		--out ../var/models/forecast
+
+.PHONY: anomaly
+anomaly: ## Fit the multivariate isolation-forest anomaly model to a local bundle
+	$(PY) python -m ml.anomaly_train \
+		--repo-root .. --out ../var/models/anomaly
 
 .PHONY: score
 score: data-pull ## Score held-out capture replays (hosted gate)

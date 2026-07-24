@@ -1,0 +1,44 @@
+# Multivariate anomaly (Isolation Forest) hyperparameters + the SIMULATED
+# behavioral-regime generator (Phase 3.5a). Config-as-data: the scorer reads
+# every knob here and this file's content hash is recorded inside each trained
+# bundle. Kept separate from the other ml-*.yml files so their fingerprints stay
+# stable. The Isolation Forest is a CORROBORATING anomaly vote — never
+# load-bearing (propose-then-verify): a deterministic verifier confirms before
+# any action.
+version: 1
+
+# Deterministic Isolation Forest: fixed random_state, single-threaded at fit.
+n_estimators: 200
+max_samples: 256
+contamination: 0.02
+random_state: 20260724
+
+# The behavioral-ratio dimensions the model scores — the space an event PRESERVES
+# but an attack DEFORMS (detection.ratios.BehavioralRatio). A joint outlier here is
+# behavior an event's volume cannot explain.
+features: [source_entropy, auth_failure, syn_ack, rpc_amplification, path_entropy]
+
+# SIMULATED behavioral samples (labeled SIMULATED end to end — the OTel Demo has no
+# auth flow, so this behavioral space is synthesized honestly, not measured). Each
+# regime is [mean, sd]; the attack column is the deformation each attack class
+# imprints on that ratio.
+simulation:
+  seeds: [50100, 50101, 50102]
+  normal_samples: 600
+  attack_samples: 60
+  regimes:
+    - feature: source_entropy      # botnet concentration collapses source-IP entropy
+      normal: [0.90, 0.05]
+      attack: [0.45, 0.10]
+    - feature: auth_failure        # credential stuffing lifts the auth-failure ratio
+      normal: [0.02, 0.01]
+      attack: [0.45, 0.10]
+    - feature: syn_ack             # a SYN flood unbalances the SYN:ACK ratio
+      normal: [1.00, 0.05]
+      attack: [3.00, 0.60]
+    - feature: rpc_amplification   # a retry storm amplifies downstream RPC calls
+      normal: [1.10, 0.10]
+      attack: [4.00, 1.00]
+    - feature: path_entropy        # a targeted flood collapses request-path diversity
+      normal: [0.85, 0.05]
+      attack: [0.40, 0.10]

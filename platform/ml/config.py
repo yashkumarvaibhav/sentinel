@@ -219,6 +219,70 @@ class ForecastParamsConfig(MlConfigModel):
         return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
 
 
+class BehavioralRegime(MlConfigModel):
+    """One behavioral ratio's normal vs attack (mean, sd) distributions."""
+
+    feature: Identifier
+    normal: tuple[float, float]
+    attack: tuple[float, float]
+
+    @model_validator(mode="after")
+    def validate_regime(self) -> Self:
+        if self.normal[1] < 0.0 or self.attack[1] < 0.0:
+            raise ValueError("regime standard deviations must be non-negative")
+        return self
+
+
+class AnomalySimulation(MlConfigModel):
+    """The SIMULATED behavioral-sample generator settings."""
+
+    seeds: tuple[int, ...] = Field(min_length=1)
+    normal_samples: int = Field(ge=1, le=1_000_000)
+    attack_samples: int = Field(ge=1, le=1_000_000)
+    regimes: tuple[BehavioralRegime, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_simulation(self) -> Self:
+        if len(self.seeds) != len(set(self.seeds)):
+            raise ValueError("simulation seeds must be unique")
+        features = [regime.feature for regime in self.regimes]
+        if len(features) != len(set(features)):
+            raise ValueError("each regime feature may appear only once")
+        return self
+
+
+class AnomalyParamsConfig(MlConfigModel):
+    """Isolation-forest hyperparameters plus the SIMULATED behavioral generator."""
+
+    version: Literal[1]
+    n_estimators: int = Field(ge=1, le=10_000)
+    max_samples: int = Field(ge=2, le=1_000_000)
+    contamination: Quantile
+    random_state: int = Field(ge=0)
+    features: tuple[Identifier, ...] = Field(min_length=1)
+    simulation: AnomalySimulation
+
+    @model_validator(mode="after")
+    def validate_anomaly(self) -> Self:
+        if len(self.features) != len(set(self.features)):
+            raise ValueError("features must be unique")
+        regime_features = {regime.feature for regime in self.simulation.regimes}
+        if regime_features != set(self.features):
+            raise ValueError("simulation regimes must cover exactly the configured features")
+        return self
+
+    @property
+    def fingerprint(self) -> str:
+        """Content hash recorded inside any anomaly bundle trained with these params."""
+        rendered = json.dumps(
+            self.model_dump(mode="json"),
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+
+
 def _load_yaml_mapping(path: Path) -> dict[str, object]:
     if not path.is_file():
         raise MlConfigLoadError(f"{path.name}: required configuration file is missing")
@@ -255,21 +319,32 @@ def load_forecast_params(path: Path) -> ForecastParamsConfig:
         raise MlConfigLoadError(f"{path.name}: {error}") from error
 
 
+def load_anomaly_params(path: Path) -> AnomalyParamsConfig:
+    """Load and strictly validate the multivariate-anomaly hyperparameter configuration."""
+    try:
+        return AnomalyParamsConfig.model_validate(_load_yaml_mapping(path))
+    except ValidationError as error:
+        raise MlConfigLoadError(f"{path.name}: {error}") from error
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Validate ml configuration file(s) and print their reproducibility fingerprints."""
     parser = argparse.ArgumentParser(prog="python -m ml.config")
     parser.add_argument("--path", type=Path, help="synthetic-history training configuration")
     parser.add_argument("--envelopes", type=Path, help="envelope hyperparameter configuration")
     parser.add_argument("--forecast", type=Path, help="seasonal forecast hyperparameters")
+    parser.add_argument("--anomaly", type=Path, help="multivariate anomaly hyperparameters")
     args = parser.parse_args(argv)
-    if args.path is None and args.envelopes is None and args.forecast is None:
-        parser.error("at least one of --path, --envelopes or --forecast is required")
+    if all(arg is None for arg in (args.path, args.envelopes, args.forecast, args.anomaly)):
+        parser.error("at least one of --path, --envelopes, --forecast or --anomaly is required")
     if args.path is not None:
         print(f"training configuration valid: {load_training_config(args.path).fingerprint}")
     if args.envelopes is not None:
         print(f"envelope configuration valid: {load_envelope_params(args.envelopes).fingerprint}")
     if args.forecast is not None:
         print(f"forecast configuration valid: {load_forecast_params(args.forecast).fingerprint}")
+    if args.anomaly is not None:
+        print(f"anomaly configuration valid: {load_anomaly_params(args.anomaly).fingerprint}")
     return 0
 
 
