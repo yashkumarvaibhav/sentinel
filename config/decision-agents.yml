@@ -54,3 +54,49 @@ axes:
         weight: 0.70
       - kind: LOG_BURST
         weight: 0.65
+
+  # Deploy-correlated pressure from the operator change feed. DEPLOY_MARKER is
+  # the coverage marker for that feed rather than a detector output, and its
+  # weight is the axis ceiling: correlation in time is suggestive, never proof,
+  # so a change alone cannot drive this axis to certainty.
+  - axis: CHANGE_CONFIG
+    minimum_contribution: 0.05
+    trend_deadband: 0.05
+    claims:
+      - kind: DEPLOY_MARKER
+        weight: 0.90
+    change_pressure:
+      # Fifteen minutes: long enough to cover a rollout finishing and its
+      # symptoms appearing, short enough that yesterday's deploy is not
+      # evidence about today.
+      correlation_window_seconds: 900.0
+      # A change on a quiet service still counts, because a deploy can break a
+      # neighbour through a dependency it does not own.
+      unrelated_service_factor: 0.25
+      kind_weights:
+        DEPLOY: 0.90
+        ROLLOUT: 0.85
+        FLAG: 0.80
+        CONFIG: 0.70
+
+  # User-visible harm only: conversion collapsing, volume dropping, a stream
+  # going silent. Each is scaled by the committed topology criticality of the
+  # service it happened on, so the same symptom on the edge outweighs one on a
+  # background worker.
+  - axis: BUSINESS_IMPACT
+    minimum_contribution: 0.05
+    trend_deadband: 0.05
+    claims:
+      - kind: RATIO_DEFORM
+        weight: 0.85
+        signals:
+          - conversion_ratio
+      - kind: DROP
+        weight: 0.80
+      - kind: SILENCE
+        weight: 0.85
+    criticality_weights:
+      critical: 1.00
+      high: 0.70
+      medium: 0.40
+      low: 0.20

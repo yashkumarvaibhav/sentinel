@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -11,14 +12,19 @@ import yaml
 
 from contracts import EvidenceAxis, SymptomKind
 from decision.config import (
+    ChangePressureConfig,
     DecisionConfigLoadError,
+    DeploymentLedgerConfig,
     EvidenceAgentsConfig,
     EvidenceAxisConfig,
     EvidenceClaimConfig,
+    load_deployment_ledger,
     load_evidence_agents,
 )
 
-AGENTS_PATH = Path(__file__).resolve().parents[2] / "config" / "decision-agents.yml"
+CONFIG_ROOT = Path(__file__).resolve().parents[2] / "config"
+AGENTS_PATH = CONFIG_ROOT / "decision-agents.yml"
+LEDGER_PATH = CONFIG_ROOT / "deployments.yml"
 
 
 def _document() -> dict[str, Any]:
@@ -34,16 +40,13 @@ def test_committed_configuration_loads_with_a_stable_fingerprint() -> None:
     assert len(first.fingerprint) == 64
 
 
-def test_committed_configuration_covers_both_phase_four_axes() -> None:
+def test_committed_configuration_covers_all_four_axes() -> None:
     config = load_evidence_agents(AGENTS_PATH)
 
-    assert {axis.axis for axis in config.axes} == {
-        EvidenceAxis.SECURITY,
-        EvidenceAxis.RELIABILITY,
-    }
+    assert {axis.axis for axis in config.axes} == set(EvidenceAxis)
 
 
-def test_the_two_axes_claim_no_symptom_kind_in_common() -> None:
+def test_security_and_reliability_claim_no_symptom_kind_in_common() -> None:
     config = load_evidence_agents(AGENTS_PATH)
     security = config.axis(EvidenceAxis.SECURITY).claimed_kinds
     reliability = config.axis(EvidenceAxis.RELIABILITY).claimed_kinds
@@ -69,7 +72,11 @@ def test_reliability_claims_whole_kinds_regardless_of_signal() -> None:
 
 
 def test_requesting_an_unconfigured_axis_fails_closed() -> None:
-    config = load_evidence_agents(AGENTS_PATH)
+    document = _document()
+    document["axes"] = [
+        axis for axis in document["axes"] if axis["axis"] != EvidenceAxis.BUSINESS_IMPACT.value
+    ]
+    config = EvidenceAgentsConfig.model_validate(document)
 
     with pytest.raises(DecisionConfigLoadError, match="BUSINESS_IMPACT"):
         config.axis(EvidenceAxis.BUSINESS_IMPACT)
@@ -161,6 +168,92 @@ def test_an_axis_without_claims_is_rejected() -> None:
             minimum_contribution=0.05,
             trend_deadband=0.05,
             claims=(),
+        )
+
+
+def test_change_config_without_change_pressure_is_rejected() -> None:
+    with pytest.raises(ValueError, match="requires change_pressure"):
+        EvidenceAxisConfig(
+            axis=EvidenceAxis.CHANGE_CONFIG,
+            minimum_contribution=0.05,
+            trend_deadband=0.05,
+            claims=(EvidenceClaimConfig(kind=SymptomKind.DEPLOY_MARKER, weight=0.9),),
+        )
+
+
+def test_an_axis_that_scores_detectors_may_not_configure_change_pressure() -> None:
+    with pytest.raises(ValueError, match="must not configure change_pressure"):
+        EvidenceAxisConfig(
+            axis=EvidenceAxis.SECURITY,
+            minimum_contribution=0.05,
+            trend_deadband=0.05,
+            claims=(EvidenceClaimConfig(kind=SymptomKind.RESIDUAL_EXCEED, weight=0.6),),
+            change_pressure=ChangePressureConfig(
+                correlation_window_seconds=900.0,
+                unrelated_service_factor=0.25,
+                kind_weights={"DEPLOY": 0.9},
+            ),
+        )
+
+
+def test_business_impact_without_criticality_weights_is_rejected() -> None:
+    with pytest.raises(ValueError, match="requires criticality_weights"):
+        EvidenceAxisConfig(
+            axis=EvidenceAxis.BUSINESS_IMPACT,
+            minimum_contribution=0.05,
+            trend_deadband=0.05,
+            claims=(EvidenceClaimConfig(kind=SymptomKind.DROP, weight=0.8),),
+        )
+
+
+def test_an_unknown_change_kind_weight_is_rejected() -> None:
+    with pytest.raises(ValueError, match="unknown change kinds"):
+        ChangePressureConfig(
+            correlation_window_seconds=900.0,
+            unrelated_service_factor=0.25,
+            kind_weights={"REDEPLOY": 0.9},
+        )
+
+
+@pytest.mark.parametrize("weight", [0.0, 1.5])
+def test_a_change_weight_outside_the_unit_interval_is_rejected(weight: float) -> None:
+    with pytest.raises(ValueError, match=r"must lie in \(0, 1]"):
+        ChangePressureConfig(
+            correlation_window_seconds=900.0,
+            unrelated_service_factor=0.25,
+            kind_weights={"DEPLOY": weight},
+        )
+
+
+def test_the_committed_ledger_loads_with_a_stable_fingerprint() -> None:
+    first = load_deployment_ledger(LEDGER_PATH)
+    second = load_deployment_ledger(LEDGER_PATH)
+
+    assert first == second
+    assert first.fingerprint == second.fingerprint
+    assert first.fingerprint != load_evidence_agents(AGENTS_PATH).fingerprint
+
+
+def test_a_ledger_naming_an_unknown_service_fails_closed() -> None:
+    ledger = load_deployment_ledger(LEDGER_PATH)
+
+    with pytest.raises(DecisionConfigLoadError, match="unknown topology services"):
+        ledger.validate_services(frozenset({"frontend"}))
+
+
+def test_a_ledger_with_duplicate_change_ids_is_rejected() -> None:
+    record = {
+        "change_id": "deploy-1",
+        "kind": "DEPLOY",
+        "service": "checkout",
+        "ts": datetime(2026, 3, 1, 12, 0, tzinfo=UTC),
+        "summary": "shipped checkout v2",
+        "honesty": "SIMULATED",
+    }
+
+    with pytest.raises(ValueError, match="change ids must be unique"):
+        DeploymentLedgerConfig.model_validate(
+            {"version": 1, "changes": [record, copy.deepcopy(record)]}
         )
 
 

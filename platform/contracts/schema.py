@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from pydantic.json_schema import JsonSchemaValue, models_json_schema
 
 from contracts.context import ContextWindow
-from contracts.decision import AgentAssessment
+from contracts.decision import AgentAssessment, ChangeEvent
 from contracts.detection import DecompFrame, Symptom, SymptomEpisode
 from contracts.telemetry import Observation
 
@@ -26,6 +26,7 @@ PUBLIC_MODELS: tuple[type[BaseModel], ...] = (
     DecompFrame,
     Symptom,
     SymptomEpisode,
+    ChangeEvent,
     AgentAssessment,
 )
 

@@ -27,6 +27,7 @@ from contracts import (
     AgentAssessment,
     AgentStatus,
     AgentTrend,
+    ChangeEvent,
     EpisodeStatus,
     EvidenceAxis,
     EvidenceDirection,
@@ -40,6 +41,10 @@ from decision.config import EvidenceAxisConfig
 # kind, the expected contribution of that kind to the axis is exactly nothing.
 CALM_BASELINE = 0.0
 
+# The kind an agent claims when its evidence is the operator change feed rather
+# than a detector: coverage means the feed was consulted for this tick.
+CHANGE_COVERAGE_KIND = SymptomKind.DEPLOY_MARKER
+
 
 @dataclass(frozen=True, slots=True)
 class AgentEvidenceWindow:
@@ -48,12 +53,14 @@ class AgentEvidenceWindow:
     ``covered_kinds`` is the caller's statement of which detector kinds actually
     produced a result for this tick. It is evidence in its own right and is
     never inferred from the episodes present, because "no episode" and "the
-    detector never ran" mean opposite things.
+    detector never ran" mean opposite things. Consulting the operator change
+    feed is stated the same way, as coverage of ``DEPLOY_MARKER``.
     """
 
     ts: datetime
     episodes: tuple[SymptomEpisode, ...]
     covered_kinds: frozenset[SymptomKind]
+    changes: tuple[ChangeEvent, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.ts, datetime):
@@ -62,6 +69,8 @@ class AgentEvidenceWindow:
             raise ValueError("ts must be timezone-aware UTC")
         if not isinstance(self.episodes, tuple):
             raise TypeError("episodes must be a tuple")
+        if not isinstance(self.changes, tuple):
+            raise TypeError("changes must be a tuple")
         if not isinstance(self.covered_kinds, frozenset):
             raise TypeError("covered_kinds must be a frozenset")
         seen: set[str] = set()
@@ -80,17 +89,40 @@ class AgentEvidenceWindow:
                 )
             if episode.opened_ts > self.ts:
                 raise ValueError("an episode cannot open after the tick that observes it")
+        changed: set[str] = set()
+        for change in self.changes:
+            if not isinstance(change, ChangeEvent):
+                raise TypeError("changes must contain ChangeEvent values")
+            if change.change_id in changed:
+                raise ValueError(f"duplicate change event: {change.change_id}")
+            changed.add(change.change_id)
+            if CHANGE_COVERAGE_KIND not in self.covered_kinds:
+                raise ValueError(
+                    "a change event contradicts the stated coverage: the change feed was "
+                    f"not reported as covered for {change.change_id}"
+                )
+            if change.ts > self.ts:
+                raise ValueError("a change cannot happen after the tick that observes it")
+
+    @property
+    def symptomatic_services(self) -> frozenset[str]:
+        """Services carrying an active episode, whatever kind it is."""
+        return frozenset(
+            episode.service for episode in self.episodes if episode.status is EpisodeStatus.ACTIVE
+        )
 
 
 @dataclass(frozen=True, slots=True)
-class _Contribution:
-    """One episode's justified share of an axis score."""
+class Contribution:
+    """One justified share of an axis score, with the item that explains it."""
 
-    feature: str
     service: str
-    contribution: float
-    episode: SymptomEpisode
-    weight: float
+    item: EvidenceItem
+
+    @property
+    def contribution(self) -> float:
+        """How much of the axis score this evidence carries."""
+        return self.item.contribution
 
 
 class EvidenceAgent:
@@ -138,7 +170,7 @@ class EvidenceAgent:
         # A redelivered tick is compared with the same predecessor the first
         # delivery saw, so an exact repeat produces an identical assessment.
         trend = self._trend(score, self._previous_score if redelivery else self._last_score)
-        evidence = tuple(self._item(contribution) for contribution in contributions)
+        evidence = tuple(contribution.item for contribution in contributions)
         services = tuple(sorted({contribution.service for contribution in contributions}))
         note = (
             f"{self.axis.value.lower()} scored from {len(evidence)} active "
@@ -178,44 +210,59 @@ class EvidenceAgent:
             note=note,
         )
 
-    def _contributions(self, window: AgentEvidenceWindow) -> tuple[_Contribution, ...]:
-        floor = self._configuration.minimum_contribution
-        found: list[_Contribution] = []
+    def _contributions(self, window: AgentEvidenceWindow) -> tuple[Contribution, ...]:
+        """Turn this axis's claimed episodes into justified contributions."""
+        found: list[Contribution] = []
         for episode in window.episodes:
             if episode.status is not EpisodeStatus.ACTIVE:
                 continue
             weight = self._configuration.weight_for(episode.kind, episode.signal)
             if weight is None:
                 continue
-            contribution = weight * float(episode.peak_score)
-            if contribution < floor:
+            multiplier = self._episode_multiplier(episode)
+            contribution = weight * float(episode.peak_score) * multiplier
+            if contribution < self._configuration.minimum_contribution:
                 continue
             found.append(
-                _Contribution(
-                    feature=f"{episode.service}.{episode.signal}",
+                Contribution(
                     service=episode.service,
-                    contribution=min(contribution, 1.0),
-                    episode=episode,
-                    weight=weight,
+                    item=self._episode_item(
+                        episode,
+                        weight=weight,
+                        multiplier=multiplier,
+                        contribution=min(contribution, 1.0),
+                    ),
                 )
             )
-        # Fold in a stable order so the same evidence always yields the same float.
-        return tuple(sorted(found, key=lambda item: (item.feature, item.episode.episode_id)))
+        return order_contributions(found)
 
-    def _item(self, contribution: _Contribution) -> EvidenceItem:
-        episode = contribution.episode
+    def _episode_multiplier(self, episode: SymptomEpisode) -> float:
+        """Axis-specific scaling of one episode; the base agent scales nothing."""
+        del episode
+        return 1.0
+
+    def _episode_item(
+        self,
+        episode: SymptomEpisode,
+        *,
+        weight: float,
+        multiplier: float,
+        contribution: float,
+    ) -> EvidenceItem:
+        feature = f"{episode.service}.{episode.signal}"
+        scaling = "" if multiplier == 1.0 else f", impact scaling {multiplier:.2f}"
         note = (
-            f"{episode.kind.value} episode on {contribution.feature} peaked at "
+            f"{episode.kind.value} episode on {feature} peaked at "
             f"{episode.peak_score:.3f} over {episode.breach_tick_count} breaching "
             f"{'tick' if episode.breach_tick_count == 1 else 'ticks'}; weight "
-            f"{contribution.weight:.2f}"
+            f"{weight:.2f}{scaling}"
         )
         return EvidenceItem(
-            feature=contribution.feature,
+            feature=feature,
             value=float(episode.peak_score),
             baseline=CALM_BASELINE,
             direction=EvidenceDirection.ABOVE_BASELINE,
-            contribution=contribution.contribution,
+            contribution=contribution,
             note=note,
             evidence_refs=(episode.episode_id,),
         )
@@ -251,6 +298,13 @@ class EvidenceAgent:
         }
         rendered = json.dumps(identity, allow_nan=False, separators=(",", ":"), sort_keys=True)
         return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+
+
+def order_contributions(contributions: list[Contribution]) -> tuple[Contribution, ...]:
+    """Fold in a stable order so the same evidence always yields the same float."""
+    return tuple(
+        sorted(contributions, key=lambda found: (found.item.feature, found.item.evidence_refs))
+    )
 
 
 def _noisy_or(contributions: Iterable[float]) -> float:

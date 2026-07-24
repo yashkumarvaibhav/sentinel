@@ -6,7 +6,8 @@
 /**
  * Public contracts exchanged between Sentinel planes.
  */
-export type SentinelContract = Observation | ContextWindow | DecompFrame | Symptom | SymptomEpisode | AgentAssessment;
+export type SentinelContract =
+  Observation | ContextWindow | DecompFrame | Symptom | SymptomEpisode | ChangeEvent | AgentAssessment;
 export type TelemetryScalar = string | boolean | number;
 export type Identifier = string;
 export type FlowRefs = Identifier[];
@@ -39,6 +40,12 @@ export type Revision = number;
  * Lifecycle state of an anti-flapping symptom episode.
  */
 export type EpisodeStatus = "ACTIVE" | "CLOSED";
+export type EvidenceRefs2 = Identifier[];
+export type Honesty1 = "REAL" | "SIMULATED";
+/**
+ * How the system was changed by its operators, not by its callers.
+ */
+export type ChangeKind = "DEPLOY" | "ROLLOUT" | "FLAG" | "CONFIG";
 /**
  * The independent axes a surge is judged on, one agent per axis.
  *
@@ -52,7 +59,7 @@ export type CoveredKinds = SymptomKind[];
  * Which way a measured value sits relative to its stated baseline.
  */
 export type EvidenceDirection = "ABOVE_BASELINE" | "BELOW_BASELINE" | "AT_BASELINE";
-export type EvidenceRefs2 = Identifier[];
+export type EvidenceRefs3 = Identifier[];
 export type Evidence = EvidenceItem[];
 export type Services = Identifier[];
 /**
@@ -159,6 +166,24 @@ export interface SymptomEpisode {
   status: EpisodeStatus;
 }
 /**
+ * One recorded operator change, the raw material of deploy-correlated pressure.
+ *
+ * A change is a fact about the system's own history, never a conclusion about
+ * an incident. It carries its own honesty label because the MVP feed mixes an
+ * operator-maintained ledger with changes observed from the cluster.
+ */
+export interface ChangeEvent {
+  change_id: Identifier;
+  evidence_refs?: EvidenceRefs2;
+  honesty: Honesty1;
+  kind: ChangeKind;
+  revision?: Identifier | null;
+  service: Identifier;
+  source: Identifier;
+  summary: HumanText;
+  ts: UtcDatetime;
+}
+/**
  * One agent's evidence-backed verdict about one axis at one event time.
  *
  * A calm axis (``SCORED`` at ``0.0`` with no evidence) is a genuine finding:
@@ -189,7 +214,7 @@ export interface EvidenceItem {
   baseline: FiniteFloat;
   contribution: Probability;
   direction: EvidenceDirection;
-  evidence_refs?: EvidenceRefs2;
+  evidence_refs?: EvidenceRefs3;
   feature: SignalName;
   note: HumanText;
   value: FiniteFloat;

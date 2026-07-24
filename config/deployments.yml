@@ -1,0 +1,34 @@
+# The MVP change-evidence source.
+#
+# `changes` is the operator-maintained ledger: what the team says it shipped,
+# and when. It is asserted, not observed, so every entry carries its own
+# honesty label. The full change ledger with real version-control provenance
+# lands with the RCA phase; until then this file plus the two mappings below is
+# the honest minimum.
+#
+# The mappings let change observed in the cluster be attributed to a logical
+# topology service. Nothing is inferred from a name that looks similar: an
+# unmapped workload or flag is refused, not guessed.
+version: 1
+
+changes: []
+
+# Kubernetes workload -> topology service, for observed rollout events.
+workload_mappings:
+  frontend: frontend
+  frontend-proxy: frontend
+  checkout: checkout
+  cart: cart
+  payment: payment
+  email: email
+
+# Feature flag -> the topology service the flag changes the behavior of. Only
+# flags whose blast radius lands on a service Sentinel actually models are
+# listed; a flag affecting a mesh service outside `topology.yml` is left
+# unmapped so it is refused rather than attributed to the wrong owner.
+flag_mappings:
+  paymentFailure: payment
+  paymentUnreachable: payment
+  cartFailure: cart
+  emailMemoryLeak: email
+  kafkaQueueProblems: checkout

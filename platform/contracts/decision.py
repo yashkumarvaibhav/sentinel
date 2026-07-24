@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import field_validator, model_validator
 
@@ -79,6 +79,40 @@ class EvidenceItem(ContractModel):
                 f"against baseline {self.baseline}"
             )
         return self
+
+
+class ChangeKind(StrEnum):
+    """How the system was changed by its operators, not by its callers."""
+
+    DEPLOY = "DEPLOY"
+    ROLLOUT = "ROLLOUT"
+    FLAG = "FLAG"
+    CONFIG = "CONFIG"
+
+
+class ChangeEvent(ContractModel):
+    """One recorded operator change, the raw material of deploy-correlated pressure.
+
+    A change is a fact about the system's own history, never a conclusion about
+    an incident. It carries its own honesty label because the MVP feed mixes an
+    operator-maintained ledger with changes observed from the cluster.
+    """
+
+    change_id: Identifier
+    kind: ChangeKind
+    service: Identifier
+    ts: UtcDatetime
+    summary: HumanText
+    source: Identifier
+    honesty: Literal["REAL", "SIMULATED"]
+    revision: Identifier | None = None
+    evidence_refs: tuple[Identifier, ...] = ()
+
+    @field_validator("evidence_refs")
+    @classmethod
+    def unique_change_refs(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        """The links backing one change are an ordered set."""
+        return ensure_unique(values, field_name="evidence_refs")
 
 
 class AgentStatus(StrEnum):

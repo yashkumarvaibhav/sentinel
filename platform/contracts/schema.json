@@ -82,6 +82,79 @@
       "title": "AgentTrend",
       "type": "string"
     },
+    "ChangeEvent": {
+      "additionalProperties": false,
+      "description": "One recorded operator change, the raw material of deploy-correlated pressure.\n\nA change is a fact about the system's own history, never a conclusion about\nan incident. It carries its own honesty label because the MVP feed mixes an\noperator-maintained ledger with changes observed from the cluster.",
+      "properties": {
+        "change_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "evidence_refs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "honesty": {
+          "enum": [
+            "REAL",
+            "SIMULATED"
+          ],
+          "title": "Honesty",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ChangeKind"
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "service": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "source": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "summary": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "ts": {
+          "$ref": "#/$defs/UtcDatetime"
+        }
+      },
+      "required": [
+        "change_id",
+        "kind",
+        "service",
+        "ts",
+        "summary",
+        "source",
+        "honesty"
+      ],
+      "title": "ChangeEvent",
+      "type": "object"
+    },
+    "ChangeKind": {
+      "description": "How the system was changed by its operators, not by its callers.",
+      "enum": [
+        "DEPLOY",
+        "ROLLOUT",
+        "FLAG",
+        "CONFIG"
+      ],
+      "title": "ChangeKind",
+      "type": "string"
+    },
     "ContextWindow": {
       "additionalProperties": false,
       "description": "A trusted external event and the signals whose volume it may explain.",
@@ -564,6 +637,9 @@
     },
     {
       "$ref": "#/$defs/SymptomEpisode"
+    },
+    {
+      "$ref": "#/$defs/ChangeEvent"
     },
     {
       "$ref": "#/$defs/AgentAssessment"

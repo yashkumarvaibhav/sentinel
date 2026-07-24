@@ -14,11 +14,13 @@ import argparse
 import hashlib
 import json
 from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal, Self
 
 import yaml
 from pydantic import (
+    AfterValidator,
     BaseModel,
     BeforeValidator,
     ConfigDict,
@@ -29,7 +31,9 @@ from pydantic import (
     model_validator,
 )
 
-from contracts import EvidenceAxis, SymptomKind
+from contracts import ChangeKind, EvidenceAxis, SymptomKind
+
+CRITICALITY_LEVELS = ("critical", "high", "medium", "low")
 
 
 def _named_symptom_kind(value: object) -> object:
@@ -41,6 +45,23 @@ def _named_symptom_kind(value: object) -> object:
             known = ", ".join(kind.value for kind in SymptomKind)
             raise ValueError(f"unknown symptom kind {value!r}; known kinds are {known}") from error
     return value
+
+
+def _named_change_kind(value: object) -> object:
+    """Accept the YAML spelling of a change kind under strict validation."""
+    if isinstance(value, str):
+        try:
+            return ChangeKind(value)
+        except ValueError as error:
+            known = ", ".join(kind.value for kind in ChangeKind)
+            raise ValueError(f"unknown change kind {value!r}; known kinds are {known}") from error
+    return value
+
+
+def _utc(value: datetime) -> datetime:
+    if value.utcoffset() != timedelta(0):
+        raise ValueError("timestamp must be timezone-aware UTC")
+    return value.astimezone(UTC)
 
 
 def _named_evidence_axis(value: object) -> object:
@@ -56,12 +77,23 @@ def _named_evidence_axis(value: object) -> object:
 
 type ClaimedKind = Annotated[SymptomKind, BeforeValidator(_named_symptom_kind)]
 type NamedAxis = Annotated[EvidenceAxis, BeforeValidator(_named_evidence_axis)]
+type NamedChangeKind = Annotated[ChangeKind, BeforeValidator(_named_change_kind)]
+type UtcDatetime = Annotated[datetime, AfterValidator(_utc)]
+type Identifier = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=255),
+]
+type Summary = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=4096),
+]
 type EpisodeSignal = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=512),
 ]
 type Weight = Annotated[float, Field(gt=0.0, le=1.0, allow_inf_nan=False)]
 type Probability = Annotated[float, Field(ge=0.0, le=1.0, allow_inf_nan=False)]
+type PositiveSeconds = Annotated[float, Field(gt=0.0, le=86_400.0, allow_inf_nan=False)]
 
 
 class DecisionConfigLoadError(ValueError):
@@ -110,6 +142,52 @@ class EvidenceClaimConfig(DecisionConfigModel):
         return self
 
 
+class ChangePressureConfig(DecisionConfigModel):
+    """How recent operator change is turned into deploy-correlated pressure.
+
+    A change is evidence while it is recent: relevance decays linearly to
+    nothing at ``correlation_window_seconds``. A change on a service that is not
+    itself symptomatic is not discarded - it keeps
+    ``unrelated_service_factor`` of its weight, because a change can break a
+    neighbour through a dependency it does not own.
+    """
+
+    correlation_window_seconds: PositiveSeconds
+    unrelated_service_factor: Probability
+    kind_weights: dict[str, float] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_change_pressure(self) -> Self:
+        known = {kind.value for kind in ChangeKind}
+        unknown = sorted(set(self.kind_weights) - known)
+        if unknown:
+            raise ValueError(f"unknown change kinds: {', '.join(unknown)}")
+        for kind, weight in self.kind_weights.items():
+            if not 0.0 < weight <= 1.0:
+                raise ValueError(f"change weight for {kind} must lie in (0, 1]")
+        return self
+
+    def weight_for(self, kind: ChangeKind) -> float | None:
+        """Return the configured weight for one change kind, or None if unclaimed."""
+        return self.kind_weights.get(kind.value)
+
+
+class CriticalityWeightsConfig(DecisionConfigModel):
+    """How much a symptom on a service of each topology criticality matters to users."""
+
+    critical: Weight
+    high: Weight
+    medium: Weight
+    low: Weight
+
+    def weight_for(self, criticality: str) -> float:
+        """Return the configured scaling for one topology criticality level."""
+        if criticality not in CRITICALITY_LEVELS:
+            raise DecisionConfigLoadError(f"unknown service criticality: {criticality}")
+        weight: float = getattr(self, criticality)
+        return weight
+
+
 class EvidenceAxisConfig(DecisionConfigModel):
     """Everything one evidence agent is allowed to look at, and its scoring shape."""
 
@@ -117,6 +195,22 @@ class EvidenceAxisConfig(DecisionConfigModel):
     minimum_contribution: Probability
     trend_deadband: Probability
     claims: tuple[EvidenceClaimConfig, ...] = Field(min_length=1)
+    change_pressure: ChangePressureConfig | None = None
+    criticality_weights: CriticalityWeightsConfig | None = None
+
+    @model_validator(mode="after")
+    def validate_axis_extras(self) -> Self:
+        needs_change = self.axis is EvidenceAxis.CHANGE_CONFIG
+        needs_criticality = self.axis is EvidenceAxis.BUSINESS_IMPACT
+        if needs_change and self.change_pressure is None:
+            raise ValueError("CHANGE_CONFIG requires change_pressure settings")
+        if not needs_change and self.change_pressure is not None:
+            raise ValueError(f"{self.axis.value} must not configure change_pressure")
+        if needs_criticality and self.criticality_weights is None:
+            raise ValueError("BUSINESS_IMPACT requires criticality_weights")
+        if not needs_criticality and self.criticality_weights is not None:
+            raise ValueError(f"{self.axis.value} must not configure criticality_weights")
+        return self
 
     @model_validator(mode="after")
     def validate_axis(self) -> Self:
@@ -191,8 +285,65 @@ class EvidenceAgentsConfig(DecisionConfigModel):
         return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
 
 
-def load_evidence_agents(path: Path) -> EvidenceAgentsConfig:
-    """Load and strictly validate the evidence-agent configuration."""
+class DeploymentRecord(DecisionConfigModel):
+    """One operator-maintained record of a change the team made to a service."""
+
+    change_id: Identifier
+    kind: NamedChangeKind
+    service: Identifier
+    ts: UtcDatetime
+    summary: Summary
+    honesty: Literal["REAL", "SIMULATED"]
+    revision: Identifier | None = None
+
+
+class DeploymentLedgerConfig(DecisionConfigModel):
+    """The MVP change-evidence source: a committed ledger plus its cluster mappings.
+
+    The full change ledger with real VCS provenance lands with RCA depth. Until
+    then this file is what the operator states changed, together with the
+    mappings that let observed cluster rollouts and flag flips be attributed to
+    a logical service.
+    """
+
+    version: Literal[1]
+    changes: tuple[DeploymentRecord, ...] = ()
+    workload_mappings: dict[Identifier, Identifier] = Field(default_factory=dict)
+    flag_mappings: dict[Identifier, Identifier] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_ledger(self) -> Self:
+        ids = [record.change_id for record in self.changes]
+        if len(ids) != len(set(ids)):
+            raise ValueError("change ids must be unique")
+        return self
+
+    def validate_services(self, known: frozenset[str]) -> None:
+        """Reject any change or mapping that names a service outside the topology."""
+        named = {
+            *(record.service for record in self.changes),
+            *self.workload_mappings.values(),
+            *self.flag_mappings.values(),
+        }
+        unknown = sorted(named - known)
+        if unknown:
+            raise DecisionConfigLoadError(
+                f"deployments.yml references unknown topology services: {', '.join(unknown)}"
+            )
+
+    @property
+    def fingerprint(self) -> str:
+        """Content hash recorded with any change evidence drawn from this ledger."""
+        rendered = json.dumps(
+            self.model_dump(mode="json"),
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+
+
+def _document(path: Path) -> dict[str, object]:
     if not path.is_file():
         raise DecisionConfigLoadError(f"{path.name}: required configuration file is missing")
     try:
@@ -201,8 +352,21 @@ def load_evidence_agents(path: Path) -> EvidenceAgentsConfig:
         raise DecisionConfigLoadError(f"{path.name}: {error}") from error
     if not isinstance(document, dict):
         raise DecisionConfigLoadError(f"{path.name}: YAML root must be a mapping")
+    return document
+
+
+def load_evidence_agents(path: Path) -> EvidenceAgentsConfig:
+    """Load and strictly validate the evidence-agent configuration."""
     try:
-        return EvidenceAgentsConfig.model_validate(document)
+        return EvidenceAgentsConfig.model_validate(_document(path))
+    except ValidationError as error:
+        raise DecisionConfigLoadError(f"{path.name}: {error}") from error
+
+
+def load_deployment_ledger(path: Path) -> DeploymentLedgerConfig:
+    """Load and strictly validate the committed change-evidence ledger."""
+    try:
+        return DeploymentLedgerConfig.model_validate(_document(path))
     except ValidationError as error:
         raise DecisionConfigLoadError(f"{path.name}: {error}") from error
 
@@ -211,6 +375,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Validate decision configuration and print its reproducibility fingerprint."""
     parser = argparse.ArgumentParser(prog="python -m decision")
     parser.add_argument("--agents", type=Path, required=True, help="evidence-agent configuration")
+    parser.add_argument("--deployments", type=Path, help="committed change-evidence ledger")
     args = parser.parse_args(argv)
     print(f"evidence-agent configuration valid: {load_evidence_agents(args.agents).fingerprint}")
+    if args.deployments is not None:
+        fingerprint = load_deployment_ledger(args.deployments).fingerprint
+        print(f"deployment ledger valid: {fingerprint}")
     return 0
