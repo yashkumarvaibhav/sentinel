@@ -154,6 +154,12 @@ data-pull: ## Fetch and verify the DVC-versioned Phase 1 capture store
 		--repo-root .. --manifest ../lab/captures/bootstrap.json
 	$(PY) dvc pull ../data/captures/phase-1.dvc -r bootstrap
 
+.PHONY: train-data
+train-data: ## Build the versioned training dataset (synthetic history + dev baselines)
+	$(PY) python -m ml.data \
+		--repo-root .. --captures-root ../var/captures \
+		--out ../data/training/dataset
+
 .PHONY: score
 score: data-pull ## Score held-out capture replays (hosted gate)
 	$(PY) python -m lab.scoring.capture \

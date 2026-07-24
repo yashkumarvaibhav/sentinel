@@ -1,0 +1,53 @@
+{
+  "capture_sources": [
+    {
+      "capture_id": "phase1-quiet-101-golden-v1",
+      "honesty": "REAL",
+      "rows": 42,
+      "scenario_id": "quiet_day",
+      "seed": 101
+    }
+  ],
+  "data_hash": "a31f15adeca90a334eeaadbba034e30175e8d86dce5c8064ee5cc91abb420258",
+  "detector_config_fingerprint": "23d957af85fe1fa0cea7d8f4221c53ea571d1ffaa49a13de475de65f241d7030",
+  "feature_schema": {
+    "aware": [
+      "tod_sin",
+      "tod_cos",
+      "dow_sin",
+      "dow_cos",
+      "is_weekend",
+      "event_lift",
+      "event_count",
+      "event_trust_max"
+    ],
+    "event": [
+      "event_lift",
+      "event_count",
+      "event_trust_max"
+    ],
+    "temporal": [
+      "tod_sin",
+      "tod_cos",
+      "dow_sin",
+      "dow_cos",
+      "is_weekend"
+    ]
+  },
+  "honesty_counts": {
+    "REAL": 42,
+    "SIMULATED": 12096
+  },
+  "row_counts": {
+    "capture": 42,
+    "synthetic": 12096,
+    "total": 12138
+  },
+  "synthetic_seeds": [
+    40100,
+    40101,
+    40102
+  ],
+  "training_config_fingerprint": "285169a42746903cc87e014e1f22529af9d4954f6829655b393eb881ab52c31e",
+  "version": 1
+}
