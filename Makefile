@@ -40,7 +40,7 @@ verify-py: ## Lint, typecheck and test the Python planes
 	$(PY) mypy $(PY_PATHS)
 	$(PY) python -m contracts export --check
 	$(PY) python -m common.config --path ../config
-	$(PY) python -m ml.config --path ../config/ml-training.yml --envelopes ../config/ml-envelopes.yml --forecast ../config/ml-forecast.yml --anomaly ../config/ml-anomaly.yml --autoencoder ../config/ml-autoencoder.yml
+	$(PY) python -m ml.config --path ../config/ml-training.yml --envelopes ../config/ml-envelopes.yml --forecast ../config/ml-forecast.yml --anomaly ../config/ml-anomaly.yml --autoencoder ../config/ml-autoencoder.yml --calibration ../config/ml-calibration.yml
 	$(PY) pytest
 
 .PHONY: verify-web
@@ -69,7 +69,7 @@ contracts: ## Export JSON Schema and regenerate TypeScript contracts
 .PHONY: config-check
 config-check: ## Validate all versioned operator configuration
 	$(PY) python -m common.config --path ../config
-	$(PY) python -m ml.config --path ../config/ml-training.yml --envelopes ../config/ml-envelopes.yml --forecast ../config/ml-forecast.yml --anomaly ../config/ml-anomaly.yml --autoencoder ../config/ml-autoencoder.yml
+	$(PY) python -m ml.config --path ../config/ml-training.yml --envelopes ../config/ml-envelopes.yml --forecast ../config/ml-forecast.yml --anomaly ../config/ml-anomaly.yml --autoencoder ../config/ml-autoencoder.yml --calibration ../config/ml-calibration.yml
 
 .PHONY: migrate
 migrate: ## Apply idempotent ClickHouse and Postgres migrations
@@ -181,6 +181,11 @@ anomaly: ## Fit the multivariate isolation-forest anomaly model to a local bundl
 autoencoder: ## Train the LSTM auth-sequence autoencoder to a local bundle
 	$(PY) python -m ml.autoencoder_train \
 		--repo-root .. --out ../var/models/autoencoder
+
+.PHONY: calibrate
+calibrate: ## Conformally calibrate the anomaly detector and report coverage
+	$(PY) python -m ml.calibrate_train \
+		--repo-root .. --out ../var/models/calibration/anomaly.json
 
 .PHONY: score
 score: data-pull ## Score held-out capture replays (hosted gate)

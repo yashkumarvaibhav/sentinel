@@ -12,11 +12,13 @@ import yaml
 from ml.config import (
     AnomalyParamsConfig,
     AutoencoderParamsConfig,
+    CalibrationParamsConfig,
     ForecastParamsConfig,
     MlConfigLoadError,
     MlTrainingConfig,
     load_anomaly_params,
     load_autoencoder_params,
+    load_calibration_params,
     load_forecast_params,
     load_training_config,
 )
@@ -25,6 +27,7 @@ CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "ml-training.yml"
 FORECAST_PATH = Path(__file__).resolve().parents[2] / "config" / "ml-forecast.yml"
 ANOMALY_PATH = Path(__file__).resolve().parents[2] / "config" / "ml-anomaly.yml"
 AUTOENCODER_PATH = Path(__file__).resolve().parents[2] / "config" / "ml-autoencoder.yml"
+CALIBRATION_PATH = Path(__file__).resolve().parents[2] / "config" / "ml-calibration.yml"
 
 
 def _document() -> dict[str, Any]:
@@ -202,3 +205,28 @@ def test_autoencoder_rejects_non_probability(tmp_path: Path) -> None:
     document["simulation"]["attack"]["failure_prob"] = 1.5
     with pytest.raises(MlConfigLoadError):
         _load_autoencoder(document, tmp_path)
+
+
+def _calibration_document() -> dict[str, Any]:
+    return cast("dict[str, Any]", yaml.safe_load(CALIBRATION_PATH.read_text(encoding="utf-8")))
+
+
+def _load_calibration(document: dict[str, Any], tmp_path: Path) -> CalibrationParamsConfig:
+    path = tmp_path / "ml-calibration.yml"
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    return load_calibration_params(path)
+
+
+def test_calibration_config_loads_and_fingerprint_is_deterministic() -> None:
+    first = load_calibration_params(CALIBRATION_PATH)
+    second = load_calibration_params(CALIBRATION_PATH)
+    assert first.version == 1
+    assert first.ece_bins == 10
+    assert first.fingerprint == second.fingerprint
+
+
+def test_calibration_unordered_alphas_are_rejected(tmp_path: Path) -> None:
+    document = _calibration_document()
+    document["alphas"] = [0.2, 0.1]
+    with pytest.raises(MlConfigLoadError):
+        _load_calibration(document, tmp_path)

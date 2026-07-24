@@ -1,0 +1,16 @@
+# Conformal calibration + calibration-metric settings (Phase 3.6). Config-as-data:
+# the calibrator and the ECE/reliability metric read these knobs, and this file's
+# content hash is recorded with any saved calibrator. Kept separate from the other
+# ml-*.yml files so their fingerprints stay stable.
+version: 1
+
+# Fraction of the normal-behavior scores held out as the conformal calibration set;
+# the remainder is used to measure that the coverage guarantee holds empirically.
+calibration_fraction: 0.5
+
+# Nominal significance levels at which empirical conformal coverage is reported. On
+# held-out normal scores the empirical coverage should track these (the guarantee).
+alphas: [0.05, 0.10, 0.20]
+
+# Reliability-curve / Expected-Calibration-Error bin count.
+ece_bins: 10

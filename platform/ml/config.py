@@ -348,6 +348,34 @@ class AutoencoderParamsConfig(MlConfigModel):
         return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
 
 
+class CalibrationParamsConfig(MlConfigModel):
+    """Conformal-calibration split fraction + calibration-metric settings."""
+
+    version: Literal[1]
+    calibration_fraction: Quantile
+    alphas: tuple[Quantile, ...] = Field(min_length=1)
+    ece_bins: int = Field(ge=1, le=10_000)
+
+    @model_validator(mode="after")
+    def validate_calibration(self) -> Self:
+        if len(self.alphas) != len(set(self.alphas)):
+            raise ValueError("alphas must be unique")
+        if list(self.alphas) != sorted(self.alphas):
+            raise ValueError("alphas must be listed in ascending order")
+        return self
+
+    @property
+    def fingerprint(self) -> str:
+        """Content hash recorded with any calibrator built under these settings."""
+        rendered = json.dumps(
+            self.model_dump(mode="json"),
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+
+
 def _load_yaml_mapping(path: Path) -> dict[str, object]:
     if not path.is_file():
         raise MlConfigLoadError(f"{path.name}: required configuration file is missing")
@@ -400,6 +428,14 @@ def load_autoencoder_params(path: Path) -> AutoencoderParamsConfig:
         raise MlConfigLoadError(f"{path.name}: {error}") from error
 
 
+def load_calibration_params(path: Path) -> CalibrationParamsConfig:
+    """Load and strictly validate the conformal-calibration configuration."""
+    try:
+        return CalibrationParamsConfig.model_validate(_load_yaml_mapping(path))
+    except ValidationError as error:
+        raise MlConfigLoadError(f"{path.name}: {error}") from error
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Validate ml configuration file(s) and print their reproducibility fingerprints."""
     parser = argparse.ArgumentParser(prog="python -m ml.config")
@@ -410,8 +446,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--autoencoder", type=Path, help="auth-sequence autoencoder hyperparameters"
     )
+    parser.add_argument("--calibration", type=Path, help="conformal-calibration settings")
     args = parser.parse_args(argv)
-    provided = (args.path, args.envelopes, args.forecast, args.anomaly, args.autoencoder)
+    provided = (
+        args.path,
+        args.envelopes,
+        args.forecast,
+        args.anomaly,
+        args.autoencoder,
+        args.calibration,
+    )
     if all(arg is None for arg in provided):
         parser.error("at least one configuration path is required")
     if args.path is not None:
@@ -425,6 +469,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.autoencoder is not None:
         fingerprint = load_autoencoder_params(args.autoencoder).fingerprint
         print(f"autoencoder configuration valid: {fingerprint}")
+    if args.calibration is not None:
+        fingerprint = load_calibration_params(args.calibration).fingerprint
+        print(f"calibration configuration valid: {fingerprint}")
     return 0
 
 
