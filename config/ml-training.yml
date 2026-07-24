@@ -1,0 +1,49 @@
+# Seeded synthetic history for the learned decomposition envelopes (Phase 3).
+#
+# Config-as-data: the synthetic generator invents no numbers of its own — every
+# level, shape, seed and event lift lives here and is content-hashed into the
+# training dataset. These synthetic seeds are deliberately disjoint from every
+# scenario seed (development AND held_out) so no evaluation seed can leak into
+# training; the dataset builder re-asserts that against the live profiles.
+version: 1
+
+history:
+  # Deterministic UTC anchor for the synthetic horizon. 2026-01-05 is a Monday,
+  # so day-of-week features line up with real weekday/weekend structure.
+  start: 2026-01-05T00:00:00Z
+  horizon_days: 28
+  # 10-minute cadence: dense enough to learn diurnal + weekly shape without the
+  # multi-million-row cost of the runtime 2s tick.
+  tick_seconds: 600
+  seeds: [40100, 40101, 40102]
+
+signals:
+  - signal: frontend.request_rate
+    base_level: 8.0            # requests/second at the diurnal + weekly mean
+    diurnal_amplitude: 0.45    # fraction of base; < 1 keeps the daily factor positive
+    diurnal_peak_hour: 14.0    # UTC hour of the daily peak
+    weekend_factor: 0.7        # weekend level relative to a weekday
+    noise_fraction: 0.06       # seeded multiplicative gaussian sigma (fraction of the mean)
+    floor: 0.0                 # generated values are clamped at or above this
+
+# Explained-event lifts drawn into the synthetic history. Semantics match the
+# decomposition event contribution exactly: a multiplier > 1 with a trust score,
+# applied only to the named signal while the event window is active. The learned
+# aware envelope must raise its band during these; the context-blind twin cannot.
+events:
+  - event_id: synthetic-weekend-match
+    event_type: sports_fixture
+    signal: frontend.request_rate
+    day_indices: [5, 12, 19, 26]   # the four Saturdays inside the horizon
+    start_hour: 18.5
+    duration_hours: 3.0
+    multiplier: 2.5
+    trust_score: 0.9
+  - event_id: synthetic-midweek-promo
+    event_type: marketing_promo
+    signal: frontend.request_rate
+    day_indices: [9, 23]           # two Wednesday promotions
+    start_hour: 12.0
+    duration_hours: 2.0
+    multiplier: 1.8
+    trust_score: 0.75
