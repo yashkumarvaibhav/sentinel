@@ -15,6 +15,7 @@ from common.config import DetectorConfig
 from contracts import ContextWindow, DecompFrame, Observation
 from detection.decompose import (
     DecompositionEngine,
+    DecompositionEnvelope,
     DecompositionStats,
     DecompositionStatus,
 )
@@ -153,6 +154,7 @@ def replay_decomposition(
     *,
     detector: DetectorConfig,
     replay_config_fingerprint: str,
+    envelope: DecompositionEnvelope | None = None,
 ) -> DecompositionReplay:
     manifest = capture.manifest
     schedule = CapturedSchedule.model_validate_json(capture.schedule)
@@ -187,7 +189,11 @@ def replay_decomposition(
         anchor_ts=anchor_ts,
         duration_seconds=schedule.duration_seconds,
     )
-    engine = DecompositionEngine(configuration=detector, dedup_capacity=len(observations) + 1)
+    engine = DecompositionEngine(
+        configuration=detector,
+        dedup_capacity=len(observations) + 1,
+        envelope=envelope,
+    )
     steps: list[ReplayStep] = []
     for observation in observations:
         result = engine.decompose(observation, contexts=contexts)
