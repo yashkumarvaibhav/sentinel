@@ -283,6 +283,71 @@ class AnomalyParamsConfig(MlConfigModel):
         return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
 
 
+_AUTH_SEQUENCE_FEATURES = ("inter_arrival", "is_failure", "is_new_account")
+
+
+class AuthRegime(MlConfigModel):
+    """One auth-sequence regime: inter-arrival distribution + per-step probabilities."""
+
+    inter_arrival: tuple[float, float]
+    failure_prob: Probability
+    new_account_prob: Probability
+
+    @model_validator(mode="after")
+    def validate_regime(self) -> Self:
+        if self.inter_arrival[1] < 0.0:
+            raise ValueError("inter_arrival standard deviation must be non-negative")
+        return self
+
+
+class AuthSimulation(MlConfigModel):
+    """The SIMULATED auth-sequence generator settings."""
+
+    seeds: tuple[int, ...] = Field(min_length=1)
+    normal_sequences: int = Field(ge=1, le=1_000_000)
+    attack_sequences: int = Field(ge=1, le=1_000_000)
+    normal: AuthRegime
+    attack: AuthRegime
+
+    @model_validator(mode="after")
+    def validate_simulation(self) -> Self:
+        if len(self.seeds) != len(set(self.seeds)):
+            raise ValueError("simulation seeds must be unique")
+        return self
+
+
+class AutoencoderParamsConfig(MlConfigModel):
+    """LSTM auth-sequence autoencoder architecture, optimisation and generator."""
+
+    version: Literal[1]
+    features: tuple[Identifier, ...] = Field(min_length=1)
+    seq_len: int = Field(ge=2, le=4096)
+    hidden_size: int = Field(ge=1, le=4096)
+    latent_size: int = Field(ge=1, le=4096)
+    num_layers: int = Field(ge=1, le=8)
+    epochs: int = Field(ge=1, le=100_000)
+    learning_rate: LearningRate
+    seed: int = Field(ge=0)
+    simulation: AuthSimulation
+
+    @model_validator(mode="after")
+    def validate_autoencoder(self) -> Self:
+        if tuple(self.features) != _AUTH_SEQUENCE_FEATURES:
+            raise ValueError(f"features must be exactly {list(_AUTH_SEQUENCE_FEATURES)}")
+        return self
+
+    @property
+    def fingerprint(self) -> str:
+        """Content hash recorded inside any autoencoder bundle trained with these params."""
+        rendered = json.dumps(
+            self.model_dump(mode="json"),
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+
+
 def _load_yaml_mapping(path: Path) -> dict[str, object]:
     if not path.is_file():
         raise MlConfigLoadError(f"{path.name}: required configuration file is missing")
@@ -327,6 +392,14 @@ def load_anomaly_params(path: Path) -> AnomalyParamsConfig:
         raise MlConfigLoadError(f"{path.name}: {error}") from error
 
 
+def load_autoencoder_params(path: Path) -> AutoencoderParamsConfig:
+    """Load and strictly validate the auth-sequence autoencoder configuration."""
+    try:
+        return AutoencoderParamsConfig.model_validate(_load_yaml_mapping(path))
+    except ValidationError as error:
+        raise MlConfigLoadError(f"{path.name}: {error}") from error
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Validate ml configuration file(s) and print their reproducibility fingerprints."""
     parser = argparse.ArgumentParser(prog="python -m ml.config")
@@ -334,9 +407,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--envelopes", type=Path, help="envelope hyperparameter configuration")
     parser.add_argument("--forecast", type=Path, help="seasonal forecast hyperparameters")
     parser.add_argument("--anomaly", type=Path, help="multivariate anomaly hyperparameters")
+    parser.add_argument(
+        "--autoencoder", type=Path, help="auth-sequence autoencoder hyperparameters"
+    )
     args = parser.parse_args(argv)
-    if all(arg is None for arg in (args.path, args.envelopes, args.forecast, args.anomaly)):
-        parser.error("at least one of --path, --envelopes, --forecast or --anomaly is required")
+    provided = (args.path, args.envelopes, args.forecast, args.anomaly, args.autoencoder)
+    if all(arg is None for arg in provided):
+        parser.error("at least one configuration path is required")
     if args.path is not None:
         print(f"training configuration valid: {load_training_config(args.path).fingerprint}")
     if args.envelopes is not None:
@@ -345,6 +422,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"forecast configuration valid: {load_forecast_params(args.forecast).fingerprint}")
     if args.anomaly is not None:
         print(f"anomaly configuration valid: {load_anomaly_params(args.anomaly).fingerprint}")
+    if args.autoencoder is not None:
+        fingerprint = load_autoencoder_params(args.autoencoder).fingerprint
+        print(f"autoencoder configuration valid: {fingerprint}")
     return 0
 
 

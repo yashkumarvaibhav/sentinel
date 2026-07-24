@@ -11,10 +11,12 @@ import yaml
 
 from ml.config import (
     AnomalyParamsConfig,
+    AutoencoderParamsConfig,
     ForecastParamsConfig,
     MlConfigLoadError,
     MlTrainingConfig,
     load_anomaly_params,
+    load_autoencoder_params,
     load_forecast_params,
     load_training_config,
 )
@@ -22,6 +24,7 @@ from ml.config import (
 CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "ml-training.yml"
 FORECAST_PATH = Path(__file__).resolve().parents[2] / "config" / "ml-forecast.yml"
 ANOMALY_PATH = Path(__file__).resolve().parents[2] / "config" / "ml-anomaly.yml"
+AUTOENCODER_PATH = Path(__file__).resolve().parents[2] / "config" / "ml-autoencoder.yml"
 
 
 def _document() -> dict[str, Any]:
@@ -167,3 +170,35 @@ def test_anomaly_duplicate_feature_is_rejected(tmp_path: Path) -> None:
     document["features"] = [*document["features"], "source_entropy"]
     with pytest.raises(MlConfigLoadError):
         _load_anomaly(document, tmp_path)
+
+
+def _autoencoder_document() -> dict[str, Any]:
+    return cast("dict[str, Any]", yaml.safe_load(AUTOENCODER_PATH.read_text(encoding="utf-8")))
+
+
+def _load_autoencoder(document: dict[str, Any], tmp_path: Path) -> AutoencoderParamsConfig:
+    path = tmp_path / "ml-autoencoder.yml"
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    return load_autoencoder_params(path)
+
+
+def test_autoencoder_config_loads_and_fingerprint_is_deterministic() -> None:
+    first = load_autoencoder_params(AUTOENCODER_PATH)
+    second = load_autoencoder_params(AUTOENCODER_PATH)
+    assert first.version == 1
+    assert first.features == ("inter_arrival", "is_failure", "is_new_account")
+    assert first.fingerprint == second.fingerprint
+
+
+def test_autoencoder_features_are_fixed(tmp_path: Path) -> None:
+    document = _autoencoder_document()
+    document["features"] = ["inter_arrival", "is_failure", "something_else"]
+    with pytest.raises(MlConfigLoadError):
+        _load_autoencoder(document, tmp_path)
+
+
+def test_autoencoder_rejects_non_probability(tmp_path: Path) -> None:
+    document = _autoencoder_document()
+    document["simulation"]["attack"]["failure_prob"] = 1.5
+    with pytest.raises(MlConfigLoadError):
+        _load_autoencoder(document, tmp_path)

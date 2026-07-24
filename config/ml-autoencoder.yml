@@ -1,0 +1,38 @@
+# LSTM auth-sequence autoencoder (Phase 3.5b). Config-as-data: the trainer reads
+# every knob here and this file's content hash is recorded inside each trained
+# bundle. A reconstruction autoencoder learns the shape of a NORMAL auth session;
+# credential-stuffing sequences (rapid, high-failure, account-spraying) reconstruct
+# poorly, so reconstruction error is a CORROBORATING anomaly vote — never
+# load-bearing (propose-then-verify). Kept separate from the other ml-*.yml files.
+version: 1
+
+# The auth-event feature schema, in model-input order. Fixed to the three signals
+# a credential-stuffing attack deforms; the generator maps to these exactly.
+features: [inter_arrival, is_failure, is_new_account]
+
+# LSTM autoencoder architecture + optimisation. Small + CPU-deterministic: a fixed
+# seed, single-threaded, full-batch training gives bit-exact reconstruction scores.
+seq_len: 8
+hidden_size: 16
+latent_size: 8
+num_layers: 1
+epochs: 40
+learning_rate: 0.01
+seed: 20260724
+
+# SIMULATED auth sequences (labeled SIMULATED end to end — the OTel Demo has no auth
+# flow, so this space is synthesized honestly, not measured). A normal session is
+# slow, mostly-successful, single-account; the attack regime is the credential-
+# stuffing deformation. inter_arrival is [mean, sd]; the probabilities are per step.
+simulation:
+  seeds: [60100, 60101, 60102]
+  normal_sequences: 300
+  attack_sequences: 30
+  normal:
+    inter_arrival: [0.60, 0.15]
+    failure_prob: 0.10
+    new_account_prob: 0.05
+  attack:
+    inter_arrival: [0.08, 0.03]
+    failure_prob: 0.85
+    new_account_prob: 0.90

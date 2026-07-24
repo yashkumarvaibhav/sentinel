@@ -37,6 +37,7 @@ ml = [
     "numpy>=2.1,<3",
     "scikit-learn>=1.5,<2",
     "statsmodels>=0.14,<0.15",
+    "torch>=2.4,<3",
 ]
 
 [dependency-groups]
@@ -49,6 +50,17 @@ dev = [
     "hypothesis>=6.112",
     "types-pyyaml>=6.0.12.20250516",
 ]
+
+# Pin torch to the CPU wheels: this shared box has no CUDA budget for a DL
+# autoencoder, and the eval must be CPU-deterministic. The CPU wheel is ~190 MB
+# versus ~2.5 GB for the default CUDA build.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
 
 [build-system]
 requires = ["hatchling"]
