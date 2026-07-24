@@ -17,6 +17,7 @@ from ml.config import load_envelope_params, load_training_config
 from ml.data import build_training_dataset, discover_baseline_captures
 from ml.envelopes import save_envelope_model, train_envelopes
 from ml.evaluate import holdout_metrics
+from ml.registry import register_model
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -60,17 +61,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         flush=True,
     )
     print(f"  held-out metrics (fraction {args.holdout_fraction}):", flush=True)
-    for metrics in holdout_metrics(
+    metrics = holdout_metrics(
         dataset.frames, params=envelope_params, holdout_fraction=args.holdout_fraction
-    ):
+    )
+    for signal_metrics in metrics:
         coverage = ", ".join(
-            f"p{int(q.quantile * 100)}={q.coverage:.3f}" for q in metrics.per_quantile
+            f"p{int(q.quantile * 100)}={q.coverage:.3f}" for q in signal_metrics.per_quantile
         )
         print(
-            f"    {metrics.signal_key}: rows={metrics.eval_rows} "
-            f"interval_coverage={metrics.interval_coverage:.3f} [{coverage}]",
+            f"    {signal_metrics.signal_key}: rows={signal_metrics.eval_rows} "
+            f"interval_coverage={signal_metrics.interval_coverage:.3f} [{coverage}]",
             flush=True,
         )
+
+    registry_path = args.out.resolve().parent / "registry.json"
+    version = register_model(
+        registry_path, model=model, metrics=metrics, bundle_path=args.out.resolve()
+    )
+    print(f"  registered model version {version} in {registry_path}", flush=True)
     return 0
 
 
