@@ -66,3 +66,22 @@ causal:
   minimum_margin: 0.05
   # Episode signals of this shape name the dependency they measure.
   dependency_signal_prefix: "dependency."
+
+# Incident memory: "have we seen this shape before?"
+#
+# The signature is the four axis scores at the incident's peak, so a match means
+# the same balance of hostility, degradation, self-inflicted change and user
+# harm - not merely a similar-looking description.
+memory:
+  # How many precedents to surface. More than a handful is noise to a responder.
+  neighbours: 5
+  # Below this, two incidents are not the same shape and saying so would be
+  # worse than saying nothing.
+  minimum_similarity: 0.60
+  # Recognition corroborates a verdict; it must never carry one. The whole nudge
+  # is smaller than the smallest confidence gain the fusion rules can award.
+  confidence_nudge: 0.05
+  # Until the store holds this many incidents, the verifier's memory check has
+  # nothing to check and passes vacuously (recorded as a bootstrap, never as a
+  # confirmation) - otherwise nothing could ever be confirmed on an empty store.
+  bootstrap_minimum_entries: 20

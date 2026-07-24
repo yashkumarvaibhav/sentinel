@@ -648,6 +648,21 @@ class CausalCollapseConfig(DecisionConfigModel):
         return self
 
 
+class IncidentMemoryConfig(DecisionConfigModel):
+    """How strongly recognising a shape is allowed to move a verdict."""
+
+    neighbours: int = Field(ge=1, le=100)
+    minimum_similarity: Probability
+    confidence_nudge: Probability
+    bootstrap_minimum_entries: int = Field(ge=0, le=100_000)
+
+    @model_validator(mode="after")
+    def validate_memory(self) -> Self:
+        if self.minimum_similarity == 0.0:
+            raise ValueError("a similarity floor of zero would call every incident a match")
+        return self
+
+
 class IncidentsConfig(DecisionConfigModel):
     """One fully validated snapshot of the incident clustering policy."""
 
@@ -656,6 +671,7 @@ class IncidentsConfig(DecisionConfigModel):
     lifecycle: IncidentLifecycleConfig
     severity: IncidentSeverityConfig
     causal: CausalCollapseConfig
+    memory: IncidentMemoryConfig
 
     @property
     def fingerprint(self) -> str:

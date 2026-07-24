@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -16,7 +17,9 @@ from common.settings import Settings
 from common.storage import (
     AuditRecord,
     ClickHouseRepository,
+    IncidentMemoryRepository,
     IncidentRecord,
+    IncidentSignatureRecord,
     PostgresPool,
     PostgresRepository,
     create_postgres_pool,
@@ -33,6 +36,7 @@ from contracts import (
     SymptomEpisode,
     SymptomKind,
 )
+from decision.memory import similarity_from_distance
 from detection.decompose import DecompositionEngine, DecompositionWorker
 from detection.pipeline import EpisodeWorker, SymptomEpisodePipeline
 from tests.factories import (
@@ -77,6 +81,7 @@ async def _exercise_real_storage() -> None:
             await migrate_storage(config, clickhouse_client=client, postgres_pool=pool)
             await _round_trip_clickhouse(config, client, suffix)
             await _round_trip_postgres(config, pool, suffix)
+            await _round_trip_incident_memory(config, pool, suffix)
         finally:
             await _drop_test_storage(config, client, pool)
             await pool.close()
@@ -321,6 +326,64 @@ async def _round_trip_episode(repository: PostgresRepository, ts: datetime, suff
     assert await repository.put_episode(advanced) is True  # higher revision advances
     assert await repository.put_episode(episode) is False  # stale revision cannot regress
     assert await repository.get_episode(episode.episode_id) == advanced
+
+
+async def _round_trip_incident_memory(config: Settings, pool: PostgresPool, suffix: str) -> None:
+    """Prove pgvector nearest-neighbour search agrees with the in-memory metric."""
+    memory = IncidentMemoryRepository(pool=pool, schema=config.postgres_schema)
+    ts = datetime(2026, 7, 21, 12, 0, tzinfo=UTC)
+    shapes = {
+        "near": (0.15, 0.85, 0.10, 0.50),
+        "middling": (0.40, 0.60, 0.30, 0.40),
+        "opposite": (1.00, 0.00, 1.00, 0.00),
+    }
+    assert await memory.size() == 0
+    for name, vector in shapes.items():
+        await memory.remember(
+            IncidentSignatureRecord(
+                incident_id=f"{name}-{suffix}",
+                recorded_at=ts,
+                vector=vector,
+                severity="HIGH",
+                origin_service="payment",
+                verdict_class="OPERATIONAL_FAULT",
+                payload={"signature": list(vector)},
+            )
+        )
+    # An identical rewrite is idempotent, not a second row.
+    await memory.remember(
+        IncidentSignatureRecord(
+            incident_id=f"near-{suffix}",
+            recorded_at=ts,
+            vector=shapes["near"],
+            severity="HIGH",
+            origin_service="payment",
+            verdict_class="OPERATIONAL_FAULT",
+            payload={"signature": list(shapes["near"])},
+        )
+    )
+    assert await memory.size() == len(shapes)
+
+    probe = (0.10, 0.90, 0.10, 0.50)
+    neighbours = await memory.nearest(probe, limit=3)
+    assert [neighbour.record.incident_id for neighbour in neighbours] == [
+        f"near-{suffix}",
+        f"middling-{suffix}",
+        f"opposite-{suffix}",
+    ]
+    # pgvector's distance and the pure-Python similarity must describe one metric.
+    expected = math.dist(probe, shapes["near"])
+    assert neighbours[0].distance == pytest.approx(expected, abs=1e-6)
+    assert similarity_from_distance(neighbours[0].distance) == pytest.approx(
+        similarity_from_distance(expected)
+    )
+    assert neighbours[0].record.vector == shapes["near"]
+
+    excluded = await memory.nearest(probe, limit=3, exclude_incident_id=f"near-{suffix}")
+    assert [neighbour.record.incident_id for neighbour in excluded] == [
+        f"middling-{suffix}",
+        f"opposite-{suffix}",
+    ]
 
 
 async def _drop_test_storage(

@@ -11,6 +11,13 @@ from decision.agents import (
 from decision.causal import CausalCollapse, OriginCandidate, collapse_to_origin
 from decision.changes import ChangeFeed, FlagChange, RolloutEvent
 from decision.incidents import IncidentTracker
+from decision.memory import (
+    IncidentSignature,
+    SimilarIncident,
+    build_signature,
+    nearest,
+    recognized,
+)
 from decision.verdict import EvidenceFusion, FusionResult, FusionStatus
 
 __all__ = [
@@ -24,10 +31,15 @@ __all__ = [
     "FlagChange",
     "FusionResult",
     "FusionStatus",
+    "IncidentSignature",
     "IncidentTracker",
     "OriginCandidate",
     "ReliabilityEvidenceAgent",
     "RolloutEvent",
     "SecurityEvidenceAgent",
+    "SimilarIncident",
+    "build_signature",
     "collapse_to_origin",
+    "nearest",
+    "recognized",
 ]

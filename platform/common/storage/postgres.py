@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import cast
+from collections.abc import Sequence
+from datetime import datetime, timedelta
+from typing import Self, cast
 
 from psycopg import sql
 from psycopg.types.json import Jsonb
-from pydantic import JsonValue
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from common.storage.models import AuditRecord, IncidentRecord
 from common.storage.pool import PostgresPool
@@ -169,3 +170,146 @@ class PostgresRepository:
             prev_hash=cast(str, row[4]),
             entry_hash=cast(str, row[5]),
         )
+
+
+class IncidentSignatureRecord(BaseModel):
+    """One incident's stored four-dimensional signature and its provenance."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    incident_id: str = Field(min_length=1, max_length=255)
+    recorded_at: datetime
+    vector: tuple[float, ...] = Field(min_length=1)
+    severity: str = Field(min_length=1, max_length=64)
+    origin_service: str | None = None
+    verdict_class: str | None = None
+    payload: dict[str, JsonValue] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_signature_record(self) -> Self:
+        if self.recorded_at.utcoffset() != timedelta(0):
+            raise ValueError("recorded_at must be timezone-aware UTC")
+        for value in self.vector:
+            if not 0.0 <= value <= 1.0:
+                raise ValueError("every signature dimension is a probability")
+        return self
+
+
+class NeighbourRecord(BaseModel):
+    """A stored signature and its euclidean distance from a probe."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True)
+
+    record: IncidentSignatureRecord
+    distance: float = Field(ge=0.0)
+
+
+class IncidentMemoryRepository:
+    """Store and search incident signatures with pgvector's exact nearest search."""
+
+    def __init__(self, *, pool: PostgresPool, schema: str) -> None:
+        self._pool = pool
+        self._signatures = sql.Identifier(schema, "incident_signatures")
+
+    async def remember(self, record: IncidentSignatureRecord) -> None:
+        """Idempotently record or refresh one incident's signature."""
+        query = sql.SQL(
+            """
+            INSERT INTO {table}
+                (incident_id, recorded_at, origin_service, verdict_class,
+                 severity, signature, payload)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (incident_id) DO UPDATE SET
+                recorded_at = EXCLUDED.recorded_at,
+                origin_service = EXCLUDED.origin_service,
+                verdict_class = EXCLUDED.verdict_class,
+                severity = EXCLUDED.severity,
+                signature = EXCLUDED.signature,
+                payload = EXCLUDED.payload
+            WHERE {table}.recorded_at <= EXCLUDED.recorded_at
+            """
+        ).format(table=self._signatures)
+        async with self._pool.connection() as connection:
+            await connection.execute(
+                query,
+                (
+                    record.incident_id,
+                    record.recorded_at,
+                    record.origin_service,
+                    record.verdict_class,
+                    record.severity,
+                    _vector_literal(record.vector),
+                    Jsonb(record.payload),
+                ),
+            )
+
+    async def size(self) -> int:
+        """How many incidents the memory holds, for the verifier's cold start."""
+        query = sql.SQL("SELECT count(*) FROM {}").format(self._signatures)
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(query)
+            row = await cursor.fetchone()
+        return 0 if row is None else cast(int, row[0])
+
+    async def nearest(
+        self,
+        vector: Sequence[float],
+        *,
+        limit: int,
+        exclude_incident_id: str | None = None,
+    ) -> tuple[NeighbourRecord, ...]:
+        """Return the closest stored signatures, nearest first.
+
+        The probe's own incident is excluded explicitly: an incident is never
+        its own precedent, and letting it match itself would make every verdict
+        look familiar.
+        """
+        if limit < 1:
+            raise ValueError("limit must be at least one")
+        query = sql.SQL(
+            """
+            SELECT incident_id, recorded_at, origin_service, verdict_class,
+                   severity, payload, signature <-> %s AS distance
+            FROM {table}
+            WHERE %s::text IS NULL OR incident_id <> %s
+            ORDER BY distance ASC, incident_id ASC
+            LIMIT %s
+            """
+        ).format(table=self._signatures)
+        probe = _vector_literal(tuple(vector))
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                query, (probe, exclude_incident_id, exclude_incident_id, limit)
+            )
+            rows = await cursor.fetchall()
+        return tuple(
+            NeighbourRecord(
+                record=IncidentSignatureRecord(
+                    incident_id=cast(str, row[0]),
+                    recorded_at=cast(datetime, row[1]),
+                    vector=_stored_vector(row[5]),
+                    severity=cast(str, row[4]),
+                    origin_service=cast("str | None", row[2]),
+                    verdict_class=cast("str | None", row[3]),
+                    payload=cast(dict[str, JsonValue], row[5]),
+                ),
+                distance=float(cast(float, row[6])),
+            )
+            for row in rows
+        )
+
+
+def _vector_literal(vector: tuple[float, ...]) -> str:
+    """Render a vector in pgvector's text input form."""
+    if not vector:
+        raise ValueError("a signature vector cannot be empty")
+    return "[" + ",".join(format(value, ".12g") for value in vector) + "]"
+
+
+def _stored_vector(payload: object) -> tuple[float, ...]:
+    """Recover the signature from the payload written alongside it."""
+    if isinstance(payload, dict):
+        stored = payload.get("signature")
+        if isinstance(stored, list):
+            return tuple(float(value) for value in stored)
+    raise ValueError("a stored signature must carry its vector in the payload")
