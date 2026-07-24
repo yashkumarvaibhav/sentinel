@@ -53,6 +53,12 @@ class QuantileBand:
         return self.aware[self.quantiles[-1]]
 
     @property
+    def expected(self) -> float:
+        """The central (median) aware quantile: the learned expected value."""
+        central = min(self.quantiles, key=lambda quantile: abs(quantile - 0.5))
+        return self.aware[central]
+
+    @property
     def event_explained_upper(self) -> float:
         """The aware-minus-blind gap in the upper band: the learned event lift."""
         return max(self.upper - self.blind_upper, 0.0)

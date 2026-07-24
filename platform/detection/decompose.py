@@ -6,16 +6,43 @@ import hashlib
 import json
 import math
 from collections import OrderedDict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from statistics import median
 from typing import Literal, Protocol
 
 from common.config import DetectorConfig
 from contracts import ContextWindow, DecompFrame, Observation
+from ml.features import ActiveEvent, aware_features
 
 type StreamKey = tuple[str, str]
 type DecompositionStatus = Literal["warming", "context_blocked_warmup", "decomposed"]
+
+
+class DecompositionBand(Protocol):
+    """The learned band a decomposition envelope returns for one tick."""
+
+    @property
+    def lower(self) -> float: ...
+
+    @property
+    def upper(self) -> float: ...
+
+    @property
+    def expected(self) -> float: ...
+
+
+class DecompositionEnvelope(Protocol):
+    """A trained model that predicts a learned band for a ``service.signal`` key.
+
+    Structural so the deterministic detection plane never hard-imports the ML
+    stack: any object with this ``predict`` (e.g. ``ml.envelopes.EnvelopeModel``)
+    can be supplied. ``predict`` returns None when no envelope covers the signal.
+    """
+
+    def predict(
+        self, signal_key: str, features: Mapping[str, float]
+    ) -> DecompositionBand | None: ...
 
 
 class UnconfiguredSignalError(ValueError):
@@ -52,11 +79,18 @@ class DecompositionSink(Protocol):
 class DecompositionEngine:
     """Maintain context-blind EWMA baselines and emit exact decomposition frames."""
 
-    def __init__(self, *, configuration: DetectorConfig, dedup_capacity: int) -> None:
+    def __init__(
+        self,
+        *,
+        configuration: DetectorConfig,
+        dedup_capacity: int,
+        envelope: DecompositionEnvelope | None = None,
+    ) -> None:
         if dedup_capacity < 1:
             raise ValueError("dedup_capacity must be positive")
         self._configuration = configuration
         self._dedup_capacity = dedup_capacity
+        self._envelope = envelope
         self._states: dict[StreamKey, _BaselineState] = {}
         self._results: OrderedDict[str, DecompositionResult] = OrderedDict()
         self._warming = 0
@@ -81,6 +115,16 @@ class DecompositionEngine:
         signal_key = self._signal_key(observation.service, observation.signal)
         floor = self._configuration.absolute_noise_floors[signal_key]
         lifts = self._active_lifts(observation, signal_key, contexts)
+
+        # A registered envelope replaces the EWMA baseline for its signals; every
+        # other signal (and the no-model case) falls through to the deterministic
+        # path below unchanged, so the fallback is byte-identical.
+        if self._envelope is not None:
+            envelope_result = self._envelope_decompose(observation, signal_key, floor, lifts)
+            if envelope_result is not None:
+                self._remember(observation.observation_id, envelope_result)
+                return envelope_result
+
         stream = (observation.service, observation.signal)
         state = self._states.setdefault(stream, _BaselineState())
 
@@ -170,6 +214,71 @@ class DecompositionEngine:
         )
         self._remember(observation.observation_id, result)
         return result
+
+    def _envelope_decompose(
+        self,
+        observation: Observation,
+        signal_key: str,
+        floor: float,
+        lifts: tuple[tuple[ContextWindow, float], ...],
+    ) -> DecompositionResult | None:
+        """Decompose one tick against a learned band; None if no envelope covers it."""
+        assert self._envelope is not None
+        active = tuple(
+            ActiveEvent(multiplier=multiplier, trust_score=context.trust_score)
+            for context, multiplier in lifts
+        )
+        band = self._envelope.predict(signal_key, aware_features(observation.ts, active))
+        if band is None:
+            return None
+
+        # The event component is the aware model's own marginal effect: the median
+        # it predicts now, minus what it would predict with the events turned off.
+        baseline_band = self._envelope.predict(signal_key, aware_features(observation.ts, ()))
+        expected = band.expected
+        base_expected = expected if baseline_band is None else baseline_band.expected
+        explained_event = max(expected - base_expected, 0.0)
+        explained_base = expected - explained_event
+
+        band_low = band.lower
+        band_high = band.upper
+        residual = observation.value - expected
+        excess = max(band_low - observation.value, observation.value - band_high, 0.0)
+        scale = max(floor, (band_high - band_low) / 2.0)
+        residual_score = 0.0 if excess == 0.0 else min(excess / max(scale, 1e-12), 1.0)
+        context_ids = tuple(sorted(context.context_id for context, _ in lifts))
+        frame_identity = {
+            "observation_id": observation.observation_id,
+            "ts": observation.ts.isoformat(),
+            "service": observation.service,
+            "signal": observation.signal,
+            "observed": observation.value,
+            "explained_base": explained_base,
+            "explained_event": explained_event,
+            "residual": residual,
+            "band_low": band_low,
+            "band_high": band_high,
+            "residual_score": residual_score,
+            "context_ids": context_ids,
+            "source": "envelope",
+        }
+        frame = DecompFrame(
+            frame_id=_digest(frame_identity),
+            observation_id=observation.observation_id,
+            ts=observation.ts,
+            service=observation.service,
+            signal=observation.signal,
+            observed=observation.value,
+            explained_base=explained_base,
+            explained_event=explained_event,
+            residual=residual,
+            band_low=band_low,
+            band_high=band_high,
+            residual_score=residual_score,
+            context_ids=context_ids,
+        )
+        self._decomposed += 1
+        return DecompositionResult(status="decomposed", frame=frame, baseline_updated=False)
 
     def baseline_for(self, *, service: str, signal: str) -> float | None:
         """Inspect one stream's learned baseline without mutating it."""
