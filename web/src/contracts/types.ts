@@ -6,7 +6,7 @@
 /**
  * Public contracts exchanged between Sentinel planes.
  */
-export type SentinelContract = Observation | ContextWindow | DecompFrame | Symptom | SymptomEpisode;
+export type SentinelContract = Observation | ContextWindow | DecompFrame | Symptom | SymptomEpisode | AgentAssessment;
 export type TelemetryScalar = string | boolean | number;
 export type Identifier = string;
 export type FlowRefs = Identifier[];
@@ -39,6 +39,30 @@ export type Revision = number;
  * Lifecycle state of an anti-flapping symptom episode.
  */
 export type EpisodeStatus = "ACTIVE" | "CLOSED";
+/**
+ * The independent axes a surge is judged on, one agent per axis.
+ *
+ * Each axis is scored from its own claimed evidence only. An attacker who
+ * keeps one axis calm cannot thereby quiet another, because no agent ever
+ * reads another agent's score.
+ */
+export type EvidenceAxis = "SECURITY" | "RELIABILITY" | "CHANGE_CONFIG" | "BUSINESS_IMPACT";
+export type CoveredKinds = SymptomKind[];
+/**
+ * Which way a measured value sits relative to its stated baseline.
+ */
+export type EvidenceDirection = "ABOVE_BASELINE" | "BELOW_BASELINE" | "AT_BASELINE";
+export type EvidenceRefs2 = Identifier[];
+export type Evidence = EvidenceItem[];
+export type Services = Identifier[];
+/**
+ * Whether an agent had the coverage to score its axis at all.
+ */
+export type AgentStatus = "SCORED" | "INSUFFICIENT";
+/**
+ * Direction of an axis score against the agent's previous assessment.
+ */
+export type AgentTrend = "RISING" | "FALLING" | "STEADY" | "UNKNOWN";
 
 /**
  * One event-time telemetry value, containing evidence but never answer-key data.
@@ -133,4 +157,40 @@ export interface SymptomEpisode {
   service: Identifier;
   signal: SignalName;
   status: EpisodeStatus;
+}
+/**
+ * One agent's evidence-backed verdict about one axis at one event time.
+ *
+ * A calm axis (``SCORED`` at ``0.0`` with no evidence) is a genuine finding:
+ * the claimed detectors ran and saw nothing. An axis whose detectors produced
+ * no coverage is ``INSUFFICIENT`` instead, so absence of evidence is never
+ * silently reported as evidence of absence.
+ */
+export interface AgentAssessment {
+  assessment_id: Identifier;
+  axis: EvidenceAxis;
+  covered_kinds?: CoveredKinds;
+  evidence?: Evidence;
+  note: HumanText;
+  score: Probability;
+  services?: Services;
+  status: AgentStatus;
+  trend: AgentTrend;
+  ts: UtcDatetime;
+}
+/**
+ * One measured value that justifies part of an axis score.
+ *
+ * An agent never reports a bare number: every point of score is traceable to
+ * an item naming the feature, what was measured, what it is compared with,
+ * which way it moved and how much of the score it contributed.
+ */
+export interface EvidenceItem {
+  baseline: FiniteFloat;
+  contribution: Probability;
+  direction: EvidenceDirection;
+  evidence_refs?: EvidenceRefs2;
+  feature: SignalName;
+  note: HumanText;
+  value: FiniteFloat;
 }

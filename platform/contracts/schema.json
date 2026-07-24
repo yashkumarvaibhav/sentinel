@@ -1,5 +1,87 @@
 {
   "$defs": {
+    "AgentAssessment": {
+      "additionalProperties": false,
+      "description": "One agent's evidence-backed verdict about one axis at one event time.\n\nA calm axis (``SCORED`` at ``0.0`` with no evidence) is a genuine finding:\nthe claimed detectors ran and saw nothing. An axis whose detectors produced\nno coverage is ``INSUFFICIENT`` instead, so absence of evidence is never\nsilently reported as evidence of absence.",
+      "properties": {
+        "assessment_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "axis": {
+          "$ref": "#/$defs/EvidenceAxis"
+        },
+        "covered_kinds": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SymptomKind"
+          },
+          "title": "Covered Kinds",
+          "type": "array"
+        },
+        "evidence": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/EvidenceItem"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "note": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "score": {
+          "$ref": "#/$defs/Probability"
+        },
+        "services": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "title": "Services",
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/AgentStatus"
+        },
+        "trend": {
+          "$ref": "#/$defs/AgentTrend"
+        },
+        "ts": {
+          "$ref": "#/$defs/UtcDatetime"
+        }
+      },
+      "required": [
+        "assessment_id",
+        "axis",
+        "ts",
+        "status",
+        "score",
+        "trend",
+        "note"
+      ],
+      "title": "AgentAssessment",
+      "type": "object"
+    },
+    "AgentStatus": {
+      "description": "Whether an agent had the coverage to score its axis at all.",
+      "enum": [
+        "SCORED",
+        "INSUFFICIENT"
+      ],
+      "title": "AgentStatus",
+      "type": "string"
+    },
+    "AgentTrend": {
+      "description": "Direction of an axis score against the agent's previous assessment.",
+      "enum": [
+        "RISING",
+        "FALLING",
+        "STEADY",
+        "UNKNOWN"
+      ],
+      "title": "AgentTrend",
+      "type": "string"
+    },
     "ContextWindow": {
       "additionalProperties": false,
       "description": "A trusted external event and the signals whose volume it may explain.",
@@ -133,6 +215,69 @@
       ],
       "title": "EpisodeStatus",
       "type": "string"
+    },
+    "EvidenceAxis": {
+      "description": "The independent axes a surge is judged on, one agent per axis.\n\nEach axis is scored from its own claimed evidence only. An attacker who\nkeeps one axis calm cannot thereby quiet another, because no agent ever\nreads another agent's score.",
+      "enum": [
+        "SECURITY",
+        "RELIABILITY",
+        "CHANGE_CONFIG",
+        "BUSINESS_IMPACT"
+      ],
+      "title": "EvidenceAxis",
+      "type": "string"
+    },
+    "EvidenceDirection": {
+      "description": "Which way a measured value sits relative to its stated baseline.",
+      "enum": [
+        "ABOVE_BASELINE",
+        "BELOW_BASELINE",
+        "AT_BASELINE"
+      ],
+      "title": "EvidenceDirection",
+      "type": "string"
+    },
+    "EvidenceItem": {
+      "additionalProperties": false,
+      "description": "One measured value that justifies part of an axis score.\n\nAn agent never reports a bare number: every point of score is traceable to\nan item naming the feature, what was measured, what it is compared with,\nwhich way it moved and how much of the score it contributed.",
+      "properties": {
+        "baseline": {
+          "$ref": "#/$defs/FiniteFloat"
+        },
+        "contribution": {
+          "$ref": "#/$defs/Probability"
+        },
+        "direction": {
+          "$ref": "#/$defs/EvidenceDirection"
+        },
+        "evidence_refs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "feature": {
+          "$ref": "#/$defs/SignalName"
+        },
+        "note": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "value": {
+          "$ref": "#/$defs/FiniteFloat"
+        }
+      },
+      "required": [
+        "feature",
+        "value",
+        "baseline",
+        "direction",
+        "contribution",
+        "note"
+      ],
+      "title": "EvidenceItem",
+      "type": "object"
     },
     "FiniteFloat": {
       "type": "number"
@@ -419,6 +564,9 @@
     },
     {
       "$ref": "#/$defs/SymptomEpisode"
+    },
+    {
+      "$ref": "#/$defs/AgentAssessment"
     }
   ],
   "title": "SentinelContract"

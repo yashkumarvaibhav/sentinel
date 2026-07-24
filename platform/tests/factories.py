@@ -1,5 +1,7 @@
 """Small validated configuration factories shared by detector unit tests."""
 
+from datetime import UTC, datetime, timedelta
+
 from common.config import (
     BehavioralRatioConfig,
     BehavioralRatioRuleConfig,
@@ -18,6 +20,10 @@ from common.config import (
     SequenceRatioRuleConfig,
     SilenceRuleConfig,
 )
+from contracts import EpisodeStatus, EvidenceAxis, SymptomEpisode, SymptomKind
+from decision.config import EvidenceAxisConfig, EvidenceClaimConfig
+
+EPOCH = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
 
 
 def behavioral_ratio_config(
@@ -222,3 +228,52 @@ def episode_config(
         clear_score=clear_score,
     )
     return EpisodeConfig(policies={"RESIDUAL_EXCEED": policy, "SATURATION": policy})
+
+
+def symptom_episode(
+    *,
+    kind: SymptomKind,
+    service: str = "frontend",
+    signal: str = "request_rate",
+    peak_score: float = 1.0,
+    status: EpisodeStatus = EpisodeStatus.ACTIVE,
+    opened_offset_seconds: float = 0.0,
+    breach_tick_count: int = 3,
+    episode_id: str | None = None,
+) -> SymptomEpisode:
+    """Build one durable episode the decision plane can be handed directly."""
+    opened = EPOCH + timedelta(seconds=opened_offset_seconds)
+    identity = episode_id or f"{kind.value}:{service}:{signal}:{opened_offset_seconds}"
+    return SymptomEpisode(
+        episode_id=identity,
+        kind=kind,
+        service=service,
+        signal=signal,
+        status=status,
+        opened_ts=opened,
+        confirmed_ts=opened,
+        last_breach_ts=opened,
+        closed_ts=opened if status is EpisodeStatus.CLOSED else None,
+        peak_score=peak_score,
+        breach_tick_count=breach_tick_count,
+        revision=1,
+        opening_symptom_id=f"{identity}:open",
+        peak_symptom_id=f"{identity}:peak",
+        latest_symptom_id=f"{identity}:latest",
+    )
+
+
+def evidence_axis_config(
+    *,
+    axis: EvidenceAxis,
+    claims: tuple[EvidenceClaimConfig, ...],
+    minimum_contribution: float = 0.05,
+    trend_deadband: float = 0.05,
+) -> EvidenceAxisConfig:
+    """Build one axis's evidence configuration without reading the committed file."""
+    return EvidenceAxisConfig(
+        axis=axis,
+        minimum_contribution=minimum_contribution,
+        trend_deadband=trend_deadband,
+        claims=claims,
+    )

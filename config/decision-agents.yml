@@ -1,0 +1,56 @@
+# Independent evidence agents.
+#
+# One agent per axis. Each scores 0-1 from the durable symptom episodes it
+# claims here and from nothing else: no agent is given another agent's score,
+# so keeping one axis calm can never quiet another. Weights are the operator's
+# a-priori statement of how strongly a fully-breaching episode of that kind
+# argues for the axis; contributions combine as independent evidence
+# (1 - prod(1 - w*peak)), so corroboration from several kinds raises a score.
+#
+# Axes may claim overlapping evidence on purpose - a saturating resource is
+# honestly both a reliability fact and (in 4.2) a business-impact fact.
+# Independence is about never reading another agent's conclusion, not about
+# partitioning the world.
+version: 1
+axes:
+  # Deformation of the behavioral ratios a legitimate surge preserves, plus the
+  # volume the context-aware band could not explain. Deliberately blind to
+  # latency, saturation and errors: an attacker who keeps the mesh healthy is
+  # still fully visible on this axis.
+  - axis: SECURITY
+    minimum_contribution: 0.05
+    trend_deadband: 0.05
+    claims:
+      - kind: RATIO_DEFORM
+        weight: 0.85
+        signals:
+          - source_entropy
+          - auth_failure_ratio
+          - syn_ack_ratio
+          - rpc_retry_amplification
+          - path_entropy
+          - interarrival_cv
+          - crowd_coherence
+      # Unexplained residual is suspicious but not discriminating on its own -
+      # a mis-trusted event calendar produces it too. Weighted below the
+      # behavioral evidence that a real event cannot fake.
+      - kind: RESIDUAL_EXCEED
+        weight: 0.60
+
+  # The shape a self-inflicted fault leaves behind. Deliberately blind to who is
+  # calling: a fault stays visible during an attack, and an attack cannot
+  # inflate this score.
+  - axis: RELIABILITY
+    minimum_contribution: 0.05
+    trend_deadband: 0.05
+    claims:
+      - kind: EDGE_DEGRADED
+        weight: 0.85
+      - kind: SATURATION
+        weight: 0.80
+      - kind: SILENCE
+        weight: 0.75
+      - kind: DROP
+        weight: 0.70
+      - kind: LOG_BURST
+        weight: 0.65
