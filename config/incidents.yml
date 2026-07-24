@@ -41,3 +41,28 @@ severity:
     high: MEDIUM
     medium: LOW
     low: LOW
+
+# Collapsing the storm to one origin.
+#
+# Three independent priors, weighted to sum to one:
+#
+#   onset       - the service that started first is the likelier cause. A prior,
+#                 never a rule: detectors confirm at different speeds, so the
+#                 origin's own log burst often lands after the edge symptom it
+#                 caused one hop up.
+#   reachability- a cause is downstream of its effects. The fraction of the
+#                 other affected services that depend on this one, directly or
+#                 transitively, over the committed dependency graph.
+#   accusation  - a degraded `caller -> dependency.callee` edge is evidence FOR
+#                 the callee and AGAINST the caller: the caller's trouble is
+#                 already explained by the dependency it is waiting on.
+causal:
+  onset_weight: 0.30
+  reachability_weight: 0.35
+  accusation_weight: 0.35
+  # If the top two candidates are this close, the storm does not point anywhere
+  # clearly and no origin is named. An ambiguous answer is more useful than a
+  # confident wrong one.
+  minimum_margin: 0.05
+  # Episode signals of this shape name the dependency they measure.
+  dependency_signal_prefix: "dependency."

@@ -332,6 +332,8 @@ class Incident(ContractModel):
     kinds: tuple[SymptomKind, ...] = Field(min_length=1)
     episode_ids: tuple[Identifier, ...] = Field(min_length=1)
     business_impact: Probability | None = None
+    origin_service: Identifier | None = None
+    origin_confidence: Probability | None = None
     merged_incident_ids: tuple[Identifier, ...] = ()
     revision: int = Field(ge=1)
     note: HumanText
@@ -358,4 +360,8 @@ class Incident(ContractModel):
             raise ValueError("the anchoring episode must be a member of the incident")
         if self.incident_id in self.merged_incident_ids:
             raise ValueError("an incident cannot record itself as merged away")
+        if (self.origin_service is None) != (self.origin_confidence is None):
+            raise ValueError("an origin and its confidence are recorded together or not at all")
+        if self.origin_service is not None and self.origin_service not in self.services:
+            raise ValueError("the collapsed origin must be a service the incident affects")
         return self

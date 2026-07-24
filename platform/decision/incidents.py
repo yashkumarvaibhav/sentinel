@@ -32,6 +32,7 @@ from contracts import (
     IncidentState,
     SymptomEpisode,
 )
+from decision.causal import collapse_to_origin
 from decision.config import IncidentsConfig
 
 _CRITICALITY_ORDER = ("low", "medium", "high", "critical")
@@ -62,6 +63,7 @@ class IncidentTracker:
         topology: TopologyConfig,
     ) -> None:
         self._configuration = configuration
+        self._topology = topology
         self._criticality = {service.service: service.criticality for service in topology.services}
         self._hops = _hop_distances(topology)
         self._last_ts: datetime | None = None
@@ -169,6 +171,11 @@ class IncidentTracker:
         )
         impact = _impact_for(business, frozenset(episode_ids))
         severity = self._severity(cluster.episodes, impact=impact)
+        collapse = collapse_to_origin(
+            cluster.episodes,
+            configuration=self._configuration.causal,
+            topology=self._topology,
+        )
         revision = self._revisions.get(incident_id, 0) + 1
         self._revisions[incident_id] = revision
 
@@ -180,7 +187,7 @@ class IncidentTracker:
         note = (
             f"{len(episode_ids)} episodes across {len(services)} "
             f"{'service' if len(services) == 1 else 'services'} collapsed into one incident; "
-            f"business impact {measured}"
+            f"business impact {measured}; origin: {collapse.note}"
         )
         return Incident(
             incident_id=incident_id,
@@ -193,6 +200,8 @@ class IncidentTracker:
             kinds=kinds,
             episode_ids=episode_ids,
             business_impact=impact,
+            origin_service=None if collapse.origin is None else collapse.origin.service,
+            origin_confidence=None if collapse.origin is None else collapse.origin.score,
             merged_incident_ids=merged,
             revision=revision,
             note=note,

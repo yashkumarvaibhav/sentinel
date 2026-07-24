@@ -323,6 +323,8 @@ export interface Incident {
   merged_incident_ids?: MergedIncidentIds;
   note: HumanText;
   opened_ts: UtcDatetime;
+  origin_confidence?: Probability | null;
+  origin_service?: Identifier | null;
   revision: Revision1;
   services: Services2;
   severity: IncidentSeverity;

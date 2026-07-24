@@ -631,6 +631,23 @@ class IncidentSeverityConfig(DecisionConfigModel):
         return severity
 
 
+class CausalCollapseConfig(DecisionConfigModel):
+    """The weighted priors that collapse a symptom storm to one origin service."""
+
+    onset_weight: Probability
+    reachability_weight: Probability
+    accusation_weight: Probability
+    minimum_margin: Probability
+    dependency_signal_prefix: Identifier
+
+    @model_validator(mode="after")
+    def validate_causal(self) -> Self:
+        total = self.onset_weight + self.reachability_weight + self.accusation_weight
+        if abs(total - 1.0) > 1e-9:
+            raise ValueError(f"causal priors must be weighted to sum to one, got {total}")
+        return self
+
+
 class IncidentsConfig(DecisionConfigModel):
     """One fully validated snapshot of the incident clustering policy."""
 
@@ -638,6 +655,7 @@ class IncidentsConfig(DecisionConfigModel):
     clustering: IncidentClusteringConfig
     lifecycle: IncidentLifecycleConfig
     severity: IncidentSeverityConfig
+    causal: CausalCollapseConfig
 
     @property
     def fingerprint(self) -> str:

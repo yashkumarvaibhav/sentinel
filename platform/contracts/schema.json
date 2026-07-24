@@ -427,6 +427,28 @@
         "opened_ts": {
           "$ref": "#/$defs/UtcDatetime"
         },
+        "origin_confidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Probability"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "origin_service": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "revision": {
           "minimum": 1,
           "title": "Revision",

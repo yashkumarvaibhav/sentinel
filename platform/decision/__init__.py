@@ -8,6 +8,7 @@ from decision.agents import (
     ReliabilityEvidenceAgent,
     SecurityEvidenceAgent,
 )
+from decision.causal import CausalCollapse, OriginCandidate, collapse_to_origin
 from decision.changes import ChangeFeed, FlagChange, RolloutEvent
 from decision.incidents import IncidentTracker
 from decision.verdict import EvidenceFusion, FusionResult, FusionStatus
@@ -15,6 +16,7 @@ from decision.verdict import EvidenceFusion, FusionResult, FusionStatus
 __all__ = [
     "AgentEvidenceWindow",
     "BusinessImpactEvidenceAgent",
+    "CausalCollapse",
     "ChangeConfigEvidenceAgent",
     "ChangeFeed",
     "EvidenceAgent",
@@ -23,7 +25,9 @@ __all__ = [
     "FusionResult",
     "FusionStatus",
     "IncidentTracker",
+    "OriginCandidate",
     "ReliabilityEvidenceAgent",
     "RolloutEvent",
     "SecurityEvidenceAgent",
+    "collapse_to_origin",
 ]
