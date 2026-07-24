@@ -9,6 +9,7 @@ from decision.agents import (
     SecurityEvidenceAgent,
 )
 from decision.changes import ChangeFeed, FlagChange, RolloutEvent
+from decision.incidents import IncidentTracker
 from decision.verdict import EvidenceFusion, FusionResult, FusionStatus
 
 __all__ = [
@@ -21,6 +22,7 @@ __all__ = [
     "FlagChange",
     "FusionResult",
     "FusionStatus",
+    "IncidentTracker",
     "ReliabilityEvidenceAgent",
     "RolloutEvent",
     "SecurityEvidenceAgent",

@@ -290,3 +290,72 @@ class Verdict(ContractModel):
         ):
             raise ValueError("CAPACITY_SHORTAGE only refines an operational fault")
         return self
+
+
+class IncidentState(StrEnum):
+    """Where an incident is in its life, from first symptom to resolved."""
+
+    OPEN = "OPEN"
+    MITIGATING = "MITIGATING"
+    MONITORING = "MONITORING"
+    RESOLVED = "RESOLVED"
+
+
+class IncidentSeverity(StrEnum):
+    """How much this incident matters, in the language a responder pages on."""
+
+    CRITICAL = "CRITICAL"
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+
+
+class Incident(ContractModel):
+    """One real-world problem, assembled from the storm of symptoms it caused.
+
+    A single fault lights many detectors across many services. An incident is
+    the collapse of that storm into the one thing an on-call person is actually
+    dealing with: co-occurring episodes on services that are near each other in
+    the topology become one incident, not twelve alerts.
+
+    Identity is anchored to the earliest episode in the cluster, so the incident
+    keeps its id as the storm grows around it.
+    """
+
+    incident_id: Identifier
+    anchor_episode_id: Identifier
+    opened_ts: UtcDatetime
+    last_activity_ts: UtcDatetime
+    state: IncidentState
+    severity: IncidentSeverity
+    services: tuple[Identifier, ...] = Field(min_length=1)
+    kinds: tuple[SymptomKind, ...] = Field(min_length=1)
+    episode_ids: tuple[Identifier, ...] = Field(min_length=1)
+    business_impact: Probability | None = None
+    merged_incident_ids: tuple[Identifier, ...] = ()
+    revision: int = Field(ge=1)
+    note: HumanText
+
+    @field_validator("services", "episode_ids", "merged_incident_ids")
+    @classmethod
+    def unique_members(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        """Every membership list on an incident is an ordered set."""
+        return ensure_unique(values, field_name="members")
+
+    @field_validator("kinds")
+    @classmethod
+    def unique_incident_kinds(cls, values: tuple[SymptomKind, ...]) -> tuple[SymptomKind, ...]:
+        """An incident names each symptom kind once, however many episodes carry it."""
+        ensure_unique(tuple(kind.value for kind in values), field_name="kinds")
+        return values
+
+    @model_validator(mode="after")
+    def validate_incident(self) -> Self:
+        """Keep the timeline forward-moving and the anchor inside the cluster."""
+        if self.last_activity_ts < self.opened_ts:
+            raise ValueError("last_activity_ts must not precede opened_ts")
+        if self.anchor_episode_id not in self.episode_ids:
+            raise ValueError("the anchoring episode must be a member of the incident")
+        if self.incident_id in self.merged_incident_ids:
+            raise ValueError("an incident cannot record itself as merged away")
+        return self

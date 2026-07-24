@@ -373,6 +373,118 @@
       "minLength": 1,
       "type": "string"
     },
+    "Incident": {
+      "additionalProperties": false,
+      "description": "One real-world problem, assembled from the storm of symptoms it caused.\n\nA single fault lights many detectors across many services. An incident is\nthe collapse of that storm into the one thing an on-call person is actually\ndealing with: co-occurring episodes on services that are near each other in\nthe topology become one incident, not twelve alerts.\n\nIdentity is anchored to the earliest episode in the cluster, so the incident\nkeeps its id as the storm grows around it.",
+      "properties": {
+        "anchor_episode_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "business_impact": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Probability"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "episode_ids": {
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "minItems": 1,
+          "title": "Episode Ids",
+          "type": "array"
+        },
+        "incident_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "kinds": {
+          "items": {
+            "$ref": "#/$defs/SymptomKind"
+          },
+          "minItems": 1,
+          "title": "Kinds",
+          "type": "array"
+        },
+        "last_activity_ts": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "merged_incident_ids": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "title": "Merged Incident Ids",
+          "type": "array"
+        },
+        "note": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "opened_ts": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "revision": {
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "services": {
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "minItems": 1,
+          "title": "Services",
+          "type": "array"
+        },
+        "severity": {
+          "$ref": "#/$defs/IncidentSeverity"
+        },
+        "state": {
+          "$ref": "#/$defs/IncidentState"
+        }
+      },
+      "required": [
+        "incident_id",
+        "anchor_episode_id",
+        "opened_ts",
+        "last_activity_ts",
+        "state",
+        "severity",
+        "services",
+        "kinds",
+        "episode_ids",
+        "revision",
+        "note"
+      ],
+      "title": "Incident",
+      "type": "object"
+    },
+    "IncidentSeverity": {
+      "description": "How much this incident matters, in the language a responder pages on.",
+      "enum": [
+        "CRITICAL",
+        "HIGH",
+        "MEDIUM",
+        "LOW"
+      ],
+      "title": "IncidentSeverity",
+      "type": "string"
+    },
+    "IncidentState": {
+      "description": "Where an incident is in its life, from first symptom to resolved.",
+      "enum": [
+        "OPEN",
+        "MITIGATING",
+        "MONITORING",
+        "RESOLVED"
+      ],
+      "title": "IncidentState",
+      "type": "string"
+    },
     "Observation": {
       "additionalProperties": false,
       "description": "One event-time telemetry value, containing evidence but never answer-key data.",
@@ -786,6 +898,9 @@
     },
     {
       "$ref": "#/$defs/Verdict"
+    },
+    {
+      "$ref": "#/$defs/Incident"
     }
   ],
   "title": "SentinelContract"

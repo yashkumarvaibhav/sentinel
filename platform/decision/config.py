@@ -31,7 +31,14 @@ from pydantic import (
     model_validator,
 )
 
-from contracts import ChangeKind, EvidenceAxis, ReasonSubtype, SymptomKind, VerdictClass
+from contracts import (
+    ChangeKind,
+    EvidenceAxis,
+    IncidentSeverity,
+    ReasonSubtype,
+    SymptomKind,
+    VerdictClass,
+)
 
 CRITICALITY_LEVELS = ("critical", "high", "medium", "low")
 
@@ -86,6 +93,17 @@ def _named_reason_subtype(value: object) -> object:
     return value
 
 
+def _named_severity(value: object) -> object:
+    """Accept the YAML spelling of an incident severity under strict validation."""
+    if isinstance(value, str):
+        try:
+            return IncidentSeverity(value)
+        except ValueError as error:
+            known = ", ".join(member.value for member in IncidentSeverity)
+            raise ValueError(f"unknown severity {value!r}; known are {known}") from error
+    return value
+
+
 def _named_evidence_axis(value: object) -> object:
     """Accept the YAML spelling of an evidence axis under strict validation."""
     if isinstance(value, str):
@@ -102,6 +120,7 @@ type NamedAxis = Annotated[EvidenceAxis, BeforeValidator(_named_evidence_axis)]
 type NamedChangeKind = Annotated[ChangeKind, BeforeValidator(_named_change_kind)]
 type NamedVerdictClass = Annotated[VerdictClass, BeforeValidator(_named_verdict_class)]
 type NamedReasonSubtype = Annotated[ReasonSubtype, BeforeValidator(_named_reason_subtype)]
+type NamedSeverity = Annotated[IncidentSeverity, BeforeValidator(_named_severity)]
 type UtcDatetime = Annotated[datetime, AfterValidator(_utc)]
 type Identifier = Annotated[
     str,
@@ -401,6 +420,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--agents", type=Path, required=True, help="evidence-agent configuration")
     parser.add_argument("--deployments", type=Path, help="committed change-evidence ledger")
     parser.add_argument("--verdict-rules", type=Path, help="ordered evidence-fusion rule table")
+    parser.add_argument("--incidents", type=Path, help="incident clustering policy")
     args = parser.parse_args(argv)
     print(f"evidence-agent configuration valid: {load_evidence_agents(args.agents).fingerprint}")
     if args.deployments is not None:
@@ -409,6 +429,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.verdict_rules is not None:
         fingerprint = load_verdict_rules(args.verdict_rules).fingerprint
         print(f"verdict rules valid: {fingerprint}")
+    if args.incidents is not None:
+        print(f"incident policy valid: {load_incidents(args.incidents).fingerprint}")
     return 0
 
 
@@ -545,5 +567,93 @@ def load_verdict_rules(path: Path) -> VerdictRulesConfig:
     """Load and strictly validate the ordered evidence-fusion rule table."""
     try:
         return VerdictRulesConfig.model_validate(_document(path))
+    except ValidationError as error:
+        raise DecisionConfigLoadError(f"{path.name}: {error}") from error
+
+
+class IncidentClusteringConfig(DecisionConfigModel):
+    """When two durable episodes are evidence of the same real-world problem."""
+
+    join_window_seconds: PositiveSeconds
+    max_topology_hops: int = Field(ge=0, le=16)
+
+
+class IncidentLifecycleConfig(DecisionConfigModel):
+    """How long an incident stays watched after its last symptom clears."""
+
+    resolve_after_seconds: PositiveSeconds
+
+
+class SeverityBandConfig(DecisionConfigModel):
+    """One measured-impact floor and the severity it earns."""
+
+    severity: NamedSeverity
+    minimum_impact: Probability
+
+
+class IncidentSeverityConfig(DecisionConfigModel):
+    """How a measured impact, or its absence, becomes a page-able severity."""
+
+    impact_bands: tuple[SeverityBandConfig, ...] = Field(min_length=1)
+    criticality_fallback: dict[str, NamedSeverity] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_severity(self) -> Self:
+        severities = [band.severity for band in self.impact_bands]
+        if len(severities) != len(set(severities)):
+            raise ValueError("each severity may appear in only one band")
+        floors = [band.minimum_impact for band in self.impact_bands]
+        if floors != sorted(floors, reverse=True):
+            raise ValueError("impact bands must be listed from highest floor to lowest")
+        if floors[-1] != 0.0:
+            raise ValueError("the lowest band must accept every measured impact")
+        unknown = sorted(set(self.criticality_fallback) - set(CRITICALITY_LEVELS))
+        if unknown:
+            raise ValueError(f"unknown service criticality: {', '.join(unknown)}")
+        missing = sorted(set(CRITICALITY_LEVELS) - set(self.criticality_fallback))
+        if missing:
+            raise ValueError(f"every criticality needs a fallback severity: {', '.join(missing)}")
+        return self
+
+    def band_for(self, impact: float) -> IncidentSeverity:
+        """The severity a measured user-impact number earns."""
+        for band in self.impact_bands:
+            if impact >= band.minimum_impact:
+                return band.severity
+        # defensive: the lowest band is validated to accept everything
+        raise DecisionConfigLoadError(f"no severity band accepts impact {impact}")
+
+    def fallback_for(self, criticality: str) -> IncidentSeverity:
+        """The severity an unmeasured incident earns from topology alone."""
+        severity = self.criticality_fallback.get(criticality)
+        if severity is None:
+            raise DecisionConfigLoadError(f"unknown service criticality: {criticality}")
+        return severity
+
+
+class IncidentsConfig(DecisionConfigModel):
+    """One fully validated snapshot of the incident clustering policy."""
+
+    version: Literal[1]
+    clustering: IncidentClusteringConfig
+    lifecycle: IncidentLifecycleConfig
+    severity: IncidentSeverityConfig
+
+    @property
+    def fingerprint(self) -> str:
+        """Content hash recorded with any incident assembled under this policy."""
+        rendered = json.dumps(
+            self.model_dump(mode="json"),
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+
+
+def load_incidents(path: Path) -> IncidentsConfig:
+    """Load and strictly validate the incident clustering configuration."""
+    try:
+        return IncidentsConfig.model_validate(_document(path))
     except ValidationError as error:
         raise DecisionConfigLoadError(f"{path.name}: {error}") from error

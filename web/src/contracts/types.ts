@@ -7,7 +7,15 @@
  * Public contracts exchanged between Sentinel planes.
  */
 export type SentinelContract =
-  Observation | ContextWindow | DecompFrame | Symptom | SymptomEpisode | ChangeEvent | AgentAssessment | Verdict;
+  | Observation
+  | ContextWindow
+  | DecompFrame
+  | Symptom
+  | SymptomEpisode
+  | ChangeEvent
+  | AgentAssessment
+  | Verdict
+  | Incident;
 export type TelemetryScalar = string | boolean | number;
 export type Identifier = string;
 export type FlowRefs = Identifier[];
@@ -88,6 +96,28 @@ export type ReasonSubtype = "CAPACITY_SHORTAGE";
 export type VerdictClass = "EXPECTED_EVENT" | "ATTACK" | "OPERATIONAL_FAULT" | "CODE_CONFIG_FAULT" | "COMBINATION";
 export type RejectedAlternatives = RejectedAlternative[];
 export type Services1 = Identifier[];
+/**
+ * @minItems 1
+ */
+export type EpisodeIds = [Identifier, ...Identifier[]];
+/**
+ * @minItems 1
+ */
+export type Kinds = [SymptomKind, ...SymptomKind[]];
+export type MergedIncidentIds = Identifier[];
+export type Revision1 = number;
+/**
+ * @minItems 1
+ */
+export type Services2 = [Identifier, ...Identifier[]];
+/**
+ * How much this incident matters, in the language a responder pages on.
+ */
+export type IncidentSeverity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
+/**
+ * Where an incident is in its life, from first symptom to resolved.
+ */
+export type IncidentState = "OPEN" | "MITIGATING" | "MONITORING" | "RESOLVED";
 
 /**
  * One event-time telemetry value, containing evidence but never answer-key data.
@@ -271,4 +301,30 @@ export interface Distribution {
 export interface RejectedAlternative {
   reason: HumanText;
   verdict_class: VerdictClass;
+}
+/**
+ * One real-world problem, assembled from the storm of symptoms it caused.
+ *
+ * A single fault lights many detectors across many services. An incident is
+ * the collapse of that storm into the one thing an on-call person is actually
+ * dealing with: co-occurring episodes on services that are near each other in
+ * the topology become one incident, not twelve alerts.
+ *
+ * Identity is anchored to the earliest episode in the cluster, so the incident
+ * keeps its id as the storm grows around it.
+ */
+export interface Incident {
+  anchor_episode_id: Identifier;
+  business_impact?: Probability | null;
+  episode_ids: EpisodeIds;
+  incident_id: Identifier;
+  kinds: Kinds;
+  last_activity_ts: UtcDatetime;
+  merged_incident_ids?: MergedIncidentIds;
+  note: HumanText;
+  opened_ts: UtcDatetime;
+  revision: Revision1;
+  services: Services2;
+  severity: IncidentSeverity;
+  state: IncidentState;
 }

@@ -1,0 +1,43 @@
+# Incident clustering, lifecycle and severity.
+#
+# One fault lights many detectors. This file states when two durable episodes
+# are evidence of the same real-world problem, how long an incident stays
+# watched after its last symptom clears, and how a measured user-impact number
+# becomes the severity a responder is paged on.
+version: 1
+
+clustering:
+  # Two episodes co-occur if their windows overlap once each is widened by this
+  # slack. Detectors confirm at different speeds - a saturation trend is slower
+  # to open than a dependency edge - so strict overlap would split one storm.
+  join_window_seconds: 120.0
+  # Episodes on different services join only if those services are within this
+  # many dependency hops. The service graph diameter is 2, so one hop keeps a
+  # real propagation together while refusing to merge unrelated corners.
+  max_topology_hops: 1
+
+lifecycle:
+  # After every member episode has closed, the incident is watched rather than
+  # declared over: symptoms that come straight back belong to the same problem.
+  resolve_after_seconds: 300.0
+
+severity:
+  # Read top down; the first band whose floor the measured impact clears wins.
+  impact_bands:
+    - severity: CRITICAL
+      minimum_impact: 0.75
+    - severity: HIGH
+      minimum_impact: 0.50
+    - severity: MEDIUM
+      minimum_impact: 0.25
+    - severity: LOW
+      minimum_impact: 0.0
+  # When the business-impact axis had no coverage there is no measured impact,
+  # so severity falls back to the topology criticality of the worst-affected
+  # service - deliberately one band below what the same criticality would earn
+  # with evidence, because an unmeasured incident is not a proven emergency.
+  criticality_fallback:
+    critical: HIGH
+    high: MEDIUM
+    medium: LOW
+    low: LOW
