@@ -1,0 +1,28 @@
+# Concept-drift monitoring settings (Phase 3.7). Config-as-data: the drift board
+# reads these knobs and this file's content hash is recorded with any drift report.
+# Kept separate from the other ml-*.yml files so their fingerprints stay stable.
+version: 1
+
+# Detector: adwin (ADaptive WINdowing — deterministic, parameter-light) or kswin
+# (a windowed Kolmogorov-Smirnov test, seeded for determinism).
+detector: adwin
+adwin_delta: 0.002
+kswin_alpha: 0.005
+kswin_window_size: 100
+kswin_stat_size: 30
+kswin_seed: 20260724
+
+# The feature/prediction streams the board watches. Drift on any of these is a
+# META-symptom — the learned model's world has shifted — that alarms the
+# self-health board so a stale model is caught before it silently mis-scores.
+streams: [residual_score, anomaly_score, forecast_error]
+
+# Injected-drift demonstration: a stable regime followed by a shifted one, per
+# stream (each [mean, sd]). Drift must fire in the shifted half and never in the
+# stable half.
+demo:
+  seed: 70100
+  stable_samples: 300
+  drift_samples: 300
+  stable: [0.0, 1.0]
+  drift: [3.0, 1.0]

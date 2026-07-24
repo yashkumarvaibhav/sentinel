@@ -348,6 +348,55 @@ class AutoencoderParamsConfig(MlConfigModel):
         return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
 
 
+class DriftDemo(MlConfigModel):
+    """A stable-then-shifted stream for the injected-drift demonstration."""
+
+    seed: int = Field(ge=0)
+    stable_samples: int = Field(ge=1, le=1_000_000)
+    drift_samples: int = Field(ge=1, le=1_000_000)
+    stable: tuple[float, float]  # (mean, sd)
+    drift: tuple[float, float]  # (mean, sd)
+
+    @model_validator(mode="after")
+    def validate_demo(self) -> Self:
+        if self.stable[1] < 0.0 or self.drift[1] < 0.0:
+            raise ValueError("demo standard deviations must be non-negative")
+        return self
+
+
+class DriftParamsConfig(MlConfigModel):
+    """Concept-drift detector settings + the streams the board monitors."""
+
+    version: Literal[1]
+    detector: Literal["adwin", "kswin"]
+    adwin_delta: Quantile
+    kswin_alpha: Quantile
+    kswin_window_size: int = Field(ge=2, le=1_000_000)
+    kswin_stat_size: int = Field(ge=2, le=1_000_000)
+    kswin_seed: int = Field(ge=0)
+    streams: tuple[Identifier, ...] = Field(min_length=1)
+    demo: DriftDemo
+
+    @model_validator(mode="after")
+    def validate_drift(self) -> Self:
+        if self.kswin_stat_size >= self.kswin_window_size:
+            raise ValueError("kswin_stat_size must be smaller than kswin_window_size")
+        if len(self.streams) != len(set(self.streams)):
+            raise ValueError("streams must be unique")
+        return self
+
+    @property
+    def fingerprint(self) -> str:
+        """Content hash recorded with any drift report built under these settings."""
+        rendered = json.dumps(
+            self.model_dump(mode="json"),
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+
+
 class CalibrationParamsConfig(MlConfigModel):
     """Conformal-calibration split fraction + calibration-metric settings."""
 
@@ -436,6 +485,14 @@ def load_calibration_params(path: Path) -> CalibrationParamsConfig:
         raise MlConfigLoadError(f"{path.name}: {error}") from error
 
 
+def load_drift_params(path: Path) -> DriftParamsConfig:
+    """Load and strictly validate the concept-drift monitoring configuration."""
+    try:
+        return DriftParamsConfig.model_validate(_load_yaml_mapping(path))
+    except ValidationError as error:
+        raise MlConfigLoadError(f"{path.name}: {error}") from error
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Validate ml configuration file(s) and print their reproducibility fingerprints."""
     parser = argparse.ArgumentParser(prog="python -m ml.config")
@@ -447,6 +504,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--autoencoder", type=Path, help="auth-sequence autoencoder hyperparameters"
     )
     parser.add_argument("--calibration", type=Path, help="conformal-calibration settings")
+    parser.add_argument("--drift", type=Path, help="concept-drift monitoring settings")
     args = parser.parse_args(argv)
     provided = (
         args.path,
@@ -455,6 +513,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.anomaly,
         args.autoencoder,
         args.calibration,
+        args.drift,
     )
     if all(arg is None for arg in provided):
         parser.error("at least one configuration path is required")
@@ -472,6 +531,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.calibration is not None:
         fingerprint = load_calibration_params(args.calibration).fingerprint
         print(f"calibration configuration valid: {fingerprint}")
+    if args.drift is not None:
+        fingerprint = load_drift_params(args.drift).fingerprint
+        print(f"drift configuration valid: {fingerprint}")
     return 0
 
 

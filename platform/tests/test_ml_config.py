@@ -13,12 +13,14 @@ from ml.config import (
     AnomalyParamsConfig,
     AutoencoderParamsConfig,
     CalibrationParamsConfig,
+    DriftParamsConfig,
     ForecastParamsConfig,
     MlConfigLoadError,
     MlTrainingConfig,
     load_anomaly_params,
     load_autoencoder_params,
     load_calibration_params,
+    load_drift_params,
     load_forecast_params,
     load_training_config,
 )
@@ -28,6 +30,7 @@ FORECAST_PATH = Path(__file__).resolve().parents[2] / "config" / "ml-forecast.ym
 ANOMALY_PATH = Path(__file__).resolve().parents[2] / "config" / "ml-anomaly.yml"
 AUTOENCODER_PATH = Path(__file__).resolve().parents[2] / "config" / "ml-autoencoder.yml"
 CALIBRATION_PATH = Path(__file__).resolve().parents[2] / "config" / "ml-calibration.yml"
+DRIFT_PATH = Path(__file__).resolve().parents[2] / "config" / "ml-drift.yml"
 
 
 def _document() -> dict[str, Any]:
@@ -230,3 +233,35 @@ def test_calibration_unordered_alphas_are_rejected(tmp_path: Path) -> None:
     document["alphas"] = [0.2, 0.1]
     with pytest.raises(MlConfigLoadError):
         _load_calibration(document, tmp_path)
+
+
+def _drift_document() -> dict[str, Any]:
+    return cast("dict[str, Any]", yaml.safe_load(DRIFT_PATH.read_text(encoding="utf-8")))
+
+
+def _load_drift(document: dict[str, Any], tmp_path: Path) -> DriftParamsConfig:
+    path = tmp_path / "ml-drift.yml"
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    return load_drift_params(path)
+
+
+def test_drift_config_loads_and_fingerprint_is_deterministic() -> None:
+    first = load_drift_params(DRIFT_PATH)
+    second = load_drift_params(DRIFT_PATH)
+    assert first.version == 1
+    assert first.detector == "adwin"
+    assert first.fingerprint == second.fingerprint
+
+
+def test_drift_unknown_detector_is_rejected(tmp_path: Path) -> None:
+    document = _drift_document()
+    document["detector"] = "pagehinkley"
+    with pytest.raises(MlConfigLoadError):
+        _load_drift(document, tmp_path)
+
+
+def test_drift_kswin_stat_must_be_smaller_than_window(tmp_path: Path) -> None:
+    document = _drift_document()
+    document["kswin_stat_size"] = document["kswin_window_size"]
+    with pytest.raises(MlConfigLoadError):
+        _load_drift(document, tmp_path)
