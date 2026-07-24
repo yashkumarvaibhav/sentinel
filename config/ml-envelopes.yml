@@ -1,0 +1,22 @@
+# LightGBM quantile-regression hyperparameters for the context-conditioned
+# envelopes (Phase 3.2). Config-as-data: the trainer reads every knob from here
+# and this file's content hash is recorded inside each trained model bundle, so a
+# model is always traceable to the exact parameters that produced it.
+version: 1
+
+# Aware envelope quantiles (p10/p50/p90). The context-blind twin trains only the
+# upper band (blind_quantile); the aware-minus-blind p90 gap is the event's
+# learned contribution to the explained component.
+quantiles: [0.1, 0.5, 0.9]
+blind_quantile: 0.9
+
+# Deterministic CPU training: fixed seed, single-threaded, row-wise histograms.
+learning_rate: 0.05
+num_leaves: 31
+n_estimators: 300
+min_data_in_leaf: 20
+max_depth: -1          # -1 = no explicit depth cap; num_leaves governs complexity
+seed: 20260724
+
+# Refuse to train a signal's envelope on too little history to be meaningful.
+min_rows_per_signal: 200

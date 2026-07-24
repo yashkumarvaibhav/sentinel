@@ -32,6 +32,8 @@ type Hour = Annotated[float, Field(ge=0.0, lt=24.0, allow_inf_nan=False)]
 type Factor = Annotated[float, Field(gt=0.0, le=100.0, allow_inf_nan=False)]
 type UnitFraction = Annotated[float, Field(ge=0.0, lt=1.0, allow_inf_nan=False)]
 type EventMultiplier = Annotated[float, Field(ge=1.0, le=100.0, allow_inf_nan=False)]
+type Quantile = Annotated[float, Field(gt=0.0, lt=1.0, allow_inf_nan=False)]
+type LearningRate = Annotated[float, Field(gt=0.0, le=1.0, allow_inf_nan=False)]
 
 
 class MlConfigLoadError(ValueError):
@@ -145,29 +147,82 @@ class MlTrainingConfig(MlConfigModel):
         return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
 
 
-def load_training_config(path: Path) -> MlTrainingConfig:
-    """Load and strictly validate the synthetic-history training configuration."""
+class EnvelopeParamsConfig(MlConfigModel):
+    """LightGBM quantile-regression hyperparameters for the learned envelopes."""
+
+    version: Literal[1]
+    quantiles: tuple[Quantile, ...] = Field(min_length=1)
+    blind_quantile: Quantile
+    learning_rate: LearningRate
+    num_leaves: int = Field(ge=2, le=1024)
+    n_estimators: int = Field(ge=1, le=10_000)
+    min_data_in_leaf: int = Field(ge=1, le=100_000)
+    max_depth: int = Field(ge=-1, le=64)
+    seed: int = Field(ge=0)
+    min_rows_per_signal: int = Field(ge=1, le=10_000_000)
+
+    @model_validator(mode="after")
+    def validate_quantiles(self) -> Self:
+        if len(self.quantiles) != len(set(self.quantiles)):
+            raise ValueError("quantiles must be unique")
+        if list(self.quantiles) != sorted(self.quantiles):
+            raise ValueError("quantiles must be listed in ascending order")
+        if self.blind_quantile not in self.quantiles:
+            raise ValueError("blind_quantile must be one of the trained quantiles")
+        return self
+
+    @property
+    def fingerprint(self) -> str:
+        """Content hash recorded inside any model bundle trained with these params."""
+        rendered = json.dumps(
+            self.model_dump(mode="json"),
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+
+
+def _load_yaml_mapping(path: Path) -> dict[str, object]:
     if not path.is_file():
-        raise MlConfigLoadError(f"{path.name}: required training configuration file is missing")
+        raise MlConfigLoadError(f"{path.name}: required configuration file is missing")
     try:
         document = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError) as error:
         raise MlConfigLoadError(f"{path.name}: {error}") from error
     if not isinstance(document, dict):
         raise MlConfigLoadError(f"{path.name}: YAML root must be a mapping")
+    return document
+
+
+def load_training_config(path: Path) -> MlTrainingConfig:
+    """Load and strictly validate the synthetic-history training configuration."""
     try:
-        return MlTrainingConfig.model_validate(document)
+        return MlTrainingConfig.model_validate(_load_yaml_mapping(path))
+    except ValidationError as error:
+        raise MlConfigLoadError(f"{path.name}: {error}") from error
+
+
+def load_envelope_params(path: Path) -> EnvelopeParamsConfig:
+    """Load and strictly validate the envelope hyperparameter configuration."""
+    try:
+        return EnvelopeParamsConfig.model_validate(_load_yaml_mapping(path))
     except ValidationError as error:
         raise MlConfigLoadError(f"{path.name}: {error}") from error
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Validate a training configuration file and print its reproducibility fingerprint."""
+    """Validate ml configuration file(s) and print their reproducibility fingerprints."""
     parser = argparse.ArgumentParser(prog="python -m ml.config")
-    parser.add_argument("--path", type=Path, required=True)
+    parser.add_argument("--path", type=Path, help="synthetic-history training configuration")
+    parser.add_argument("--envelopes", type=Path, help="envelope hyperparameter configuration")
     args = parser.parse_args(argv)
-    config = load_training_config(args.path)
-    print(f"training configuration valid: {config.fingerprint}")
+    if args.path is None and args.envelopes is None:
+        parser.error("at least one of --path or --envelopes is required")
+    if args.path is not None:
+        print(f"training configuration valid: {load_training_config(args.path).fingerprint}")
+    if args.envelopes is not None:
+        print(f"envelope configuration valid: {load_envelope_params(args.envelopes).fingerprint}")
     return 0
 
 
