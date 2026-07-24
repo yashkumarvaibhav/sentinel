@@ -162,7 +162,7 @@ train-data: ## Build the versioned training dataset (synthetic history + dev bas
 
 .PHONY: train
 train: ## Train the context-conditioned quantile envelopes to a local bundle
-	$(PY) python -m ml.envelopes \
+	$(PY) python -m ml.train \
 		--repo-root .. --captures-root ../var/captures \
 		--out ../var/models/envelopes
 

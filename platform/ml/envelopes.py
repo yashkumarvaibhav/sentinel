@@ -10,7 +10,6 @@ reproducible from a dataset + the versioned hyperparameters.
 
 from __future__ import annotations
 
-import argparse
 import json
 import re
 from collections import defaultdict
@@ -21,9 +20,7 @@ from pathlib import Path
 import lightgbm as lgb
 import numpy as np
 
-from common.config import load_config
-from ml.config import EnvelopeParamsConfig, load_envelope_params, load_training_config
-from ml.data import build_training_dataset, discover_baseline_captures
+from ml.config import EnvelopeParamsConfig
 from ml.features import AWARE_FEATURES, TEMPORAL_FEATURES
 from ml.frames import TrainingFrame
 
@@ -291,47 +288,3 @@ def load_envelope_model_or_none(directory: Path) -> EnvelopeModel | None:
     if not (directory / _MANIFEST_NAME).is_file():
         return None
     return load_envelope_model(directory)
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m ml.envelopes")
-    parser.add_argument("--repo-root", type=Path, required=True)
-    parser.add_argument("--captures-root", type=Path)
-    parser.add_argument("--out", type=Path, required=True)
-    args = parser.parse_args(argv)
-    repo_root = args.repo_root.resolve()
-    training_config = load_training_config(repo_root / "config" / "ml-training.yml")
-    envelope_params = load_envelope_params(repo_root / "config" / "ml-envelopes.yml")
-    config = load_config(repo_root / "config")
-    capture_roots = (
-        discover_baseline_captures(args.captures_root.resolve(), repo_root)
-        if args.captures_root is not None
-        else ()
-    )
-    dataset = build_training_dataset(
-        repo_root=repo_root,
-        training_config=training_config,
-        config=config,
-        capture_roots=capture_roots,
-    )
-    model = train_envelopes(
-        dataset.frames,
-        params=envelope_params,
-        training_data_hash=dataset.manifest.data_hash,
-        training_config_fingerprint=dataset.manifest.training_config_fingerprint,
-        detector_config_fingerprint=dataset.manifest.detector_config_fingerprint,
-    )
-    save_envelope_model(args.out.resolve(), model)
-    print(f"envelope model written to {args.out.resolve()}", flush=True)
-    print(f"  params_fingerprint: {model.params_fingerprint}", flush=True)
-    print(f"  training_data_hash: {model.training_data_hash}", flush=True)
-    print(
-        "  signals: "
-        + ", ".join(f"{key}({env.train_rows})" for key, env in sorted(model.signals.items())),
-        flush=True,
-    )
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
