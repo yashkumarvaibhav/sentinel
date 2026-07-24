@@ -85,3 +85,11 @@ memory:
   # nothing to check and passes vacuously (recorded as a bootstrap, never as a
   # confirmation) - otherwise nothing could ever be confirmed on an empty store.
   bootstrap_minimum_entries: 20
+
+# The deterministic gate every hypothesis must survive before anything acts.
+verification:
+  # Detectors confirm at different speeds, so "the origin was observed first"
+  # is checked with slack rather than to the second. The origin's first evidence
+  # includes the dependency edges that accuse it - a caller noticing its callee
+  # IS the first observation of the callee's fault.
+  onset_tolerance_seconds: 30.0

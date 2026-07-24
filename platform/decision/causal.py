@@ -137,7 +137,9 @@ def collapse_to_origin(
             note=f"{ranked[0].service} is the only affected service",
         )
     margin = ranked[0].score - ranked[1].score
-    if margin < configuration.minimum_margin:
+    # Compare with a hair of slack so a margin that lands exactly on the
+    # configured minimum counts as separated rather than flipping on float dust.
+    if margin < configuration.minimum_margin - 1e-9:
         return CausalCollapse(
             origin=None,
             candidates=ranked,

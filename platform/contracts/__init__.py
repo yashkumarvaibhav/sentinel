@@ -2,11 +2,13 @@
 
 from contracts.context import ContextWindow
 from contracts.decision import (
+    REQUIRED_CHECKS,
     AgentAssessment,
     AgentStatus,
     AgentTrend,
     ChangeEvent,
     ChangeKind,
+    CheckOutcome,
     EvidenceAxis,
     EvidenceDirection,
     EvidenceItem,
@@ -17,6 +19,8 @@ from contracts.decision import (
     RejectedAlternative,
     Verdict,
     VerdictClass,
+    Verification,
+    VerificationCheck,
 )
 from contracts.detection import (
     DecompFrame,
@@ -28,11 +32,13 @@ from contracts.detection import (
 from contracts.telemetry import Observation
 
 __all__ = [
+    "REQUIRED_CHECKS",
     "AgentAssessment",
     "AgentStatus",
     "AgentTrend",
     "ChangeEvent",
     "ChangeKind",
+    "CheckOutcome",
     "ContextWindow",
     "DecompFrame",
     "EpisodeStatus",
@@ -50,4 +56,6 @@ __all__ = [
     "SymptomKind",
     "Verdict",
     "VerdictClass",
+    "Verification",
+    "VerificationCheck",
 ]

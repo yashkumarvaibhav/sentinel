@@ -163,6 +163,16 @@
       "title": "ChangeKind",
       "type": "string"
     },
+    "CheckOutcome": {
+      "description": "How one deterministic check answered, including an honest vacuous pass.",
+      "enum": [
+        "PASSED",
+        "FAILED",
+        "BOOTSTRAP"
+      ],
+      "title": "CheckOutcome",
+      "type": "string"
+    },
     "ContextWindow": {
       "additionalProperties": false,
       "description": "A trusted external event and the signals whose volume it may explain.",
@@ -891,6 +901,64 @@
       ],
       "title": "VerdictClass",
       "type": "string"
+    },
+    "Verification": {
+      "additionalProperties": false,
+      "description": "The four deterministic checks a hypothesis must survive before it is acted on.\n\nNothing here proposes anything. Each check is arithmetic over telemetry and\ncommitted topology, and all four must hold: a hypothesis that is merely\nplausible is left unconfirmed, which downstream means pending review rather\nthan action.\n\n``BOOTSTRAP`` is a vacuous pass, recorded as such and never as a\nconfirmation. It exists only so that an empty incident memory cannot make\nconfirmation impossible forever.",
+      "properties": {
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/VerificationCheck"
+          },
+          "minItems": 1,
+          "title": "Checks",
+          "type": "array"
+        },
+        "confirmed": {
+          "title": "Confirmed",
+          "type": "boolean"
+        },
+        "incident_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "ts": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "verification_id": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "verification_id",
+        "ts",
+        "incident_id",
+        "confirmed",
+        "checks"
+      ],
+      "title": "Verification",
+      "type": "object"
+    },
+    "VerificationCheck": {
+      "additionalProperties": false,
+      "description": "One non-LLM check and the evidence-derived reason for its answer.",
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "name": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "outcome": {
+          "$ref": "#/$defs/CheckOutcome"
+        }
+      },
+      "required": [
+        "name",
+        "outcome",
+        "detail"
+      ],
+      "title": "VerificationCheck",
+      "type": "object"
     }
   },
   "$id": "urn:sentinel:contracts:v1",
@@ -923,6 +991,9 @@
     },
     {
       "$ref": "#/$defs/Incident"
+    },
+    {
+      "$ref": "#/$defs/Verification"
     }
   ],
   "title": "SentinelContract"

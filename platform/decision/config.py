@@ -663,6 +663,12 @@ class IncidentMemoryConfig(DecisionConfigModel):
         return self
 
 
+class VerificationConfig(DecisionConfigModel):
+    """Tolerances for the deterministic checks a hypothesis must survive."""
+
+    onset_tolerance_seconds: PositiveSeconds
+
+
 class IncidentsConfig(DecisionConfigModel):
     """One fully validated snapshot of the incident clustering policy."""
 
@@ -672,6 +678,7 @@ class IncidentsConfig(DecisionConfigModel):
     severity: IncidentSeverityConfig
     causal: CausalCollapseConfig
     memory: IncidentMemoryConfig
+    verification: VerificationConfig
 
     @property
     def fingerprint(self) -> str:

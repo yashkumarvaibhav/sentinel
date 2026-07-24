@@ -15,7 +15,8 @@ export type SentinelContract =
   | ChangeEvent
   | AgentAssessment
   | Verdict
-  | Incident;
+  | Incident
+  | Verification;
 export type TelemetryScalar = string | boolean | number;
 export type Identifier = string;
 export type FlowRefs = Identifier[];
@@ -118,6 +119,15 @@ export type IncidentSeverity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
  * Where an incident is in its life, from first symptom to resolved.
  */
 export type IncidentState = "OPEN" | "MITIGATING" | "MONITORING" | "RESOLVED";
+/**
+ * @minItems 1
+ */
+export type Checks = [VerificationCheck, ...VerificationCheck[]];
+/**
+ * How one deterministic check answered, including an honest vacuous pass.
+ */
+export type CheckOutcome = "PASSED" | "FAILED" | "BOOTSTRAP";
+export type Confirmed = boolean;
 
 /**
  * One event-time telemetry value, containing evidence but never answer-key data.
@@ -329,4 +339,31 @@ export interface Incident {
   services: Services2;
   severity: IncidentSeverity;
   state: IncidentState;
+}
+/**
+ * The four deterministic checks a hypothesis must survive before it is acted on.
+ *
+ * Nothing here proposes anything. Each check is arithmetic over telemetry and
+ * committed topology, and all four must hold: a hypothesis that is merely
+ * plausible is left unconfirmed, which downstream means pending review rather
+ * than action.
+ *
+ * ``BOOTSTRAP`` is a vacuous pass, recorded as such and never as a
+ * confirmation. It exists only so that an empty incident memory cannot make
+ * confirmation impossible forever.
+ */
+export interface Verification {
+  checks: Checks;
+  confirmed: Confirmed;
+  incident_id: Identifier;
+  ts: UtcDatetime;
+  verification_id: Identifier;
+}
+/**
+ * One non-LLM check and the evidence-derived reason for its answer.
+ */
+export interface VerificationCheck {
+  detail: HumanText;
+  name: Identifier;
+  outcome: CheckOutcome;
 }

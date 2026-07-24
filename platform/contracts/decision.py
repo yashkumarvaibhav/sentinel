@@ -365,3 +365,67 @@ class Incident(ContractModel):
         if self.origin_service is not None and self.origin_service not in self.services:
             raise ValueError("the collapsed origin must be a service the incident affects")
         return self
+
+
+# The four checks are a fixed set: a verification that skipped one is not a
+# verification. Adding a fifth is a deliberate contract change.
+REQUIRED_CHECKS: tuple[str, ...] = (
+    "temporal_causality",
+    "trace_coverage",
+    "dependency_validity",
+    "memory_similarity",
+)
+
+
+class CheckOutcome(StrEnum):
+    """How one deterministic check answered, including an honest vacuous pass."""
+
+    PASSED = "PASSED"
+    FAILED = "FAILED"
+    BOOTSTRAP = "BOOTSTRAP"
+
+
+class VerificationCheck(ContractModel):
+    """One non-LLM check and the evidence-derived reason for its answer."""
+
+    name: Identifier
+    outcome: CheckOutcome
+    detail: HumanText
+
+
+class Verification(ContractModel):
+    """The four deterministic checks a hypothesis must survive before it is acted on.
+
+    Nothing here proposes anything. Each check is arithmetic over telemetry and
+    committed topology, and all four must hold: a hypothesis that is merely
+    plausible is left unconfirmed, which downstream means pending review rather
+    than action.
+
+    ``BOOTSTRAP`` is a vacuous pass, recorded as such and never as a
+    confirmation. It exists only so that an empty incident memory cannot make
+    confirmation impossible forever.
+    """
+
+    verification_id: Identifier
+    ts: UtcDatetime
+    incident_id: Identifier
+    confirmed: bool
+    checks: tuple[VerificationCheck, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_verification(self) -> Self:
+        """Require the full check set and keep ``confirmed`` a derived fact."""
+        names = [check.name for check in self.checks]
+        if len(names) != len(set(names)):
+            raise ValueError("each check may be recorded only once")
+        if set(names) != set(REQUIRED_CHECKS):
+            missing = sorted(set(REQUIRED_CHECKS) - set(names))
+            unknown = sorted(set(names) - set(REQUIRED_CHECKS))
+            raise ValueError(
+                f"verification must run exactly the required checks "
+                f"(missing: {missing}, unknown: {unknown})"
+            )
+        passing = all(check.outcome is not CheckOutcome.FAILED for check in self.checks)
+        if self.confirmed != passing:
+            raise ValueError("confirmed must be true exactly when no check failed")
+        return self

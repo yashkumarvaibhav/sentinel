@@ -19,6 +19,7 @@ from decision.memory import (
     recognized,
 )
 from decision.verdict import EvidenceFusion, FusionResult, FusionStatus
+from decision.verifier import verify_incident
 
 __all__ = [
     "AgentEvidenceWindow",
@@ -42,4 +43,5 @@ __all__ = [
     "collapse_to_origin",
     "nearest",
     "recognized",
+    "verify_incident",
 ]
