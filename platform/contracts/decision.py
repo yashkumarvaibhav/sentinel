@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import math
 from enum import StrEnum
 from typing import Literal, Self
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from contracts._base import (
     ContractModel,
@@ -147,6 +148,7 @@ class AgentAssessment(ContractModel):
     score: Probability
     trend: AgentTrend
     covered_kinds: tuple[SymptomKind, ...] = ()
+    contributing_kinds: tuple[SymptomKind, ...] = ()
     services: tuple[Identifier, ...] = ()
     evidence: tuple[EvidenceItem, ...] = ()
     note: HumanText
@@ -157,11 +159,11 @@ class AgentAssessment(ContractModel):
         """A service is named at most once per assessment."""
         return ensure_unique(values, field_name="services")
 
-    @field_validator("covered_kinds")
+    @field_validator("covered_kinds", "contributing_kinds")
     @classmethod
-    def unique_covered_kinds(cls, values: tuple[SymptomKind, ...]) -> tuple[SymptomKind, ...]:
-        """Coverage is a set of kinds, not a multiset."""
-        ensure_unique(tuple(kind.value for kind in values), field_name="covered_kinds")
+    def unique_kinds(cls, values: tuple[SymptomKind, ...]) -> tuple[SymptomKind, ...]:
+        """Coverage and contribution are sets of kinds, not multisets."""
+        ensure_unique(tuple(kind.value for kind in values), field_name="kinds")
         return values
 
     @model_validator(mode="after")
@@ -174,6 +176,8 @@ class AgentAssessment(ContractModel):
                 raise ValueError("an insufficient assessment must not claim a trend")
             if self.covered_kinds or self.evidence or self.services:
                 raise ValueError("an insufficient assessment must not carry coverage or evidence")
+            if self.contributing_kinds:
+                raise ValueError("an insufficient assessment must not claim contributing kinds")
             return self
         if not self.covered_kinds:
             raise ValueError("a scored assessment must record the kinds it had coverage for")
@@ -181,4 +185,108 @@ class AgentAssessment(ContractModel):
             raise ValueError("a positive score must be justified by evidence")
         if self.score == 0.0 and self.evidence:
             raise ValueError("a zero score must not claim contributing evidence")
+        if self.contributing_kinds and not self.evidence:
+            raise ValueError("a kind cannot contribute without an evidence item")
+        unclaimed = sorted(set(self.contributing_kinds) - set(self.covered_kinds))
+        if unclaimed:
+            names = ", ".join(kind.value for kind in unclaimed)
+            raise ValueError(f"contributing kinds must have had coverage: {names}")
+        return self
+
+
+class VerdictClass(StrEnum):
+    """What the fused evidence says is actually happening."""
+
+    EXPECTED_EVENT = "EXPECTED_EVENT"
+    ATTACK = "ATTACK"
+    OPERATIONAL_FAULT = "OPERATIONAL_FAULT"
+    CODE_CONFIG_FAULT = "CODE_CONFIG_FAULT"
+    COMBINATION = "COMBINATION"
+
+
+class ReasonSubtype(StrEnum):
+    """A refinement that changes what a sane response looks like.
+
+    ``CAPACITY_SHORTAGE`` exists so under-provisioning is answered with
+    "scale", never with "block": the traffic is real and the system is simply
+    too small for it.
+    """
+
+    CAPACITY_SHORTAGE = "CAPACITY_SHORTAGE"
+
+
+class RejectedAlternative(ContractModel):
+    """One diagnosis that was considered and the evidence that ruled it out."""
+
+    verdict_class: VerdictClass
+    reason: HumanText
+
+    @model_validator(mode="after")
+    def validate_alternative(self) -> Self:
+        """A rejection is only useful if it says what failed."""
+        if not self.reason.strip():
+            raise ValueError("a rejected alternative must state what ruled it out")
+        return self
+
+
+class Verdict(ContractModel):
+    """The fused, evidence-backed answer, with its differential diagnosis.
+
+    ``verdict_class`` comes from the ordered rule table - crisp, operator-owned
+    and explainable. ``distribution`` is the same signatures read softly, so the
+    runner-up is visible rather than hidden. Every class that lost is recorded
+    in ``rejected_alternatives`` with the requirement it failed, so the answer
+    can be argued with rather than merely believed.
+    """
+
+    verdict_id: Identifier
+    ts: UtcDatetime
+    verdict_class: VerdictClass
+    rule_id: Identifier
+    confidence: Probability
+    reason: HumanText
+    reason_subtype: ReasonSubtype | None = None
+    distribution: dict[str, Probability] = Field(min_length=1)
+    corroborating_kinds: tuple[SymptomKind, ...] = ()
+    services: tuple[Identifier, ...] = ()
+    evidence: tuple[EvidenceItem, ...] = ()
+    assessment_ids: tuple[Identifier, ...] = ()
+    rejected_alternatives: tuple[RejectedAlternative, ...] = ()
+
+    @field_validator("services", "assessment_ids")
+    @classmethod
+    def unique_references(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        """Services and the assessments behind a verdict are ordered sets."""
+        return ensure_unique(values, field_name="references")
+
+    @field_validator("corroborating_kinds")
+    @classmethod
+    def unique_corroborating_kinds(cls, values: tuple[SymptomKind, ...]) -> tuple[SymptomKind, ...]:
+        """Corroboration counts distinct kinds, so a kind appears once."""
+        ensure_unique(tuple(kind.value for kind in values), field_name="corroborating_kinds")
+        return values
+
+    @model_validator(mode="after")
+    def validate_verdict(self) -> Self:
+        """Enforce a complete, normalized distribution and a full differential."""
+        classes = {member.value for member in VerdictClass}
+        if set(self.distribution) != classes:
+            missing = sorted(classes - set(self.distribution))
+            unknown = sorted(set(self.distribution) - classes)
+            raise ValueError(
+                "distribution must cover exactly the verdict classes "
+                f"(missing: {missing}, unknown: {unknown})"
+            )
+        total = sum(self.distribution.values())
+        if not math.isclose(total, 1.0, rel_tol=1e-9, abs_tol=1e-9):
+            raise ValueError(f"distribution must sum to 1, got {total}")
+        rejected = [alternative.verdict_class for alternative in self.rejected_alternatives]
+        if len(rejected) != len(set(rejected)):
+            raise ValueError("each alternative may be rejected only once")
+        if self.verdict_class in rejected:
+            raise ValueError("the winning class cannot also be a rejected alternative")
+        if self.reason_subtype is ReasonSubtype.CAPACITY_SHORTAGE and (
+            self.verdict_class is not VerdictClass.OPERATIONAL_FAULT
+        ):
+            raise ValueError("CAPACITY_SHORTAGE only refines an operational fault")
         return self

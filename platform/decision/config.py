@@ -31,7 +31,7 @@ from pydantic import (
     model_validator,
 )
 
-from contracts import ChangeKind, EvidenceAxis, SymptomKind
+from contracts import ChangeKind, EvidenceAxis, ReasonSubtype, SymptomKind, VerdictClass
 
 CRITICALITY_LEVELS = ("critical", "high", "medium", "low")
 
@@ -64,6 +64,28 @@ def _utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
+def _named_verdict_class(value: object) -> object:
+    """Accept the YAML spelling of a verdict class under strict validation."""
+    if isinstance(value, str):
+        try:
+            return VerdictClass(value)
+        except ValueError as error:
+            known = ", ".join(member.value for member in VerdictClass)
+            raise ValueError(f"unknown verdict class {value!r}; known are {known}") from error
+    return value
+
+
+def _named_reason_subtype(value: object) -> object:
+    """Accept the YAML spelling of a reason subtype under strict validation."""
+    if isinstance(value, str):
+        try:
+            return ReasonSubtype(value)
+        except ValueError as error:
+            known = ", ".join(member.value for member in ReasonSubtype)
+            raise ValueError(f"unknown reason subtype {value!r}; known are {known}") from error
+    return value
+
+
 def _named_evidence_axis(value: object) -> object:
     """Accept the YAML spelling of an evidence axis under strict validation."""
     if isinstance(value, str):
@@ -78,6 +100,8 @@ def _named_evidence_axis(value: object) -> object:
 type ClaimedKind = Annotated[SymptomKind, BeforeValidator(_named_symptom_kind)]
 type NamedAxis = Annotated[EvidenceAxis, BeforeValidator(_named_evidence_axis)]
 type NamedChangeKind = Annotated[ChangeKind, BeforeValidator(_named_change_kind)]
+type NamedVerdictClass = Annotated[VerdictClass, BeforeValidator(_named_verdict_class)]
+type NamedReasonSubtype = Annotated[ReasonSubtype, BeforeValidator(_named_reason_subtype)]
 type UtcDatetime = Annotated[datetime, AfterValidator(_utc)]
 type Identifier = Annotated[
     str,
@@ -376,9 +400,150 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m decision")
     parser.add_argument("--agents", type=Path, required=True, help="evidence-agent configuration")
     parser.add_argument("--deployments", type=Path, help="committed change-evidence ledger")
+    parser.add_argument("--verdict-rules", type=Path, help="ordered evidence-fusion rule table")
     args = parser.parse_args(argv)
     print(f"evidence-agent configuration valid: {load_evidence_agents(args.agents).fingerprint}")
     if args.deployments is not None:
         fingerprint = load_deployment_ledger(args.deployments).fingerprint
         print(f"deployment ledger valid: {fingerprint}")
+    if args.verdict_rules is not None:
+        fingerprint = load_verdict_rules(args.verdict_rules).fingerprint
+        print(f"verdict rules valid: {fingerprint}")
     return 0
+
+
+class VerdictRuleConfig(DecisionConfigModel):
+    """One signature over the axes, and the diagnosis it names.
+
+    ``lit`` and ``calm`` both require the axis to have been scored: an axis
+    nobody could measure is never treated as quiet. ``absent`` is the weaker
+    requirement that the axis is not established as lit, so a missing feed
+    narrows a diagnosis instead of blocking it.
+    """
+
+    rule_id: Identifier
+    verdict_class: NamedVerdictClass
+    reason: Summary
+    lit: tuple[NamedAxis, ...] = ()
+    calm: tuple[NamedAxis, ...] = ()
+    absent: tuple[NamedAxis, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_rule(self) -> Self:
+        for name, axes in (("lit", self.lit), ("calm", self.calm), ("absent", self.absent)):
+            if len(axes) != len(set(axes)):
+                raise ValueError(f"{self.rule_id}: {name} axes must be unique")
+        overlapping = (set(self.lit) & set(self.calm)) | (set(self.lit) & set(self.absent))
+        if overlapping:
+            names = ", ".join(sorted(axis.value for axis in overlapping))
+            raise ValueError(f"{self.rule_id}: {names} is required both lit and quiet")
+        if not (self.lit or self.calm or self.absent):
+            raise ValueError(f"{self.rule_id}: a rule that requires nothing matches everything")
+        return self
+
+
+class ConfidenceConfig(DecisionConfigModel):
+    """The floor and the two independent gains that build a verdict's confidence."""
+
+    floor: Probability
+    evidence_gain: Probability
+    corroboration_gain: Probability
+    corroboration_saturation: int = Field(ge=1, le=100)
+
+    @model_validator(mode="after")
+    def validate_confidence(self) -> Self:
+        if self.floor + self.evidence_gain + self.corroboration_gain > 1.0:
+            raise ValueError("floor plus both gains must not exceed full confidence")
+        return self
+
+
+class ReasonSubtypeConfig(DecisionConfigModel):
+    """When a diagnosis is refined into a subtype that changes the sane response."""
+
+    subtype: NamedReasonSubtype
+    verdict_class: NamedVerdictClass
+    requires_kinds: tuple[ClaimedKind, ...] = Field(min_length=1)
+    forbids_kinds: tuple[ClaimedKind, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_subtype(self) -> Self:
+        overlapping = set(self.requires_kinds) & set(self.forbids_kinds)
+        if overlapping:
+            names = ", ".join(sorted(kind.value for kind in overlapping))
+            raise ValueError(f"{self.subtype.value}: {names} is both required and forbidden")
+        return self
+
+    def matches(self, verdict_class: VerdictClass, kinds: frozenset[SymptomKind]) -> bool:
+        """Whether this refinement applies to a diagnosis and its contributing kinds."""
+        if verdict_class is not self.verdict_class:
+            return False
+        if not set(self.requires_kinds) <= kinds:
+            return False
+        return not set(self.forbids_kinds) & kinds
+
+
+class VerdictRulesConfig(DecisionConfigModel):
+    """One fully validated snapshot of the ordered fusion rule table."""
+
+    version: Literal[1]
+    unknown_axis_score: Probability
+    axis_thresholds: dict[str, float] = Field(min_length=1)
+    confidence: ConfidenceConfig
+    rules: tuple[VerdictRuleConfig, ...] = Field(min_length=1)
+    reason_subtypes: tuple[ReasonSubtypeConfig, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_rules(self) -> Self:
+        known_axes = {axis.value for axis in EvidenceAxis}
+        unknown = sorted(set(self.axis_thresholds) - known_axes)
+        if unknown:
+            raise ValueError(f"unknown evidence axes: {', '.join(unknown)}")
+        missing = sorted(known_axes - set(self.axis_thresholds))
+        if missing:
+            raise ValueError(f"every axis needs a threshold, missing: {', '.join(missing)}")
+        for axis, threshold in self.axis_thresholds.items():
+            if not 0.0 < threshold <= 1.0:
+                raise ValueError(f"threshold for {axis} must lie in (0, 1]")
+        ids = [rule.rule_id for rule in self.rules]
+        if len(ids) != len(set(ids)):
+            raise ValueError("rule ids must be unique")
+        named = [rule.verdict_class for rule in self.rules]
+        if len(named) != len(set(named)):
+            raise ValueError("each verdict class may be named by only one rule")
+        uncovered = sorted(member.value for member in VerdictClass if member not in set(named))
+        if uncovered:
+            raise ValueError(f"no rule can ever produce: {', '.join(uncovered)}")
+        subtypes = [refinement.subtype for refinement in self.reason_subtypes]
+        if len(subtypes) != len(set(subtypes)):
+            raise ValueError("reason subtypes must be unique")
+        return self
+
+    def threshold_for(self, axis: EvidenceAxis) -> float:
+        """The score at or above which an axis counts as lit."""
+        return self.axis_thresholds[axis.value]
+
+    def rule_for(self, verdict_class: VerdictClass) -> VerdictRuleConfig:
+        """The single rule that can name one diagnosis."""
+        for rule in self.rules:
+            if rule.verdict_class is verdict_class:
+                return rule
+        raise DecisionConfigLoadError(f"no rule names {verdict_class.value}")
+
+    @property
+    def fingerprint(self) -> str:
+        """Content hash recorded with any verdict fused under these rules."""
+        rendered = json.dumps(
+            self.model_dump(mode="json"),
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+
+
+def load_verdict_rules(path: Path) -> VerdictRulesConfig:
+    """Load and strictly validate the ordered evidence-fusion rule table."""
+    try:
+        return VerdictRulesConfig.model_validate(_document(path))
+    except ValidationError as error:
+        raise DecisionConfigLoadError(f"{path.name}: {error}") from error

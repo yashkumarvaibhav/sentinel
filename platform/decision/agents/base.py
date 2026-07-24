@@ -118,6 +118,7 @@ class Contribution:
 
     service: str
     item: EvidenceItem
+    kind: SymptomKind
 
     @property
     def contribution(self) -> float:
@@ -172,6 +173,12 @@ class EvidenceAgent:
         trend = self._trend(score, self._previous_score if redelivery else self._last_score)
         evidence = tuple(contribution.item for contribution in contributions)
         services = tuple(sorted({contribution.service for contribution in contributions}))
+        contributing = tuple(
+            sorted(
+                {contribution.kind for contribution in contributions},
+                key=lambda kind: kind.value,
+            )
+        )
         note = (
             f"{self.axis.value.lower()} scored from {len(evidence)} active "
             f"{'episode' if len(evidence) == 1 else 'episodes'} across "
@@ -185,6 +192,7 @@ class EvidenceAgent:
             score=score,
             trend=trend,
             covered_kinds=covered,
+            contributing_kinds=contributing,
             services=services,
             evidence=evidence,
             note=note,
@@ -226,6 +234,7 @@ class EvidenceAgent:
             found.append(
                 Contribution(
                     service=episode.service,
+                    kind=episode.kind,
                     item=self._episode_item(
                         episode,
                         weight=weight,

@@ -7,7 +7,7 @@
  * Public contracts exchanged between Sentinel planes.
  */
 export type SentinelContract =
-  Observation | ContextWindow | DecompFrame | Symptom | SymptomEpisode | ChangeEvent | AgentAssessment;
+  Observation | ContextWindow | DecompFrame | Symptom | SymptomEpisode | ChangeEvent | AgentAssessment | Verdict;
 export type TelemetryScalar = string | boolean | number;
 export type Identifier = string;
 export type FlowRefs = Identifier[];
@@ -54,6 +54,7 @@ export type ChangeKind = "DEPLOY" | "ROLLOUT" | "FLAG" | "CONFIG";
  * reads another agent's score.
  */
 export type EvidenceAxis = "SECURITY" | "RELIABILITY" | "CHANGE_CONFIG" | "BUSINESS_IMPACT";
+export type ContributingKinds = SymptomKind[];
 export type CoveredKinds = SymptomKind[];
 /**
  * Which way a measured value sits relative to its stated baseline.
@@ -70,6 +71,23 @@ export type AgentStatus = "SCORED" | "INSUFFICIENT";
  * Direction of an axis score against the agent's previous assessment.
  */
 export type AgentTrend = "RISING" | "FALLING" | "STEADY" | "UNKNOWN";
+export type AssessmentIds = Identifier[];
+export type CorroboratingKinds = SymptomKind[];
+export type Evidence1 = EvidenceItem[];
+/**
+ * A refinement that changes what a sane response looks like.
+ *
+ * ``CAPACITY_SHORTAGE`` exists so under-provisioning is answered with
+ * "scale", never with "block": the traffic is real and the system is simply
+ * too small for it.
+ */
+export type ReasonSubtype = "CAPACITY_SHORTAGE";
+/**
+ * What the fused evidence says is actually happening.
+ */
+export type VerdictClass = "EXPECTED_EVENT" | "ATTACK" | "OPERATIONAL_FAULT" | "CODE_CONFIG_FAULT" | "COMBINATION";
+export type RejectedAlternatives = RejectedAlternative[];
+export type Services1 = Identifier[];
 
 /**
  * One event-time telemetry value, containing evidence but never answer-key data.
@@ -194,6 +212,7 @@ export interface ChangeEvent {
 export interface AgentAssessment {
   assessment_id: Identifier;
   axis: EvidenceAxis;
+  contributing_kinds?: ContributingKinds;
   covered_kinds?: CoveredKinds;
   evidence?: Evidence;
   note: HumanText;
@@ -218,4 +237,38 @@ export interface EvidenceItem {
   feature: SignalName;
   note: HumanText;
   value: FiniteFloat;
+}
+/**
+ * The fused, evidence-backed answer, with its differential diagnosis.
+ *
+ * ``verdict_class`` comes from the ordered rule table - crisp, operator-owned
+ * and explainable. ``distribution`` is the same signatures read softly, so the
+ * runner-up is visible rather than hidden. Every class that lost is recorded
+ * in ``rejected_alternatives`` with the requirement it failed, so the answer
+ * can be argued with rather than merely believed.
+ */
+export interface Verdict {
+  assessment_ids?: AssessmentIds;
+  confidence: Probability;
+  corroborating_kinds?: CorroboratingKinds;
+  distribution: Distribution;
+  evidence?: Evidence1;
+  reason: HumanText;
+  reason_subtype?: ReasonSubtype | null;
+  rejected_alternatives?: RejectedAlternatives;
+  rule_id: Identifier;
+  services?: Services1;
+  ts: UtcDatetime;
+  verdict_class: VerdictClass;
+  verdict_id: Identifier;
+}
+export interface Distribution {
+  [k: string]: Probability;
+}
+/**
+ * One diagnosis that was considered and the evidence that ruled it out.
+ */
+export interface RejectedAlternative {
+  reason: HumanText;
+  verdict_class: VerdictClass;
 }

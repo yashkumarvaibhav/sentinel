@@ -1,0 +1,93 @@
+# Evidence fusion: the ordered rule table that turns four independent axis
+# scores into one named diagnosis.
+#
+# Each rule is a signature over the axes, stated three ways:
+#   lit    - the axis must be SCORED at or above its threshold.
+#   calm   - the axis must be SCORED below its threshold. Positive knowledge
+#            that it is quiet; an axis nobody could measure does not qualify.
+#   absent - the axis must not be established as lit. An axis with no coverage
+#            satisfies this, so losing one feed narrows the diagnosis instead
+#            of blocking it.
+#
+# The table is ORDERED and the first matching rule wins, so the more specific
+# diagnosis is always listed before the more general one it would otherwise be
+# confused with. The same signatures are read softly to produce the class
+# distribution, so the crisp answer and the runner-up never come from different
+# beliefs.
+version: 1
+
+# An axis nobody could measure is maximal uncertainty, not evidence either way.
+# Scoring it 0.5 stops ignorance from favouring any class.
+unknown_axis_score: 0.5
+
+axis_thresholds:
+  SECURITY: 0.50
+  RELIABILITY: 0.50
+  CHANGE_CONFIG: 0.50
+  BUSINESS_IMPACT: 0.50
+
+# Confidence is a floor plus two independent gains: how well the winning
+# signature fits the measured scores, and how many distinct kinds of symptom
+# independently corroborate it. Fit alone is capped well below certainty,
+# because one loud axis is a hypothesis, not a proof.
+confidence:
+  floor: 0.40
+  evidence_gain: 0.30
+  corroboration_gain: 0.30
+  corroboration_saturation: 3
+
+rules:
+  # An attack hiding inside a real fault, or a fault triggered under attack.
+  # First because it is the shape every single-axis rule below would otherwise
+  # misread as its own.
+  - rule_id: attack-and-fault-together
+    verdict_class: COMBINATION
+    lit: [SECURITY, RELIABILITY]
+    reason: >-
+      behavioral deformation and service degradation are both present, so this
+      is not one incident wearing two hats
+
+  # Degradation that arrived with our own change: the traffic is innocent.
+  - rule_id: degradation-follows-our-change
+    verdict_class: CODE_CONFIG_FAULT
+    lit: [RELIABILITY, CHANGE_CONFIG]
+    calm: [SECURITY]
+    reason: >-
+      services degraded with no hostile behavior, and a change of ours landed
+      inside the correlation window
+
+  # Hostility with the mesh still healthy: the classic surge-shaped attack.
+  - rule_id: hostile-behavior-without-degradation
+    verdict_class: ATTACK
+    lit: [SECURITY]
+    calm: [RELIABILITY]
+    reason: >-
+      the behavioral ratios a legitimate surge preserves are deformed while the
+      services themselves are healthy
+
+  # Degradation with nothing of ours to blame it on.
+  - rule_id: degradation-without-hostility-or-change
+    verdict_class: OPERATIONAL_FAULT
+    lit: [RELIABILITY]
+    calm: [SECURITY]
+    absent: [CHANGE_CONFIG]
+    reason: >-
+      services degraded with no hostile behavior and no recent change of ours
+      to explain it
+
+  # Everything the context plane already explains.
+  - rule_id: explained-by-context
+    verdict_class: EXPECTED_EVENT
+    calm: [SECURITY, RELIABILITY]
+    reason: >-
+      the surge deforms no behavioral ratio and degrades no service, so the
+      context that explains its volume explains all of it
+
+# Refinements that change what a sane response looks like.
+reason_subtypes:
+  # Saturation with no failing dependency is the system being too small for
+  # real traffic. It must be answered with "scale", never with "block".
+  - subtype: CAPACITY_SHORTAGE
+    verdict_class: OPERATIONAL_FAULT
+    requires_kinds: [SATURATION]
+    forbids_kinds: []

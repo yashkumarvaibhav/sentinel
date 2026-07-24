@@ -10,6 +10,10 @@ from contracts.decision import (
     EvidenceAxis,
     EvidenceDirection,
     EvidenceItem,
+    ReasonSubtype,
+    RejectedAlternative,
+    Verdict,
+    VerdictClass,
 )
 from contracts.detection import (
     DecompFrame,
@@ -33,7 +37,11 @@ __all__ = [
     "EvidenceDirection",
     "EvidenceItem",
     "Observation",
+    "ReasonSubtype",
+    "RejectedAlternative",
     "Symptom",
     "SymptomEpisode",
     "SymptomKind",
+    "Verdict",
+    "VerdictClass",
 ]

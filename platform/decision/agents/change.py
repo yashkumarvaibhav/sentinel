@@ -72,6 +72,7 @@ class ChangeConfigEvidenceAgent(EvidenceAgent):
             found.append(
                 Contribution(
                     service=change.service,
+                    kind=CHANGE_COVERAGE_KIND,
                     item=self._change_item(
                         change,
                         age=age,
