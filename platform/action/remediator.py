@@ -58,11 +58,13 @@ from action.ladder import (
     StandingRestraint,
 )
 from action.rollback import RollbackResult, VerifiedRollback
+from audit import AuditSink
 from contracts import (
     WATCHING_ACTIONS,
     ActionOutcome,
     ActionPlan,
     ActionStatus,
+    AuditEventKind,
     Decision,
 )
 
@@ -146,9 +148,11 @@ class Remediator:
     __slots__ = (
         "_actuators",
         "_breaker",
+        "_breaker_open",
         "_executor",
         "_guard",
         "_ladder",
+        "_ledger",
         "_owner",
         "_registry",
         "_rollback",
@@ -164,6 +168,7 @@ class Remediator:
         breaker: RemediationBreaker,
         rollback: VerifiedRollback,
         registry: RestraintRegistry | None = None,
+        ledger: AuditSink | None = None,
         owner: str = DEFAULT_OWNER,
     ) -> None:
         self._ladder = ladder
@@ -177,6 +182,13 @@ class Remediator:
         # Explicitly `is None`: an empty registry is falsy, and `registry or
         # RestraintRegistry()` would hand back one nothing is recorded in.
         self._registry = registry if registry is not None else RestraintRegistry()
+        # Optional, and `is None` for the same reason the others are: an empty
+        # chain is falsy, and `ledger or AuditChain()` would hand back a ledger
+        # nothing is ever read from.
+        self._ledger = ledger
+        # Whether the breaker was open the last time this loop looked, so the
+        # ledger records it *opening* rather than it being open.
+        self._breaker_open = False
         self._owner = owner
 
     @property
@@ -213,31 +225,42 @@ class Remediator:
         settled = settled_at if settled_at is not None else ts
         recovered = recovered_at if recovered_at is not None else settled
         state = self._breaker.state(ts)
+        self._audit_breaker(state, ts=ts)
         if state.open:
-            return RemediationRun(
-                decision_id=decision.decision_id,
-                incident_id=decision.incident_id,
-                breaker=state,
-                refusals=(state.reason or "the remediation breaker is open",),
+            return self._audited(
+                RemediationRun(
+                    decision_id=decision.decision_id,
+                    incident_id=decision.incident_id,
+                    breaker=state,
+                    refusals=(state.reason or "the remediation breaker is open",),
+                ),
+                ts=ts,
             )
         try:
             selection = self._ladder.select(decision)
         except LadderError as refusal:
-            return RemediationRun(
-                decision_id=decision.decision_id,
-                incident_id=decision.incident_id,
-                breaker=state,
-                refusals=(str(refusal),),
+            return self._audited(
+                RemediationRun(
+                    decision_id=decision.decision_id,
+                    incident_id=decision.incident_id,
+                    breaker=state,
+                    refusals=(str(refusal),),
+                ),
+                ts=ts,
             )
 
         superseded, blocked = self._supersede(decision, selection, ts=ts)
         if blocked is not None:
-            return RemediationRun(
-                decision_id=decision.decision_id,
-                incident_id=decision.incident_id,
-                breaker=state,
-                selection=selection,
-                refusals=(blocked,),
+            return self._audited(
+                RemediationRun(
+                    decision_id=decision.decision_id,
+                    incident_id=decision.incident_id,
+                    breaker=state,
+                    selection=selection,
+                    released=superseded,
+                    refusals=(blocked,),
+                ),
+                ts=ts,
             )
 
         before = self._read(decision.target_service, ts=ts)
@@ -252,14 +275,15 @@ class Remediator:
             refusals=refusals,
         )
         if not run.acted:
-            return run
-        return self._watch(
+            return self._audited(run, ts=ts)
+        watched = self._watch(
             run,
             before=before,
             settled=settled,
             recovered=recovered,
             approvals=approvals,
         )
+        return self._audited(watched, ts=settled)
 
     def expire(
         self, now: datetime, *, approvals: Sequence[str] = ()
@@ -510,6 +534,126 @@ class Remediator:
             return None
         reading = self._rollback.reader(service, ts=ts)
         return None if reading is None else reading.availability
+
+    # --- writing down what the loop itself decided ---------------------------
+
+    def _audited(self, run: RemediationRun, *, ts: datetime) -> RemediationRun:
+        """Record what the platform did about this incident, and hand the run back.
+
+        This is the **incident-level** record, and it is deliberately a different
+        statement from the plan-level entries the executor writes. "``RATE_LIMIT``
+        on this target was refused for want of a signature" and "nothing was done
+        about this incident, and here is every reason" are different facts, and
+        only the second one answers the question somebody reconstructing an
+        outage actually asks. Where both are true, both are written: they are two
+        levels of the same event, not two copies of it.
+
+        A run that acted earns a ``DECISION`` entry naming the rung it climbed;
+        one that did not earns ``ACTION_REFUSED`` carrying every reason. The
+        rollback, when there was one, is recorded separately because *why* an
+        action was undone is not derivable from the fact that it was.
+        """
+        if self._ledger is None:
+            return run
+        if run.rollback is not None:
+            self._append(
+                ts=ts,
+                kind=AuditEventKind.ROLLBACK,
+                summary=f"undid the action taken on {run.incident_id}: {run.rollback.detail}",
+                body={
+                    "harmed": list(run.rollback.harmed),
+                    "availability_restored": run.rollback.availability_restored,
+                    "reverted": run.rollback.reverted,
+                },
+                run=run,
+            )
+        if run.acted:
+            primary = run.selection.primary if run.selection is not None else None
+            self._append(
+                ts=ts,
+                kind=AuditEventKind.DECISION,
+                summary=(
+                    f"acted on {run.incident_id} at rung "
+                    f"{primary.rung_id if primary else 'unknown'}: "
+                    f"{primary.reason if primary else 'no reason recorded'}"
+                ),
+                body={
+                    "ladder_id": primary.ladder_id if primary else None,
+                    "rung_id": primary.rung_id if primary else None,
+                    "effects": [effect.plan.plan_id for effect in run.applied],
+                    "gates_passed": sorted(
+                        {gate for effect in run.applied for gate in effect.outcome.gates_passed}
+                    ),
+                    "improvement": run.improvement,
+                    "released": [entry.plan.plan_id for entry in run.released],
+                    "refusals": list(run.refusals),
+                },
+                run=run,
+            )
+            return run
+        self._append(
+            ts=ts,
+            kind=AuditEventKind.ACTION_REFUSED,
+            summary=(
+                f"took no action on {run.incident_id}: "
+                f"{run.refusals[0] if run.refusals else 'no reason recorded'}"
+            ),
+            body={
+                "reasons": list(run.refusals),
+                "released": [e.plan.plan_id for e in run.released],
+            },
+            run=run,
+        )
+        return run
+
+    def _audit_breaker(self, state: BreakerState, *, ts: datetime) -> None:
+        """Record the breaker *opening*, which is an event, not a state.
+
+        Written on the transition only. A loop that appended an entry every time
+        it found the breaker already open would bury the moment it tripped - the
+        one thing a person reading the ledger needs to find - under a page of
+        identical lines saying the same thing about the same condition.
+        """
+        was_open = self._breaker_open
+        self._breaker_open = state.open
+        if self._ledger is None or not state.open or was_open:
+            return
+        self._append(
+            ts=ts,
+            kind=AuditEventKind.BREAKER_OPENED,
+            summary=state.reason or "the remediation breaker opened",
+            body={
+                "recent_actions": state.recent_actions,
+                "requires_page": state.requires_page,
+            },
+            run=None,
+        )
+
+    def _append(
+        self,
+        *,
+        ts: datetime,
+        kind: AuditEventKind,
+        summary: str,
+        body: dict[str, object],
+        run: RemediationRun | None,
+    ) -> None:
+        if self._ledger is None:  # pragma: no cover - callers check first
+            return
+        self._ledger.append(
+            ts=ts,
+            kind=kind,
+            actor=self._owner,
+            summary=summary,
+            body=body,
+            incident_id=None if run is None else run.incident_id,
+            decision_id=None if run is None else run.decision_id,
+            # No plan id: this is a statement about an incident, and attaching
+            # one of several effects to it would quietly make it look like a
+            # statement about that effect.
+            plan_id=None,
+            honesty="SIMULATED" if self._executor.dry_run else "REAL",
+        )
 
     # --- giving effects back -------------------------------------------------
 

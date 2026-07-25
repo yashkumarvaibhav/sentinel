@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from action import (
+    DEFAULT_OWNER,
     ActionExecutor,
     BlastRadiusGuard,
     RemediationBreaker,
@@ -33,8 +34,17 @@ from action import (
     load_ladder_config,
 )
 from action.actuators import KubernetesActuator, MeshActuator, SimulatedActuator
+from audit import AuditChain, verify_chain
 from common.config import load_config
-from contracts import ActionKind, ActionStatus, Decision, DecisionAction, IncidentSeverity
+from contracts import (
+    ActionKind,
+    ActionStatus,
+    AuditEntry,
+    AuditEventKind,
+    Decision,
+    DecisionAction,
+    IncidentSeverity,
+)
 from contracts.decision import VerdictClass
 from tests.test_action_kubernetes import FakeCluster
 from tests.test_action_mesh import FakeEdge
@@ -115,7 +125,9 @@ class Harness:
     slo: ScriptedSlo
 
 
-def _harness(*, dry_run: bool = False, slo: ScriptedSlo | None = None) -> Harness:
+def _harness(
+    *, dry_run: bool = False, slo: ScriptedSlo | None = None, ledger: AuditChain | None = None
+) -> Harness:
     configuration = load_action_config(CONFIG_DIR / "action.yml")
     bundle = load_config(CONFIG_DIR)
     edge = FakeEdge()
@@ -129,7 +141,12 @@ def _harness(*, dry_run: bool = False, slo: ScriptedSlo | None = None) -> Harnes
         KubernetesActuator(configuration=configuration.kubernetes, command=cluster),
         simulated,
     ]
-    executor = ActionExecutor(actuators=actuators, configuration=configuration, dry_run=dry_run)
+    # One chain for both, which is the real wiring: the executor writes the
+    # plan-level entries and the loop writes the incident-level ones, into the
+    # same tamper-evident record.
+    executor = ActionExecutor(
+        actuators=actuators, configuration=configuration, dry_run=dry_run, ledger=ledger
+    )
     reader = slo if slo is not None else ScriptedSlo()
     registry = RestraintRegistry()
     breaker = RemediationBreaker(configuration.breaker)
@@ -144,6 +161,7 @@ def _harness(*, dry_run: bool = False, slo: ScriptedSlo | None = None) -> Harnes
             breaker=breaker,
             rollback=VerifiedRollback(executor=executor, slos=bundle.slos, reader=reader),
             registry=registry,
+            ledger=ledger,
         ),
         edge=edge,
         cluster=cluster,
@@ -515,6 +533,122 @@ def test_a_companion_that_is_refused_does_not_retract_the_primary() -> None:
     assert run.refusals != ()
     assert "add-headroom-for-the-surge" in run.refusals[0]
     assert harness.cluster.mutating_calls() == []
+
+
+# --- what the ledger is told --------------------------------------------------
+
+
+def _loop_entries(ledger: AuditChain) -> list[AuditEntry]:
+    """Only the loop's own entries.
+
+    Discriminated by the absence of a ``plan_id``, not by the actor: the
+    executor records the loop as the actor, because the loop is who acted. What
+    separates the two is the *level* - the executor always writes about one
+    plan, and the loop never does.
+    """
+    return [
+        entry
+        for entry in ledger.entries()
+        if entry.plan_id is None and entry.actor == DEFAULT_OWNER
+    ]
+
+
+def test_the_loop_records_what_it_decided_about_the_incident() -> None:
+    """An incident-level record, which is a different claim from the plan-level one.
+
+    The executor writes "this action was applied"; only the loop can write "this
+    is what the platform decided to do about this incident, and at which rung".
+    """
+    ledger = AuditChain()
+    harness = _harness(ledger=ledger)
+
+    harness.remediator.consider(_decision(), ts=TICK)
+
+    decisions = [entry for entry in _loop_entries(ledger) if entry.kind is AuditEventKind.DECISION]
+    assert len(decisions) == 1
+    recorded = decisions[0]
+    assert recorded.incident_id == "incident-1"
+    assert recorded.decision_id == "decision-1"
+    assert recorded.body["rung_id"] == "hold-the-cohort-to-its-ceiling"
+    assert "canary-widened-on-clean-collateral" in recorded.body["gates_passed"]
+    # A statement about an incident carries no plan id: attaching one of several
+    # effects would quietly make it read as a statement about that effect.
+    assert recorded.plan_id is None
+    assert verify_chain(ledger.entries()).intact
+
+
+def test_the_loop_records_taking_no_action_and_why() -> None:
+    """Both levels are written, because they are two different statements.
+
+    The executor's entry says a particular plan was refused for want of a
+    signature. Only the loop's says the incident went unanswered - and that is
+    the one somebody reconstructing an outage is actually looking for.
+    """
+    ledger = AuditChain()
+    harness = _harness(ledger=ledger)
+
+    harness.remediator.consider(_decision(confidence=ISOLATE), ts=TICK)
+
+    refusals = [entry for entry in ledger.entries() if entry.kind is AuditEventKind.ACTION_REFUSED]
+    plan_level = [entry for entry in refusals if entry.plan_id is not None]
+    loop_level = [entry for entry in refusals if entry.plan_id is None]
+    assert len(plan_level) == 1, "the executor still records the plan it refused"
+    assert len(loop_level) == 1
+    assert "took no action on incident-1" in loop_level[0].summary
+    assert "approver" in loop_level[0].body["reasons"][0]
+    assert verify_chain(ledger.entries()).intact
+
+
+def test_the_breaker_is_recorded_opening_rather_than_being_open() -> None:
+    """A loop that logged the state every pass would bury the moment it tripped."""
+    ledger = AuditChain()
+    harness = _harness(ledger=ledger)
+    for index in range(5):
+        harness.remediator.consider(
+            _decision(incident=f"incident-{index}", decision_id=f"decision-{index}"),
+            ts=TICK + timedelta(seconds=index),
+        )
+
+    for index in range(3):
+        harness.remediator.consider(
+            _decision(incident="incident-late", decision_id=f"decision-late-{index}"),
+            ts=TICK + timedelta(seconds=20 + index),
+        )
+
+    opened = [
+        entry for entry in _loop_entries(ledger) if entry.kind is AuditEventKind.BREAKER_OPENED
+    ]
+    assert len(opened) == 1
+    assert opened[0].body["requires_page"] is True
+
+
+def test_why_an_action_was_undone_is_recorded_separately_from_the_undoing() -> None:
+    """That an effect was reverted does not say why; the ledger needs both."""
+    ledger = AuditChain()
+    harness = _harness(slo=_harm_that_appears_late(), ledger=ledger)
+
+    harness.remediator.consider(_decision(), ts=TICK, settled_at=SETTLED, recovered_at=RECOVERED)
+
+    rollbacks = [entry for entry in _loop_entries(ledger) if entry.kind is AuditEventKind.ROLLBACK]
+    assert len(rollbacks) == 1
+    assert rollbacks[0].body["harmed"] == ["checkout"]
+    assert rollbacks[0].body["availability_restored"] == pytest.approx(0.08)
+    # The executor's own ACTION_REVERTED entries are still there beside it.
+    assert AuditEventKind.ACTION_REVERTED in [entry.kind for entry in ledger.entries()]
+    assert verify_chain(ledger.entries()).intact
+
+
+def test_a_dry_run_leaves_a_trail_labelled_simulated() -> None:
+    """A run that produces a full audit trail of what would have happened is a
+    real capability - provided every artifact it leaves is labelled as such."""
+    ledger = AuditChain()
+    harness = _harness(dry_run=True, ledger=ledger)
+
+    harness.remediator.consider(_decision(), ts=TICK)
+
+    written = _loop_entries(ledger)
+    assert written != []
+    assert all(entry.honesty == "SIMULATED" for entry in written)
 
 
 def test_no_refusal_escapes_the_loop_as_an_exception() -> None:
