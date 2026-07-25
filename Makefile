@@ -277,6 +277,14 @@ decide-replay: ## Replay captures through the whole decision plane (CAPTURE_ROOT
 		$(if $(TRANSCRIPT_DIR),--transcript-dir "../$(TRANSCRIPT_DIR)") \
 		--report ../docs/reports/phase-4-decision-characterization.md
 
+.PHONY: remediate-replay
+remediate-replay: ## Run recorded decisions through the remediation loop (CAPTURE_ROOTS= space-separated)
+	@test -n "$(CAPTURE_ROOTS)" || { echo "CAPTURE_ROOTS is required" >&2; exit 2; }
+	cd platform && PYTHONPATH=.. uv run python -m lab.scoring.remediate \
+		--repo-root .. \
+		$(foreach root,$(CAPTURE_ROOTS),--capture "../$(root)") \
+		--report ../docs/reports/phase-5-remediation-replay.md
+
 .PHONY: score-decisions
 score-decisions: ## Score decisions against the scenario answer key (CAPTURE_ROOTS= space-separated)
 	@test -n "$(CAPTURE_ROOTS)" || { echo "CAPTURE_ROOTS is required" >&2; exit 2; }

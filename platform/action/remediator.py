@@ -196,6 +196,11 @@ class Remediator:
         """What this loop currently has standing."""
         return self._registry
 
+    @property
+    def ladder_fingerprint(self) -> str:
+        """The committed configuration every rung this loop climbed was chosen under."""
+        return self._ladder.fingerprint
+
     def consider(
         self,
         decision: Decision,
