@@ -1,0 +1,156 @@
+# The graded remediation ladders: WHICH rung, never WHETHER.
+#
+# The policy gate (config/policies/action-policy.yml) has already decided that
+# something should be done, on what evidence, and whether a person must sign it.
+# This file only answers the question that is left: given that we are acting,
+# how hard, with which adapter, and for how long.
+#
+# Four rules make the ladders safe to read as well as to run:
+#
+#   1. RUNGS ARE ORDERED WEAKEST FIRST and a ladder is walked from the bottom up.
+#      The chosen rung is the STRONGEST one whose `minimum_confidence` the
+#      decision actually clears, so less certainty means a gentler action and
+#      never a stronger one. That is the confidence-gated downgrade.
+#   2. A RUNG CANNOT CREATE PERMISSION. `autonomous: false` widens the plan's
+#      approval requirement; nothing here can narrow one the gate imposed.
+#   3. EVERY RUNG EXPIRES. `ttl_seconds` is how long a restraint may stand before
+#      the platform gives it back on its own. An action with no expiry is a
+#      configuration change nobody remembers making.
+#   4. COMPANIONS ARE NEVER CHOSEN ALONE. A companion is added *alongside* the
+#      rung that names it, and can never be selected as a primary - which is how
+#      "restrain the cohort AND add headroom" is expressible without making
+#      "just add headroom" reachable on the same evidence.
+#
+# Parameters are stated in the adapter's own absolute vocabulary, because that is
+# the only vocabulary an effect can be deduplicated in. `parameters_from` is the
+# single exception and the only resolver that exists: `committed_flag` fills in
+# the flag committed for the incident's target service, and the rung is SKIPPED
+# when that service has no committed flag or more than one - a rung that cannot
+# name its own target is not offered rather than aimed at a guess.
+version: 1
+
+ladders:
+  # An attack, or an attack hiding inside a legitimate surge. The ordering is the
+  # guiding principle made operational: the early rungs are surgical, restraining
+  # the cohort whose behaviour deformed while the surge the world explains keeps
+  # being served. Capacity is added *with* the restraint and never instead of it,
+  # because scaling into an attack buys the attacker throughput.
+  - ladder_id: contain-hostile-traffic
+    verdict_classes: [ATTACK, COMBINATION]
+    reason: >-
+      hostile behaviour is confirmed against telemetry, so the deforming cohort
+      is restrained at the edge while everything the context explains is served
+    rungs:
+      - rung_id: watch-the-cohort
+        action_kind: OBSERVE
+        actuator: SIMULATED
+        minimum_confidence: 0.0
+        autonomous: true
+        maximum_blast_fraction: 0.0
+        ttl_seconds: 300
+        parameters: {}
+
+      # Slow the cohort before refusing it. Nobody is turned away, which is the
+      # right first move against traffic we are confident about but have not yet
+      # watched respond to being restrained.
+      - rung_id: slow-the-cohort
+        action_kind: THROTTLE
+        actuator: MESH
+        minimum_confidence: 0.70
+        autonomous: true
+        maximum_blast_fraction: 0.35
+        ttl_seconds: 600
+        parameters:
+          cohort: general-traffic
+          delayed_percent: 25
+
+      # Hold the cohort to its committed ceiling, and add capacity at the same
+      # time so the legitimate share of the surge keeps its headroom.
+      - rung_id: hold-the-cohort-to-its-ceiling
+        action_kind: RATE_LIMIT
+        actuator: MESH
+        minimum_confidence: 0.85
+        autonomous: true
+        maximum_blast_fraction: 1.0
+        ttl_seconds: 900
+        paired_with: add-headroom-for-the-surge
+        parameters:
+          cohort: general-traffic
+          enforced_percent: 100
+
+      # Cordoning is destructive and expensive to undo, so it is never autonomous
+      # however certain the evidence looks.
+      - rung_id: take-the-node-out-of-rotation
+        action_kind: ISOLATE
+        actuator: KUBERNETES
+        minimum_confidence: 0.95
+        autonomous: false
+        maximum_blast_fraction: 1.0
+        ttl_seconds: 1800
+        parameters: {}
+
+    companions:
+      - rung_id: add-headroom-for-the-surge
+        action_kind: SCALE
+        actuator: KUBERNETES
+        minimum_confidence: 0.85
+        autonomous: true
+        maximum_blast_fraction: 0.5
+        ttl_seconds: 900
+        parameters:
+          replicas: 2
+
+  # A fault we caused. This is what autonomous reversible remediation is for, and
+  # the ordering is an escalation preference: while we are less sure, add
+  # capacity, which harms nothing if the diagnosis is wrong; once we are sure,
+  # undo the change that caused it; roll the deployment back only when very sure,
+  # and never without a person.
+  - ladder_id: remediate-our-own-fault
+    verdict_classes: [OPERATIONAL_FAULT, CODE_CONFIG_FAULT]
+    reason: >-
+      a confirmed fault with an evidence-computed origin is exactly what graded
+      reversible remediation exists for
+    rungs:
+      - rung_id: watch-the-service
+        action_kind: OBSERVE
+        actuator: SIMULATED
+        minimum_confidence: 0.0
+        autonomous: true
+        maximum_blast_fraction: 0.0
+        ttl_seconds: 300
+        parameters: {}
+
+      - rung_id: add-headroom-for-the-service
+        action_kind: SCALE
+        actuator: KUBERNETES
+        minimum_confidence: 0.75
+        autonomous: true
+        maximum_blast_fraction: 0.5
+        ttl_seconds: 1800
+        parameters:
+          replicas: 2
+
+      # Undoing the change beats compensating for it, but it restarts the flag
+      # provider the whole mesh evaluates against, so it sits above scaling.
+      # Skipped automatically when the target service has no single committed
+      # flag - see `parameters_from` above.
+      - rung_id: put-the-flag-back
+        action_kind: FLAG_FLIP
+        actuator: FEATURE_FLAG
+        minimum_confidence: 0.85
+        autonomous: true
+        maximum_blast_fraction: 1.0
+        ttl_seconds: 1800
+        parameters_from: committed_flag
+        parameters: {}
+
+      - rung_id: roll-the-deployment-back
+        action_kind: ROLLBACK
+        actuator: KUBERNETES
+        minimum_confidence: 0.90
+        autonomous: false
+        maximum_blast_fraction: 1.0
+        ttl_seconds: 3600
+        parameters: {}
+
+    companions: []

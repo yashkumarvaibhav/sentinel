@@ -33,7 +33,7 @@ from pydantic import (
     model_validator,
 )
 
-from contracts import ActuatorKind
+from contracts import ActionKind, ActionParameterValue, ActuatorKind, VerdictClass
 
 # The environment may only ever tighten the file's safety posture.
 FORCE_DRY_RUN_ENV = "SENTINEL_ACTION_FORCE_DRY_RUN"
@@ -65,8 +65,24 @@ def _named_actuator_kind(value: object) -> object:
     return value
 
 
+def _named_action_kind(value: object) -> object:
+    """Accept the YAML spelling of a rung under strict validation."""
+    if isinstance(value, str):
+        try:
+            return ActionKind(value)
+        except ValueError as error:
+            known = ", ".join(member.value for member in ActionKind)
+            raise ValueError(f"unknown rung {value!r}; known rungs are {known}") from error
+    return value
+
+
 type PositiveSeconds = Annotated[float, Field(gt=0.0, le=86_400.0, allow_inf_nan=False)]
 type NamedActuatorKind = Annotated[ActuatorKind, BeforeValidator(_named_actuator_kind)]
+type NamedActionKind = Annotated[ActionKind, BeforeValidator(_named_action_kind)]
+
+# The ladders name diagnoses, and a diagnosis this build does not have is a
+# typo rather than a future feature.
+_VERDICT_CLASSES: frozenset[str] = frozenset(member.value for member in VerdictClass)
 
 
 class ActionConfigLoadError(ValueError):
@@ -228,6 +244,114 @@ class FlagsConfig(ActionConfigModel):
         )
 
 
+class LadderRung(ActionConfigModel):
+    """One rung: an adapter, an effect, and the certainty it costs to reach it."""
+
+    rung_id: Identifier
+    action_kind: NamedActionKind
+    actuator: NamedActuatorKind
+    minimum_confidence: Annotated[float, Field(ge=0.0, le=1.0, allow_inf_nan=False)]
+    autonomous: bool
+    maximum_blast_fraction: Annotated[float, Field(ge=0.0, le=1.0, allow_inf_nan=False)]
+    ttl_seconds: Annotated[int, Field(ge=1, le=86_400)]
+    parameters: dict[Identifier, ActionParameterValue] = Field(default_factory=dict)
+    parameters_from: Literal["committed_flag"] | None = None
+    paired_with: Identifier | None = None
+
+    @model_validator(mode="after")
+    def validate_rung(self) -> Self:
+        if self.action_kind is ActionKind.OBSERVE and self.maximum_blast_fraction != 0.0:
+            raise ValueError(f"{self.rung_id}: observing changes nothing, so it disturbs nothing")
+        if self.parameters_from is not None and self.parameters:
+            raise ValueError(
+                f"{self.rung_id}: a resolved rung may not also carry literal parameters; one "
+                "source of parameters or the other, never both"
+            )
+        if (
+            self.parameters_from == "committed_flag"
+            and self.action_kind is not ActionKind.FLAG_FLIP
+        ):
+            raise ValueError(f"{self.rung_id}: only a FLAG_FLIP rung resolves a committed flag")
+        return self
+
+
+class Ladder(ActionConfigModel):
+    """One ordered ladder, and the diagnoses it answers."""
+
+    ladder_id: Identifier
+    verdict_classes: tuple[Identifier, ...] = Field(min_length=1)
+    reason: str
+    rungs: tuple[LadderRung, ...] = Field(min_length=1)
+    companions: tuple[LadderRung, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_ladder(self) -> Self:
+        named = [rung.rung_id for rung in (*self.rungs, *self.companions)]
+        if len(named) != len(set(named)):
+            raise ValueError(f"{self.ladder_id}: each rung is named once")
+        thresholds = [rung.minimum_confidence for rung in self.rungs]
+        if thresholds != sorted(thresholds):
+            raise ValueError(
+                f"{self.ladder_id}: rungs are ordered weakest first, so their minimum confidences "
+                "may not decrease; a ladder read in a different order is a different ladder"
+            )
+        companions = {rung.rung_id for rung in self.companions}
+        for rung in self.companions:
+            if rung.paired_with is not None:
+                raise ValueError(f"{rung.rung_id}: a companion may not itself pair with one")
+        for rung in self.rungs:
+            if rung.paired_with is not None and rung.paired_with not in companions:
+                raise ValueError(
+                    f"{rung.rung_id}: pairs with {rung.paired_with}, which is not a companion of "
+                    f"{self.ladder_id}; a companion is never chosen alone and must be declared"
+                )
+        return self
+
+
+class LadderConfig(ActionConfigModel):
+    """Every ladder the platform may climb, and nothing it may improvise."""
+
+    version: Literal[1]
+    ladders: tuple[Ladder, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_ladders(self) -> Self:
+        named = [ladder.ladder_id for ladder in self.ladders]
+        if len(named) != len(set(named)):
+            raise ValueError("each ladder is named once")
+        claimed: dict[str, str] = {}
+        for ladder in self.ladders:
+            for verdict in ladder.verdict_classes:
+                if verdict not in _VERDICT_CLASSES:
+                    known = ", ".join(sorted(_VERDICT_CLASSES))
+                    raise ValueError(f"unknown verdict class {verdict!r}; known classes: {known}")
+                owner = claimed.setdefault(verdict, ladder.ladder_id)
+                if owner != ladder.ladder_id:
+                    raise ValueError(
+                        f"{verdict} is answered by both {owner} and {ladder.ladder_id}; two "
+                        "ladders for one diagnosis is an ambiguity, not a choice"
+                    )
+        return self
+
+    @property
+    def fingerprint(self) -> str:
+        """Content hash recorded with any action chosen under these ladders."""
+        rendered = json.dumps(
+            self.model_dump(mode="json"),
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+
+    def for_verdict(self, verdict_class: str) -> Ladder | None:
+        """The one ladder that answers this diagnosis, or none."""
+        for ladder in self.ladders:
+            if verdict_class in ladder.verdict_classes:
+                return ladder
+        return None
+
+
 class ActionConfig(ActionConfigModel):
     """One fully validated snapshot of how the action plane may execute."""
 
@@ -290,6 +414,15 @@ def resolve_dry_run(configuration: ActionConfig, *, environ: Mapping[str, str]) 
 
 def load_action_config(path: Path) -> ActionConfig:
     """Load and strictly validate the action-plane configuration."""
+    return _load_document(path, ActionConfig)
+
+
+def load_ladder_config(path: Path) -> LadderConfig:
+    """Load and strictly validate the graded remediation ladders."""
+    return _load_document(path, LadderConfig)
+
+
+def _load_document[T: ActionConfigModel](path: Path, model: type[T]) -> T:
     if not path.is_file():
         raise ActionConfigLoadError(f"{path.name}: required configuration file is missing")
     try:
@@ -299,7 +432,7 @@ def load_action_config(path: Path) -> ActionConfig:
     if not isinstance(document, dict):
         raise ActionConfigLoadError(f"{path.name}: YAML root must be a mapping")
     try:
-        return ActionConfig.model_validate(document)
+        return model.model_validate(document)
     except ValidationError as error:
         raise ActionConfigLoadError(f"{path.name}: {error}") from error
 
@@ -308,7 +441,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Validate action-plane configuration and print its reproducibility fingerprint."""
     parser = argparse.ArgumentParser(prog="python -m action")
     parser.add_argument("--config", type=Path, required=True, help="action-plane configuration")
+    parser.add_argument("--ladders", type=Path, help="graded remediation ladders")
     args = parser.parse_args(argv)
     configuration = load_action_config(args.config)
     print(f"action configuration valid: {configuration.fingerprint}")
+    if args.ladders is not None:
+        ladders = load_ladder_config(args.ladders)
+        print(f"ladder configuration valid: {ladders.fingerprint}")
     return 0
