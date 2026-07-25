@@ -40,8 +40,14 @@ def test_the_platform_ships_touching_nothing() -> None:
 
 
 def test_only_the_adapters_that_exist_are_permitted() -> None:
-    enabled = load_action_config(CONFIG_PATH).enabled_actuators()
-    assert enabled == {ActuatorKind.SIMULATED}
+    """An adapter may only be enabled once it is actually implemented."""
+    configuration = load_action_config(CONFIG_PATH)
+    landed = {ActuatorKind.SIMULATED, ActuatorKind.KUBERNETES}
+    assert configuration.enabled_actuators() <= landed
+    # The mesh and feature-flag adapters land in 5.3 and 5.4; enabling either
+    # before it exists would let the executor accept a plan nothing can carry out.
+    assert ActuatorKind.MESH not in configuration.enabled_actuators()
+    assert ActuatorKind.FEATURE_FLAG not in configuration.enabled_actuators()
 
 
 def test_an_unknown_adapter_name_is_refused_by_name() -> None:
