@@ -244,6 +244,21 @@ class FlagsConfig(ActionConfigModel):
         )
 
 
+class BreakerConfig(ActionConfigModel):
+    """When the platform stops acting on its own and asks for a person.
+
+    Two ways to trip, and the second is the one that matters: a rate limit on
+    autonomous actions, and a streak of actions that did not improve the signal
+    they were taken against. A remediator that keeps acting without helping has
+    the wrong model of the problem.
+    """
+
+    maximum_actions: Annotated[int, Field(ge=1, le=1_000)]
+    window_seconds: PositiveSeconds
+    ineffective_streak: Annotated[int, Field(ge=1, le=100)]
+    minimum_improvement: Annotated[float, Field(ge=0.0, le=1.0, allow_inf_nan=False)]
+
+
 class LadderRung(ActionConfigModel):
     """One rung: an adapter, an effect, and the certainty it costs to reach it."""
 
@@ -366,6 +381,7 @@ class ActionConfig(ActionConfigModel):
     kubernetes: KubernetesConfig | None = None
     mesh: MeshConfig | None = None
     flags: FlagsConfig | None = None
+    breaker: BreakerConfig | None = None
 
     @model_validator(mode="after")
     def validate_actuators(self) -> Self:

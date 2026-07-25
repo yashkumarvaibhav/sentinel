@@ -17,11 +17,18 @@ from action.actuators import (
     SimulatedCall,
     build_plan,
 )
+from action.breaker import (
+    ActionRecord,
+    BreakerOpenError,
+    BreakerState,
+    RemediationBreaker,
+)
 from action.config import (
     FORCE_DRY_RUN_ENV,
     ActionConfig,
     ActionConfigLoadError,
     ActuatorConfig,
+    BreakerConfig,
     ExecutionConfig,
     FlagsConfig,
     KubernetesConfig,
@@ -61,6 +68,13 @@ from action.ladder import (
     StandingRestraint,
 )
 from action.leases import LeaseRegistry, TargetBusyError, TargetLease
+from action.rollback import (
+    RollbackResult,
+    SloCollateralProbe,
+    SloReader,
+    SloReading,
+    VerifiedRollback,
+)
 
 __all__ = [
     "BLAST_CAP_GATE",
@@ -73,6 +87,7 @@ __all__ = [
     "ActionExecutor",
     "ActionJournal",
     "ActionJournalFullError",
+    "ActionRecord",
     "ActionRejectedError",
     "Actuator",
     "ActuatorConfig",
@@ -80,6 +95,9 @@ __all__ = [
     "ActuatorError",
     "BlastRadiusExceededError",
     "BlastRadiusGuard",
+    "BreakerConfig",
+    "BreakerOpenError",
+    "BreakerState",
     "CanaryResult",
     "CanaryRollout",
     "CanaryStep",
@@ -106,14 +124,20 @@ __all__ = [
     "MeshConfig",
     "NoRungAvailableError",
     "ProtectedCohortError",
+    "RemediationBreaker",
     "RemediationLadder",
     "RestraintRegistry",
+    "RollbackResult",
     "RungChoice",
     "SimulatedActuator",
     "SimulatedCall",
+    "SloCollateralProbe",
+    "SloReader",
+    "SloReading",
     "StandingRestraint",
     "TargetBusyError",
     "TargetLease",
+    "VerifiedRollback",
     "build_plan",
     "guarded_apply",
     "load_action_config",

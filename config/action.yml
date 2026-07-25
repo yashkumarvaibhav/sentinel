@@ -166,3 +166,19 @@ flags:
     kafkaQueueProblems:
       service: checkout
       variant: "off"
+
+# When the platform stops acting on its own and fetches a person. Every other
+# safety mechanism here asks whether an action is allowed; this one asks whether
+# the platform is still helping, which is the question a wrong model fails.
+breaker:
+  # A rate limit on autonomy. Five reversible actions in a quarter of an hour is
+  # already more than anyone can read; past that it is a runaway whatever each
+  # one claimed to be for.
+  maximum_actions: 5
+  window_seconds: 900.0
+
+  # ...and a limit on futility. Three consecutive actions against one service
+  # that each moved its signal by less than 0.5 points of availability means the
+  # diagnosis is wrong, and more automation is the wrong answer to that.
+  ineffective_streak: 3
+  minimum_improvement: 0.005
