@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Sequence
 from datetime import datetime, timedelta
-from typing import Self, cast
+from typing import Literal, Self, cast
 
-from psycopg import sql
+from psycopg import AsyncConnection, sql
+from psycopg.rows import TupleRow
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from audit.chain import build_entry
 from common.storage.models import AuditRecord, IncidentRecord
 from common.storage.pool import PostgresPool
-from contracts import SymptomEpisode
+from contracts import AuditEntry, AuditEventKind, SymptomEpisode
 
 
 class PostgresRepository:
@@ -313,3 +316,151 @@ def _stored_vector(payload: object) -> tuple[float, ...]:
         if isinstance(stored, list):
             return tuple(float(value) for value in stored)
     raise ValueError("a stored signature must carry its vector in the payload")
+
+
+class AuditLedgerRepository:
+    """The hash-chained ledger, appended by exactly one writer at a time.
+
+    Everything about *what* an entry contains is decided by ``audit.chain``, so
+    the durable ledger and the in-process one agree by construction. What this
+    class adds is the single thing a process-local chain cannot have: an append
+    that is serialised **across** processes.
+
+    The serialisation is a Postgres advisory lock taken inside the transaction,
+    so it is released when the transaction ends however it ends - including a
+    crash, which is exactly when a lock you have to remember to release becomes
+    an outage. The head is re-read *under* the lock; reading it outside would
+    make the lock decorative, because the value it protects would already be
+    stale by the time it was used.
+
+    The table's ``UNIQUE (previous_hash)`` is the second line: even with no lock
+    at all, two writers building on one head cannot both succeed.
+    """
+
+    def __init__(self, *, pool: PostgresPool, schema: str) -> None:
+        self._pool = pool
+        self._schema = schema
+        self._ledger = sql.Identifier(schema, "audit_ledger")
+        # One lock per schema, derived from its name so a test schema and a
+        # runtime schema never contend with each other. Postgres advisory locks
+        # are a single 64-bit space shared by the whole database.
+        digest = hashlib.sha256(f"sentinel-audit-ledger:{schema}".encode()).digest()
+        self._lock_key = int.from_bytes(digest[:8], "big", signed=True)
+
+    async def append(
+        self,
+        *,
+        ts: datetime,
+        kind: AuditEventKind,
+        actor: str,
+        summary: str,
+        body: dict[str, JsonValue] | None = None,
+        incident_id: str | None = None,
+        decision_id: str | None = None,
+        plan_id: str | None = None,
+        honesty: Literal["REAL", "SIMULATED"] = "REAL",
+    ) -> AuditEntry:
+        """Append one entry to the end of the chain, alone."""
+        insert = sql.SQL(
+            """
+            INSERT INTO {table}
+                (entry_id, sequence, ts, kind, actor, summary, incident_id,
+                 decision_id, plan_id, body, previous_hash, entry_hash, honesty)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+        ).format(table=self._ledger)
+        async with self._pool.connection() as connection, connection.transaction():
+            await connection.execute("SELECT pg_advisory_xact_lock(%s)", (self._lock_key,))
+            entry = build_entry(
+                previous=await self._head(connection),
+                ts=ts,
+                kind=kind,
+                actor=actor,
+                summary=summary,
+                body=dict(body or {}),
+                incident_id=incident_id,
+                decision_id=decision_id,
+                plan_id=plan_id,
+                honesty=honesty,
+            )
+            await connection.execute(
+                insert,
+                (
+                    entry.entry_id,
+                    entry.sequence,
+                    entry.ts,
+                    entry.kind.value,
+                    entry.actor,
+                    entry.summary,
+                    entry.incident_id,
+                    entry.decision_id,
+                    entry.plan_id,
+                    Jsonb(entry.body),
+                    entry.previous_hash,
+                    entry.entry_hash,
+                    entry.honesty,
+                ),
+            )
+        return entry
+
+    async def head(self) -> AuditEntry | None:
+        """The most recent entry, or nothing if the ledger has not started."""
+        async with self._pool.connection() as connection:
+            return await self._head(connection)
+
+    async def entries(
+        self, *, limit: int = 100, after_sequence: int | None = None
+    ) -> tuple[AuditEntry, ...]:
+        """A run of the chain in order, oldest first, for reading and verifying."""
+        if limit < 1:
+            raise ValueError("limit must be at least one")
+        query = sql.SQL(
+            """
+            SELECT {columns} FROM {table}
+            WHERE %s::bigint IS NULL OR sequence > %s
+            ORDER BY sequence ASC
+            LIMIT %s
+            """
+        ).format(columns=_AUDIT_COLUMNS, table=self._ledger)
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(query, (after_sequence, after_sequence, limit))
+            rows = await cursor.fetchall()
+        return tuple(_audit_entry(row) for row in rows)
+
+    async def _head(self, connection: AsyncConnection[TupleRow]) -> AuditEntry | None:
+        query = sql.SQL("SELECT {columns} FROM {table} ORDER BY sequence DESC LIMIT 1").format(
+            columns=_AUDIT_COLUMNS, table=self._ledger
+        )
+        cursor = await connection.execute(query)
+        row = await cursor.fetchone()
+        return None if row is None else _audit_entry(row)
+
+
+_AUDIT_COLUMNS = sql.SQL(
+    "entry_id, sequence, ts, kind, actor, summary, incident_id, decision_id, "
+    "plan_id, body, previous_hash, entry_hash, honesty"
+)
+
+
+def _audit_entry(row: Sequence[object]) -> AuditEntry:
+    """Rebuild one entry, which re-validates its hash on the way out.
+
+    Validation on read is not redundant: a row edited directly in the database is
+    exactly the attack the ledger exists to detect, and it is caught here before
+    the entry reaches anything that might act on it.
+    """
+    return AuditEntry(
+        entry_id=cast(str, row[0]),
+        sequence=cast(int, row[1]),
+        ts=cast(datetime, row[2]),
+        kind=AuditEventKind(cast(str, row[3])),
+        actor=cast(str, row[4]),
+        summary=cast(str, row[5]),
+        incident_id=cast("str | None", row[6]),
+        decision_id=cast("str | None", row[7]),
+        plan_id=cast("str | None", row[8]),
+        body=cast(dict[str, JsonValue], row[9]),
+        previous_hash=cast(str, row[10]),
+        entry_hash=cast(str, row[11]),
+        honesty=cast('Literal["REAL", "SIMULATED"]', row[12]),
+    )

@@ -5,6 +5,7 @@ from common.storage.migrations import migrate_storage
 from common.storage.models import AuditRecord, IncidentRecord
 from common.storage.pool import PostgresPool, create_postgres_pool
 from common.storage.postgres import (
+    AuditLedgerRepository,
     IncidentMemoryRepository,
     IncidentSignatureRecord,
     NeighbourRecord,
@@ -12,6 +13,7 @@ from common.storage.postgres import (
 )
 
 __all__ = [
+    "AuditLedgerRepository",
     "AuditRecord",
     "ClickHouseRepository",
     "IncidentMemoryRepository",

@@ -30,7 +30,7 @@ def test_clickhouse_migration_is_versioned_idempotent_and_retained() -> None:
 def test_postgres_migration_separates_runtime_and_dev_label_schemas() -> None:
     migrations = load_migrations("postgres")
 
-    assert [migration.version for migration in migrations] == ["0001", "0002", "0003"]
+    assert [migration.version for migration in migrations] == ["0001", "0002", "0003", "0004"]
     sql = render_migration(
         migrations[0],
         schema="sentinel_test",
@@ -89,3 +89,22 @@ def test_storage_identifiers_and_pool_bounds_are_validated() -> None:
 def test_dev_label_repository_is_not_a_runtime_storage_export() -> None:
     assert "DevLabelRepository" not in runtime_storage_exports
     assert "DevLabelRecord" not in runtime_storage_exports
+
+
+def test_the_audit_ledger_cannot_hold_two_entries_built_on_one_head() -> None:
+    """The constraint that makes a fork a database error rather than a race.
+
+    A lock prevents the race; `UNIQUE (previous_hash)` detects the outcome the
+    race would have had, so the ledger stays honest even if the lock is ever
+    removed or misused.
+    """
+    migrations = load_migrations("postgres")
+    ledger = next(migration for migration in migrations if migration.version == "0004")
+    # It takes only the runtime schema token: the ledger is runtime state, and a
+    # migration that could also name the dev-label schema is one that could put
+    # an answer key next to an audit trail.
+    sql = render_migration(ledger, schema="sentinel_test")
+
+    assert "sentinel_test.audit_ledger" in sql
+    assert "previous_hash text NOT NULL UNIQUE" in sql
+    assert "sequence bigint NOT NULL UNIQUE" in sql

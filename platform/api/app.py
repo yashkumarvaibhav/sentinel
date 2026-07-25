@@ -14,9 +14,11 @@ from typing import Any
 import httpx
 from fastapi import FastAPI, Response
 
+from api.audit import AuditLedger
 from api.gate import SharedSecretGate
 from api.health import HealthReport, Probe, Readiness, check_health
 from api.probes import platform_probes
+from audit import verify_chain
 from common.buildinfo import build_info
 from common.config import load_config
 from common.settings import Settings, settings
@@ -24,13 +26,21 @@ from common.settings import Settings, settings
 SERVICE = "sentinel-gateway"
 
 # Routes that expose more than the command centre needs and so ride the gate
-# even for reads. Grows as sensitive surfaces (audit, config) are added.
-_SENSITIVE_PREFIXES = ("/api/lab",)
+# even for reads. The audit ledger is here because it is the record of what the
+# platform did and why - the one read where "who is asking" matters as much as
+# for a write (build decision #12 names it).
+_SENSITIVE_PREFIXES = ("/api/lab", "/api/audit")
+
+# How much of the chain one request may ask for. A ledger read is a scan in
+# sequence order, so an unbounded one is a way to make the gateway do arbitrary
+# work on behalf of anybody who can reach it.
+MAX_AUDIT_ENTRIES = 500
 
 
 def create_app(
     config: Settings | None = None,
     probes: Mapping[str, Probe] | None = None,
+    ledger: AuditLedger | None = None,
 ) -> FastAPI:
     """Build the gateway application.
 
@@ -41,6 +51,10 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.runtime_config = load_config(config.config_dir)
+        # Injectable so the route is testable without a database. Left unset the
+        # endpoint answers 503 rather than pretending the ledger is empty: "no
+        # ledger attached" and "nothing has happened" must not look the same.
+        app.state.audit_ledger = ledger
         async with httpx.AsyncClient(timeout=config.probe_timeout_seconds) as client:
             app.state.probes = probes if probes is not None else platform_probes(config, client)
             yield
@@ -81,6 +95,41 @@ def create_app(
             # and telling the truth about what beneath it is not.
             response.status_code = 503
         return _serialize(report)
+
+    @app.get("/api/audit", tags=["audit"])
+    async def audit(
+        response: Response, limit: int = 100, after: int | None = None
+    ) -> dict[str, Any]:
+        """The ledger, in order, with the chain re-verified on the way out.
+
+        The verification is not decoration. These rows came out of a database
+        somebody could have edited directly, which is precisely the attack the
+        chain exists to detect, so the answer says whether what it is returning
+        can be trusted rather than leaving that to the reader.
+        """
+        ledger = getattr(app.state, "audit_ledger", None)
+        if ledger is None:
+            response.status_code = 503
+            return {
+                "detail": "no audit ledger is attached to this gateway",
+                "entries": [],
+                "intact": False,
+            }
+        bounded = max(1, min(limit, MAX_AUDIT_ENTRIES))
+        entries = await ledger.entries(limit=bounded, after_sequence=after)
+        verification = verify_chain(entries)
+        if not verification.intact:
+            # A broken chain is not a 200 with a footnote. Something is wrong
+            # with the record of what this platform did.
+            response.status_code = 409
+        return {
+            "entries": [entry.model_dump(mode="json") for entry in entries],
+            "count": len(entries),
+            "intact": verification.intact,
+            "head_hash": verification.head_hash,
+            "broken_at": verification.broken_at,
+            "detail": verification.detail,
+        }
 
     return app
 

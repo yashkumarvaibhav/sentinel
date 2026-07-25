@@ -12,9 +12,11 @@ import httpx
 import pytest
 from psycopg import sql
 
+from audit import verify_chain
 from common.config import DetectorConfig
 from common.settings import Settings
 from common.storage import (
+    AuditLedgerRepository,
     AuditRecord,
     ClickHouseRepository,
     IncidentMemoryRepository,
@@ -28,6 +30,7 @@ from common.storage._clickhouse import execute as clickhouse_execute
 from common.storage.dev_labels import DevLabelRecord, DevLabelRepository
 from common.storage.migrations import migrate_storage
 from contracts import (
+    AuditEventKind,
     ContextWindow,
     DecompFrame,
     EpisodeStatus,
@@ -82,6 +85,7 @@ async def _exercise_real_storage() -> None:
             await _round_trip_clickhouse(config, client, suffix)
             await _round_trip_postgres(config, pool, suffix)
             await _round_trip_incident_memory(config, pool, suffix)
+            await _exercise_audit_ledger(config, pool)
         finally:
             await _drop_test_storage(config, client, pool)
             await pool.close()
@@ -384,6 +388,81 @@ async def _round_trip_incident_memory(config: Settings, pool: PostgresPool, suff
         f"middling-{suffix}",
         f"opposite-{suffix}",
     ]
+
+
+async def _exercise_audit_ledger(config: Settings, pool: PostgresPool) -> None:
+    """The ledger against a real database, where the interesting failures live.
+
+    Two properties cannot be shown by a unit test at all: that concurrent
+    appends serialise into one chain rather than two, and that a row edited
+    directly in the database is caught on the way back out.
+    """
+    ledger = AuditLedgerRepository(pool=pool, schema=config.postgres_schema)
+    ts = datetime(2026, 7, 21, 12, 0, tzinfo=UTC)
+
+    assert await ledger.head() is None, "a fresh ledger has no head"
+    assert await ledger.entries() == ()
+
+    first = await ledger.append(
+        ts=ts,
+        kind=AuditEventKind.DECISION,
+        actor="sentinel",
+        summary="decided to restrain the cohort",
+        body={"confidence": 0.88},
+        incident_id="incident-1",
+    )
+    assert first.sequence == 0
+    head = await ledger.head()
+    assert head is not None
+    assert head.entry_hash == first.entry_hash
+
+    # --- the property a lock exists for ------------------------------------
+    # Twelve appenders released at once against one head. True parallelism is
+    # bounded by the pool (max_size 2 here), which is all it takes: two appends
+    # running at the same instant would read the same head and mint the same
+    # sequence without the advisory lock. With it they queue on the lock, and the
+    # result is one chain with no gaps and no repeats.
+    concurrent = 12
+    appended = await asyncio.gather(
+        *(
+            ledger.append(
+                ts=ts + timedelta(seconds=index + 1),
+                kind=AuditEventKind.ACTION_APPLIED,
+                actor=f"writer-{index}",
+                summary=f"applied step {index}",
+                body={"step": index},
+                incident_id="incident-1",
+            )
+            for index in range(concurrent)
+        )
+    )
+    sequences = sorted(entry.sequence for entry in appended)
+    assert sequences == list(range(1, concurrent + 1)), "the chain forked or skipped a place"
+    assert len({entry.previous_hash for entry in appended}) == concurrent, (
+        "two entries built on the same head"
+    )
+
+    stored = await ledger.entries(limit=100)
+    assert len(stored) == concurrent + 1
+    verification = verify_chain(stored)
+    assert verification.intact, verification.detail
+    assert verification.head_hash == stored[-1].entry_hash
+
+    paged = await ledger.entries(limit=100, after_sequence=stored[2].sequence)
+    assert [entry.sequence for entry in paged] == [entry.sequence for entry in stored[3:]]
+
+    # --- the property tamper evidence exists for ---------------------------
+    # Edit a row the way somebody with database access would, and confirm the
+    # ledger refuses to hand it back as if nothing had happened.
+    async with pool.connection() as connection:
+        await connection.execute(
+            sql.SQL("UPDATE {} SET summary = %s WHERE sequence = %s").format(
+                sql.Identifier(config.postgres_schema, "audit_ledger")
+            ),
+            ("nothing happened here", 2),
+        )
+    with pytest.raises(ValueError, match="must be the digest of this entry's own content"):
+        await ledger.entries(limit=100)
 
 
 async def _drop_test_storage(
