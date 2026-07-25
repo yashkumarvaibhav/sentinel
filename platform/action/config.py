@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Annotated, Literal, Self
@@ -26,6 +27,7 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    StringConstraints,
     ValidationError,
     field_validator,
     model_validator,
@@ -36,6 +38,14 @@ from contracts import ActuatorKind
 # The environment may only ever tighten the file's safety posture.
 FORCE_DRY_RUN_ENV = "SENTINEL_ACTION_FORCE_DRY_RUN"
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+# RFC 1123 label, which is what a namespace, a workload and a node all are.
+# Validated here so nothing that fails it can ever reach an argument vector.
+_KUBERNETES_NAME = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?")
+
+type Identifier = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=253)
+]
 
 
 def _named_actuator_kind(value: object) -> object:
@@ -91,18 +101,52 @@ class ActuatorConfig(ActionConfigModel):
     enabled: bool
 
 
+class KubernetesConfig(ActionConfigModel):
+    """Which cluster the Kubernetes actuator reaches, and what it may aim at.
+
+    ``workloads`` maps a topology service to the workload an action targets. It
+    is a separate mapping from ``deployments.yml``'s ``workload_mappings`` on
+    purpose: that one runs the other way and is many-to-one (``frontend`` and
+    ``frontend-proxy`` both report as the ``frontend`` service), so reversing it
+    would mean guessing which of them to scale. An unmapped service is refused.
+    """
+
+    context: Identifier
+    namespace: Identifier
+    component_label: Identifier = "app.kubernetes.io/component"
+    maximum_replicas: Annotated[int, Field(ge=1, le=100)] = 10
+    workloads: dict[Identifier, Identifier] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_workloads(self) -> Self:
+        unsafe = sorted(
+            name
+            for name in (*self.workloads.values(), self.namespace)
+            if _KUBERNETES_NAME.fullmatch(name) is None
+        )
+        if unsafe:
+            raise ValueError(f"not valid Kubernetes object names: {', '.join(unsafe)}")
+        return self
+
+
 class ActionConfig(ActionConfigModel):
     """One fully validated snapshot of how the action plane may execute."""
 
     version: Literal[1]
     execution: ExecutionConfig
     actuators: tuple[ActuatorConfig, ...] = ()
+    kubernetes: KubernetesConfig | None = None
 
     @model_validator(mode="after")
     def validate_actuators(self) -> Self:
         named = [entry.actuator for entry in self.actuators]
         if len(named) != len(set(named)):
             raise ValueError("each actuator may be configured at most once")
+        if ActuatorKind.KUBERNETES in self.enabled_actuators() and self.kubernetes is None:
+            raise ValueError(
+                "the kubernetes actuator is enabled but no `kubernetes:` section says which "
+                "cluster it may reach; an adapter with no stated target is not permitted"
+            )
         return self
 
     @property

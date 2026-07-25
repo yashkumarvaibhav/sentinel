@@ -85,6 +85,11 @@ verify-storage: ## Run real repository round trips on the compose datastores
 		env UV_CACHE_DIR=/tmp/sentinel-uv-cache \
 		uv run --extra api --extra storage pytest tests/test_storage_integration.py
 
+.PHONY: verify-action
+verify-action: ## Run the Kubernetes actuator against the live testbed (read-only, dry-run)
+	$(PY) env SENTINEL_ACTION_K8S_INTEGRATION=1 \
+		pytest tests/test_action_kubernetes.py -k "real_testbed or stays_in_dry_run"
+
 .PHONY: verify-ingest
 verify-ingest: ## Run the real raw bus to normalized bus/ClickHouse round trip
 	$(COMPOSE) run --rm --build -e SENTINEL_LAB_INGEST_INTEGRATION=1 ingest \

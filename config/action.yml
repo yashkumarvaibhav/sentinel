@@ -40,7 +40,40 @@ execution:
 
 # Which adapters may run. An actuator missing from this list is refused, so
 # landing an adapter and enabling it are two separate, reviewable steps.
-# Kubernetes, mesh and feature-flag adapters are enabled as they land.
+# The mesh and feature-flag adapters are enabled as they land.
 actuators:
   - actuator: SIMULATED
     enabled: true
+  - actuator: KUBERNETES
+    enabled: true
+
+# The cluster the Kubernetes actuator may reach, and the only workloads it may
+# aim at. Enabling that adapter without this section is refused: an adapter with
+# no stated target is not permitted.
+kubernetes:
+  context: k3d-sentinel-lab
+  namespace: otel-demo
+
+  # Label the demo mesh puts on every pod, used to find the nodes a workload
+  # runs on before cordoning them.
+  component_label: app.kubernetes.io/component
+
+  # A hard ceiling on any scale, so a bad replica count is refused at plan time
+  # rather than absorbed by the cluster. The testbed runs one replica each.
+  maximum_replicas: 6
+
+  # Topology service -> the workload an action against it actually targets.
+  # This is deliberately NOT the reverse of deployments.yml's `workload_mappings`:
+  # that mapping is many-to-one (`frontend` and `frontend-proxy` both report as
+  # the `frontend` service), so reversing it would mean guessing which of the two
+  # to scale. Only an operator can say. A service missing here is refused.
+  #
+  # Measured against the running testbed on 2026-07-25: the OTel demo chart names
+  # its deployments plainly, so workload and service names coincide except where
+  # noted above.
+  workloads:
+    frontend: frontend
+    checkout: checkout
+    cart: cart
+    payment: payment
+    email: email
