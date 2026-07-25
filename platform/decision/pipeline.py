@@ -12,7 +12,9 @@ only place their order is stated:
 3. fusion reads the four axis scores and names the diagnosis, or refuses to;
 4. every incident is checked by the non-LLM verifier before anything may act on
    it, and recognition of a remembered shape nudges - never carries - its
-   confidence.
+   confidence;
+5. the policy gate says what happens about each incident, restricted by guards
+   computed from that same evidence.
 
 Two seams are deliberate and worth stating plainly.
 
@@ -43,6 +45,7 @@ from common.config import TopologyConfig
 from contracts import (
     AgentAssessment,
     ChangeEvent,
+    Decision,
     EvidenceAxis,
     FusionStatus,
     Incident,
@@ -62,7 +65,13 @@ from decision.agents import (
     SecurityEvidenceAgent,
 )
 from decision.changes import ChangeFeed
-from decision.config import EvidenceAgentsConfig, IncidentsConfig, VerdictRulesConfig
+from decision.config import (
+    ActionPolicyConfig,
+    EvidenceAgentsConfig,
+    IncidentsConfig,
+    VerdictRulesConfig,
+)
+from decision.decide import PolicyGate
 from decision.incidents import IncidentTracker
 from decision.memory import (
     IncidentSignature,
@@ -91,11 +100,16 @@ class IncidentOutcome:
     recognition has been folded in, so two incidents in the same tick can carry
     the same class with different confidence. It is ``None`` exactly when
     fusion refused to name a class at all.
+
+    ``decision`` always exists: a gate that declined to answer would leave an
+    incident with no stated handling, so even "nothing is happening" is a
+    recorded decision with a reason.
     """
 
     incident: Incident
     verdict: Verdict | None
     verification: Verification
+    decision: Decision
     matches: tuple[SimilarIncident, ...]
     signature: IncidentSignature | None
 
@@ -143,6 +157,7 @@ class DecisionPipeline:
         agents: EvidenceAgentsConfig,
         verdict_rules: VerdictRulesConfig,
         incidents: IncidentsConfig,
+        policy: ActionPolicyConfig,
         topology: TopologyConfig,
         changes: ChangeFeed | None = None,
         memory: Sequence[IncidentSignature] = (),
@@ -165,6 +180,7 @@ class DecisionPipeline:
         self._lookback_seconds = change_pressure.correlation_window_seconds
         self._fusion = EvidenceFusion(configuration=verdict_rules)
         self._tracker = IncidentTracker(configuration=incidents, topology=topology)
+        self._gate = PolicyGate(configuration=policy, topology=topology)
         self._incidents = incidents
         self._topology = topology
         self._changes = changes
@@ -177,6 +193,11 @@ class DecisionPipeline:
     def memory(self) -> tuple[IncidentSignature, ...]:
         """Every remembered incident shape, in the order it was learned."""
         return tuple(self._memory)
+
+    @property
+    def gate(self) -> PolicyGate:
+        """The policy gate every decision in this run was taken through."""
+        return self._gate
 
     @property
     def agents(self) -> tuple[EvidenceAgent, ...]:
@@ -212,6 +233,7 @@ class DecisionPipeline:
         outcomes = tuple(
             self._judge(
                 incident,
+                ts=moment,
                 episodes=window.episodes,
                 assessments=assessments,
                 fusion=fusion,
@@ -260,12 +282,13 @@ class DecisionPipeline:
         self,
         incident: Incident,
         *,
+        ts: datetime,
         episodes: Sequence[SymptomEpisode],
         assessments: Sequence[AgentAssessment],
         fusion: FusionResult,
         covered_services: frozenset[str],
     ) -> IncidentOutcome:
-        """Check one incident and let a remembered shape nudge its confidence."""
+        """Check one incident, let memory nudge it, and decide what happens about it."""
         verdict = fusion.verdict if fusion.status is FusionStatus.DECIDED else None
         signature = build_signature(incident, assessments=assessments, verdict=verdict)
         matches = (
@@ -289,10 +312,18 @@ class DecisionPipeline:
             if verdict is None or not matches
             else recognized(verdict, matches, configuration=self._incidents.memory)
         )
+        decision = self._gate.decide(
+            incident,
+            ts=ts,
+            verdict=recognised,
+            verification=verification,
+            fusion_status=fusion.status,
+        )
         return IncidentOutcome(
             incident=incident,
             verdict=recognised,
             verification=verification,
+            decision=decision,
             matches=matches,
             signature=signature,
         )

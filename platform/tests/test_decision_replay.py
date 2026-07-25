@@ -18,7 +18,7 @@ from lab.scoring.decisions import (
 )
 
 from common.config import load_config
-from contracts import AgentStatus, EvidenceAxis, SymptomKind
+from contracts import ACTING_ACTIONS, AgentStatus, DecisionAction, EvidenceAxis, SymptomKind
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_ROOT = REPO_ROOT / "config"
@@ -82,6 +82,23 @@ def test_the_transcript_is_canonical_and_clock_free(replay: DecisionReplay) -> N
     assert b"+00:00" not in transcript
 
 
+def test_every_transcribed_incident_carries_its_decision(replay: DecisionReplay) -> None:
+    value = json.loads(semantic_transcript(replay))
+    incidents = [incident for tick in value["ticks"] for incident in tick["incidents"]]
+
+    assert incidents, "a replay with incidents must transcribe their decisions"
+    actions = {member.value for member in DecisionAction}
+    for incident in incidents:
+        decision = incident["decision"]
+        assert decision["action"] in actions
+        assert decision["rule_id"]
+        # On real telemetry as much as in a unit test: nothing autonomous runs
+        # against a hypothesis the deterministic checks did not confirm.
+        if decision["action"] in {member.value for member in ACTING_ACTIONS}:
+            assert incident["confirmed"] is True
+            assert decision["target_service"]
+
+
 def test_the_report_states_the_configuration_it_judged_under(replay: DecisionReplay) -> None:
     config = load_config(CONFIG_ROOT)
     decisions = load_decision_configs(CONFIG_ROOT)
@@ -95,3 +112,4 @@ def test_the_report_states_the_configuration_it_judged_under(replay: DecisionRep
     assert config.fingerprint in report
     assert decisions.fingerprint in report
     assert "No private label is read" in report
+    assert "| decision | approval |" in report

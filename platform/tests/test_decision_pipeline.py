@@ -9,9 +9,11 @@ import pytest
 
 from common.config import load_config
 from contracts import (
+    ACTING_ACTIONS,
     ChangeEvent,
     ChangeKind,
     CheckOutcome,
+    DecisionAction,
     EpisodeStatus,
     EvidenceAxis,
     FusionStatus,
@@ -28,7 +30,12 @@ from decision import (
     episode_timeline,
 )
 from decision.agents import CHANGE_COVERAGE_KIND
-from decision.config import load_evidence_agents, load_incidents, load_verdict_rules
+from decision.config import (
+    load_action_policy,
+    load_evidence_agents,
+    load_incidents,
+    load_verdict_rules,
+)
 from decision.memory import SIGNATURE_AXES, IncidentSignature
 from tests.factories import EPOCH, symptom_episode
 
@@ -57,6 +64,7 @@ def _pipeline(
         agents=load_evidence_agents(CONFIG_ROOT / "decision-agents.yml"),
         verdict_rules=load_verdict_rules(CONFIG_ROOT / "verdict-rules.yml"),
         incidents=load_incidents(CONFIG_ROOT / "incidents.yml"),
+        policy=load_action_policy(CONFIG_ROOT / "policies" / "action-policy.yml"),
         topology=load_config(CONFIG_ROOT).topology,
         changes=changes,
         memory=memory,
@@ -183,6 +191,47 @@ def test_the_storm_is_judged_as_one_incident_with_a_verdict_and_a_verification()
     assert final.verdict is not None
     assert final.verdict.verdict_class is VerdictClass.OPERATIONAL_FAULT
     assert outcome.verification.confirmed is True
+
+
+def test_every_incident_leaves_the_loop_with_a_stated_decision() -> None:
+    ticks = _run(_pipeline(), episode_timeline(_cascade()))
+
+    for tick in ticks:
+        for outcome in tick.outcomes:
+            decision = outcome.decision
+            assert decision.incident_id == outcome.incident.incident_id
+            assert decision.ts == tick.ts
+            # The contract enforces this too; asserting it over a real run is
+            # the statement that the loop can never produce an unbacked action.
+            if decision.action in ACTING_ACTIONS:
+                assert decision.confirmed
+                assert decision.target_service == outcome.incident.origin_service
+
+
+def test_the_decision_survives_a_tick_where_the_storm_goes_quiet() -> None:
+    """The tick-wide verdict reads the calm; the incident is still the storm."""
+    storm = _cascade()
+    quiet_ts = max(episode.last_breach_ts for episode in storm) + timedelta(seconds=120)
+    closed = tuple(
+        episode.model_copy(
+            update={"revision": 2, "status": EpisodeStatus.CLOSED, "closed_ts": quiet_ts}
+        )
+        for episode in storm
+    )
+    ticks = _run(_pipeline(), episode_timeline((*storm, *closed)))
+
+    quiet = ticks[-1]
+    assert quiet.ts == quiet_ts
+    # Every axis has gone calm, so the tick itself diagnoses nothing at all.
+    assert quiet.fusion.status is FusionStatus.NO_EVIDENCE
+    assert quiet.verdict is None
+    decision = quiet.outcomes[0].decision
+    # The incident is still monitored, so the decision is taken on the storm's
+    # own peak - honestly dated to the tick that evidence was measured at.
+    assert quiet.outcomes[0].incident.state is IncidentState.MONITORING
+    assert decision.verdict_class is VerdictClass.OPERATIONAL_FAULT
+    assert decision.action is not DecisionAction.SUPPRESS
+    assert decision.evidence_ts < quiet.ts
 
 
 def test_the_collapse_names_the_service_that_never_called_anyone() -> None:

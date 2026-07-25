@@ -36,12 +36,14 @@ from pathlib import Path
 from typing import Literal
 
 from common.config import DetectorConfig, SentinelConfig, load_config
-from contracts import AgentStatus, EvidenceAxis
+from contracts import AgentStatus, DecisionAction, EvidenceAxis
 from decision import ChangeFeed, DecisionPipeline, DecisionTick, episode_timeline
 from decision.config import (
+    ActionPolicyConfig,
     EvidenceAgentsConfig,
     IncidentsConfig,
     VerdictRulesConfig,
+    load_action_policy,
     load_evidence_agents,
     load_incidents,
     load_verdict_rules,
@@ -59,11 +61,12 @@ CAPTURE_COVERED_KINDS = frozenset(SCORED_SYMPTOM_KINDS)
 
 @dataclass(frozen=True)
 class DecisionConfigs:
-    """The four decision-plane configuration files, loaded and validated once."""
+    """The decision plane's own configuration files, loaded and validated once."""
 
     agents: EvidenceAgentsConfig
     verdict_rules: VerdictRulesConfig
     incidents: IncidentsConfig
+    policy: ActionPolicyConfig
 
     @property
     def fingerprint(self) -> str:
@@ -74,6 +77,7 @@ class DecisionConfigs:
                 self.agents.fingerprint,
                 self.verdict_rules.fingerprint,
                 self.incidents.fingerprint,
+                self.policy.fingerprint,
             )
         )
 
@@ -84,6 +88,7 @@ def load_decision_configs(config_root: Path) -> DecisionConfigs:
         agents=load_evidence_agents(config_root / "decision-agents.yml"),
         verdict_rules=load_verdict_rules(config_root / "verdict-rules.yml"),
         incidents=load_incidents(config_root / "incidents.yml"),
+        policy=load_action_policy(config_root / "policies" / "action-policy.yml"),
     )
 
 
@@ -136,6 +141,7 @@ def replay_capture_decisions(
         agents=decisions.agents,
         verdict_rules=decisions.verdict_rules,
         incidents=decisions.incidents,
+        policy=decisions.policy,
         topology=config.topology,
         changes=changes,
     )
@@ -242,6 +248,23 @@ def semantic_transcript(replay: DecisionReplay) -> bytes:
                             None if outcome.verdict is None else _round(outcome.verdict.confidence)
                         ),
                         "confirmed": outcome.verification.confirmed,
+                        "decision": {
+                            "action": outcome.decision.action.value,
+                            "rule_id": outcome.decision.rule_id,
+                            "requires_human_approval": (outcome.decision.requires_human_approval),
+                            "approval_reasons": len(outcome.decision.approval_reasons),
+                            "guards_applied": list(outcome.decision.guards_applied),
+                            "floors_applied": list(outcome.decision.floors_applied),
+                            "target_service": outcome.decision.target_service,
+                            "evidence_offset_seconds": _round(
+                                (outcome.decision.evidence_ts - replay.anchor_ts).total_seconds()
+                            ),
+                            "suppression": (
+                                None
+                                if outcome.decision.suppression is None
+                                else outcome.decision.suppression.window_id
+                            ),
+                        },
                         "checks": {
                             check.name: check.outcome.value
                             for check in sorted(
@@ -284,6 +307,17 @@ def _axis_column(tick: DecisionTick, axis: EvidenceAxis) -> str:
 
 _SEVERITY_ORDER = ("LOW", "MEDIUM", "HIGH", "CRITICAL")
 
+# Short labels so the ladder stays readable in a wide table, ordered by how
+# much of a response each rung is.
+_DECISION_LABELS: dict[DecisionAction, str] = {
+    DecisionAction.SUPPRESS: "SUPPRESS",
+    DecisionAction.ALERT: "ALERT",
+    DecisionAction.ACT: "ACT",
+    DecisionAction.ESCALATE_TO_HUMAN: "ESCALATE",
+    DecisionAction.AUTO_CONTAIN_THEN_ESCALATE: "CONTAIN+ESC",
+}
+_DECISION_ORDER = tuple(_DECISION_LABELS)
+
 
 def _tick_row(tick: DecisionTick) -> tuple[str, ...]:
     """One tick's judgement, without its time, so identical ticks can be folded.
@@ -303,6 +337,11 @@ def _tick_row(tick: DecisionTick) -> tuple[str, ...]:
     severities = [outcome.incident.severity.value for outcome in outcomes]
     states = sorted({outcome.incident.state.value for outcome in outcomes})
     confirmed = sum(1 for outcome in outcomes if outcome.confirmed)
+    actions = sorted(
+        {outcome.decision.action for outcome in outcomes},
+        key=_DECISION_ORDER.index,
+    )
+    approvals = sum(1 for outcome in outcomes if outcome.decision.requires_human_approval)
     return (
         _axis_column(tick, EvidenceAxis.SECURITY),
         _axis_column(tick, EvidenceAxis.RELIABILITY),
@@ -315,6 +354,8 @@ def _tick_row(tick: DecisionTick) -> tuple[str, ...]:
         max(severities, key=_SEVERITY_ORDER.index) if severities else "—",
         "+".join(states) or "—",
         f"{confirmed}/{len(outcomes)}" if outcomes else "—",
+        "+".join(_DECISION_LABELS[action] for action in actions) or "—",
+        f"{approvals}/{len(outcomes)}" if outcomes else "—",
     )
 
 
@@ -337,8 +378,8 @@ def _render_replay(replay: DecisionReplay) -> list[str]:
             "row below is a change in what the plane concluded.",
             "",
             "| t(s) | ticks | SEC | REL | CHG | BIZ | verdict | conf | incidents | origin "
-            "| severity | state | verified |",
-            "|---|---:|---:|---:|---:|---:|---|---:|---:|---|---|---|---|",
+            "| severity | state | verified | decision | approval |",
+            "|---|---:|---:|---:|---:|---:|---|---:|---:|---|---|---|---|---|---:|",
         ]
     )
     for row, group in groupby(replay.ticks, key=_tick_row):
@@ -358,6 +399,24 @@ def _render_replay(replay: DecisionReplay) -> list[str]:
                 f"  - `{check.name}`: **{check.outcome.value}** — {check.detail}"
                 for check in outcome.verification.checks
             )
+        lines.append("")
+        lines.extend(["Final decision detail:", ""])
+        for outcome in final.outcomes:
+            decision = outcome.decision
+            services = ", ".join(outcome.incident.services)
+            target = decision.target_service or "—"
+            lines.append(
+                f"- Incident over `{services}`: **{decision.action.value}** "
+                f"(`{decision.rule_id}`, target `{target}`, evidence at "
+                f"+{(decision.evidence_ts - replay.anchor_ts).total_seconds():.0f}s)"
+            )
+            lines.append(f"  - {decision.reason}")
+            lines.extend(f"  - approval: {reason}" for reason in decision.approval_reasons)
+            if decision.suppression is not None:
+                lines.append(
+                    f"  - suppressed by `{decision.suppression.window_id}` "
+                    f"({decision.suppression.owner})"
+                )
         lines.append("")
     return lines
 
@@ -379,7 +438,7 @@ def render_decision_report(
         "are frozen on, before any held-out seed is spent. It gates nothing on its own.",
         "",
         f"- Runtime detector config fingerprint: `{config_fingerprint}`.",
-        f"- Decision config fingerprint (agents-rules-incidents): `{decision_fingerprint}`.",
+        f"- Decision config fingerprint (agents-rules-incidents-policy): `{decision_fingerprint}`.",
         "- Offsets are seconds from each capture's anchor; the replay is deterministic.",
         "- Telemetry is **REAL**; the injected context/fault/attack stimuli are **SIMULATED**.",
         "- `CHG` is `—` on a capture: a capture records telemetry, not deploys, so the "
@@ -387,6 +446,10 @@ def render_decision_report(
         "- A verdict column of `INSUFFICIENT` means evidence was measured and no signature "
         "accounted for it; `NO_EVIDENCE` means nothing contributed at all. They are different "
         "facts and lead to different decisions.",
+        "- `decision` is the policy gate's answer per incident, and `approval` counts the "
+        "incidents whose decision requires a person to sign off. A decision is taken on the "
+        "incident's **peak** evidence with its **current** verification, so a storm that has "
+        "gone quiet for one tick is still handled as the storm.",
         "",
     ]
     for replay in replays:

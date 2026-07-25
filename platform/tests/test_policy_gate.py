@@ -208,8 +208,34 @@ def test_a_confirmed_confident_fault_is_remediated_autonomously() -> None:
     assert decision.action is DecisionAction.ACT
     assert decision.target_service == "payment"
     assert decision.guards_applied == ()
-    # payment is critical in committed topology, so a person still signs off.
+    # Nothing about this incident is a person's call, so the platform proceeds.
+    assert decision.requires_human_approval is False
+
+
+def test_a_critical_severity_action_is_held_for_a_person() -> None:
+    gate = _gate()
+    decision = _decide(
+        gate,
+        _incident(severity=IncidentSeverity.CRITICAL, business_impact=0.90),
+        verdict=_verdict(VerdictClass.OPERATIONAL_FAULT, 0.85),
+    )
+    # Critical severity is measured user impact, so the action still stands -
+    # it is simply not the platform's to take unsupervised.
+    assert decision.action is DecisionAction.ACT
     assert decision.requires_human_approval
+    assert any("CRITICAL" in reason for reason in decision.approval_reasons)
+
+
+def test_telling_a_person_is_not_an_approvable_event() -> None:
+    decision = _decide(
+        _gate(),
+        _incident(severity=IncidentSeverity.MEDIUM, business_impact=0.40),
+        verdict=None,
+        status=FusionStatus.INSUFFICIENT,
+    )
+    assert decision.action is DecisionAction.ALERT
+    assert decision.requires_human_approval is False
+    assert decision.approval_reasons == ()
 
 
 def test_a_fault_below_the_confidence_floor_is_handed_over() -> None:
@@ -255,6 +281,23 @@ def test_a_storm_wider_than_the_blast_radius_cap_is_not_acted_on() -> None:
     )
     assert decision.action is DecisionAction.ESCALATE_TO_HUMAN
     assert "maximum_affected_services" in decision.guards_applied
+
+
+def test_a_policy_cannot_authorise_an_action_with_no_diagnosis() -> None:
+    """An acting rule that asks for no verdict class still cannot act without one."""
+    document = _policy_document()
+    document["rules"][0] = {
+        "rule_id": "act-on-anything-open",
+        "action": "ACT",
+        "incident_states": ["OPEN"],
+        "reason": "a deliberately over-broad rule",
+    }
+    gate = _gate(ActionPolicyConfig.model_validate(document))
+
+    decision = _decide(gate, _incident(), verdict=None, status=FusionStatus.INSUFFICIENT)
+
+    assert decision.action is DecisionAction.ESCALATE_TO_HUMAN
+    assert "require_verdict" in decision.guards_applied
 
 
 def test_the_two_refusals_take_opposite_decisions() -> None:

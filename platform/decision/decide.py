@@ -309,6 +309,17 @@ class PolicyGate:
         guards = self._configuration.guards
         verdict = evidence.verdict
         blocked: list[tuple[str, str]] = []
+        # Not configurable, unlike the guards below it: the contract refuses an
+        # action with no diagnosis behind it, so a policy that proposed one
+        # would crash rather than be honoured. Refusing it here is the same
+        # rule, stated where it can be explained.
+        if verdict is None:
+            blocked.append(
+                (
+                    "require_verdict",
+                    "no diagnosis was named for this incident, so there is nothing to act on",
+                )
+            )
         if guards.require_verification and not verification.confirmed:
             failed = ", ".join(
                 check.name for check in verification.checks if check.outcome is CheckOutcome.FAILED
@@ -424,8 +435,14 @@ class PolicyGate:
         guard_reasons: Sequence[str],
         window: AppliedSuppression | None,
     ) -> tuple[str, ...]:
-        """Compute, from evidence alone, why a person has to be in the loop."""
-        if action is DecisionAction.SUPPRESS:
+        """Compute, from evidence alone, why a person has to be in the loop.
+
+        Only the rungs where there is something to approve carry reasons.
+        Suppressing is the absence of a response and alerting IS telling a
+        person, so neither is an approvable event; claiming approval for them
+        would make the field mean two different things.
+        """
+        if action in (DecisionAction.SUPPRESS, DecisionAction.ALERT):
             return ()
         approval = self._configuration.approval
         reasons: list[str] = []

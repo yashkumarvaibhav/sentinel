@@ -162,12 +162,22 @@ guards:
 
 # When a human must sign off. An approval requirement never blocks containment -
 # it records that a person is in the loop and, for an ACT, that the action plane
-# must hold it until someone approves.
+# must hold it until someone approves. It is computed for the rungs where there
+# is something to approve; telling a person is not an approvable event.
 approval:
   # Measured user impact at this level is not a machine's decision to make.
-  severities: [CRITICAL, HIGH]
-  # Anything touching a service the topology calls critical.
-  service_criticalities: [critical]
+  # Severity is derived from measured business impact, so this is a statement
+  # about what users are actually feeling, not about a service's label.
+  severities: [CRITICAL]
+  # `service_criticalities: [critical]` is deliberately NOT set. Three of the
+  # five committed services are critical, so requiring sign-off for any action
+  # touching one would make autonomous remediation unreachable in practice -
+  # and it would duplicate, at the wrong level, the rung-level protection the
+  # action ladder owns: the safe rungs (scale, rate-limit) are safe anywhere,
+  # and the destructive rungs (isolate, production rollback) require two-key
+  # approval regardless of which service they aim at. The mechanism stays here
+  # for a deployment whose topology marks only a genuine few services critical.
+  service_criticalities: []
   # A storm this wide is a human's problem even when each part looks routine.
   minimum_affected_services: 3
 
