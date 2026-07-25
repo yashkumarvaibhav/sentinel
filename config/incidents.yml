@@ -7,9 +7,17 @@
 version: 1
 
 clustering:
-  # Two episodes co-occur if their windows overlap once each is widened by this
-  # slack. Detectors confirm at different speeds - a saturation trend is slower
-  # to open than a dependency edge - so strict overlap would split one storm.
+  # How long after an incident STARTED a new symptom may still be counted as
+  # part of it. Detectors confirm at different speeds - a saturation trend is
+  # slower to open than a dependency edge - so a storm's symptoms arrive spread
+  # out and demanding simultaneity would split one problem into many.
+  #
+  # This is measured from the incident's anchor, not from whichever member
+  # happens to be nearest. Measured on combo_night, a member-relative rule let
+  # one long-running episode chain an attack at t=144 to a payment fault at
+  # t=344 and on to the late-phase chaos at t=902: the whole 1004 s scenario
+  # became one incident whose services had no common cause, so its temporal
+  # check could never pass and nothing in the run was ever confirmable.
   join_window_seconds: 120.0
   # Episodes on different services join only if those services are within this
   # many dependency hops. The service graph diameter is 2, so one hop keeps a

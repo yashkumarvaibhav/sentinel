@@ -94,45 +94,46 @@ class IncidentTracker:
         return incidents
 
     def _cluster(self, episodes: tuple[SymptomEpisode, ...]) -> tuple[_Cluster, ...]:
+        """Group episodes into the storms they belong to, bounded by their anchor.
+
+        An episode joins an incident when it is topologically adjacent to one of
+        its members **and** its onset is within the join window of that
+        incident's anchor - the episode that started the storm. Measuring
+        against the anchor rather than against any member is what keeps a
+        scenario from chaining into a single incident: without it, a symptom at
+        every step of a long night is transitively "the same problem" as the one
+        before it, and an attack an hour before a fault ends up sharing an
+        origin with it.
+
+        An episode that can join several incidents merges them, so a bridging
+        symptom still pulls two halves of one storm together under the older
+        anchor.
+        """
         slack = timedelta(seconds=self._configuration.clustering.join_window_seconds)
-        parent = {episode.episode_id: episode.episode_id for episode in episodes}
-
-        def find(node: str) -> str:
-            while parent[node] != node:
-                parent[node] = parent[parent[node]]
-                node = parent[node]
-            return node
-
-        def union(left: str, right: str) -> None:
-            first, second = find(left), find(right)
-            if first != second:
-                parent[max(first, second)] = min(first, second)
-
-        for index, left in enumerate(episodes):
-            for right in episodes[index + 1 :]:
-                if self._same_problem(left, right, slack=slack):
-                    union(left.episode_id, right.episode_id)
-
-        grouped: dict[str, list[SymptomEpisode]] = {}
-        for episode in episodes:
-            grouped.setdefault(find(episode.episode_id), []).append(episode)
-        clusters = []
-        for group in grouped.values():
-            ordered = tuple(sorted(group, key=lambda item: (item.opened_ts, item.episode_id)))
-            clusters.append(_Cluster(anchor=ordered[0], episodes=ordered))
+        ordered = sorted(episodes, key=lambda item: (item.opened_ts, item.episode_id))
+        groups: list[list[SymptomEpisode]] = []
+        for episode in ordered:
+            joinable = [
+                index
+                for index, members in enumerate(groups)
+                if episode.opened_ts - members[0].opened_ts <= slack
+                and any(self._adjacent(episode, member) for member in members)
+            ]
+            if not joinable:
+                groups.append([episode])
+                continue
+            target = groups[joinable[0]]
+            target.append(episode)
+            for index in reversed(joinable[1:]):
+                target.extend(groups.pop(index))
+            target.sort(key=lambda item: (item.opened_ts, item.episode_id))
         return tuple(
-            sorted(clusters, key=lambda item: (item.anchor.opened_ts, item.anchor.episode_id))
+            _Cluster(anchor=members[0], episodes=tuple(members))
+            for members in sorted(groups, key=lambda item: (item[0].opened_ts, item[0].episode_id))
         )
 
-    def _same_problem(
-        self,
-        left: SymptomEpisode,
-        right: SymptomEpisode,
-        *,
-        slack: timedelta,
-    ) -> bool:
-        if not _overlaps(left, right, slack=slack):
-            return False
+    def _adjacent(self, left: SymptomEpisode, right: SymptomEpisode) -> bool:
+        """Whether two episodes are close enough in the topology to share a cause."""
         if left.service == right.service:
             return True
         distance = self._hops.get((left.service, right.service))
@@ -257,12 +258,6 @@ def _validated(episodes: Sequence[SymptomEpisode]) -> tuple[SymptomEpisode, ...]
             )
         seen.add(episode.episode_id)
     return tuple(episodes)
-
-
-def _overlaps(left: SymptomEpisode, right: SymptomEpisode, *, slack: timedelta) -> bool:
-    left_end = (left.closed_ts or left.last_breach_ts) + slack
-    right_end = (right.closed_ts or right.last_breach_ts) + slack
-    return left.opened_ts - slack <= right_end and right.opened_ts - slack <= left_end
 
 
 def _impact_for(business: AgentAssessment | None, episode_ids: frozenset[str]) -> float | None:

@@ -282,22 +282,39 @@ def _axis_column(tick: DecisionTick, axis: EvidenceAxis) -> str:
     return f"{assessment.score:.3f}"
 
 
+_SEVERITY_ORDER = ("LOW", "MEDIUM", "HIGH", "CRITICAL")
+
+
 def _tick_row(tick: DecisionTick) -> tuple[str, ...]:
-    """One tick's judgement, without its time, so identical ticks can be folded."""
+    """One tick's judgement, without its time, so identical ticks can be folded.
+
+    A tick can carry several incidents, so the incident columns summarise all of
+    them rather than reporting the first and hiding the rest.
+    """
     verdict = tick.verdict
-    outcome = tick.outcomes[0] if tick.outcomes else None
+    outcomes = tick.outcomes
+    confidences = [
+        outcome.verdict.confidence for outcome in outcomes if outcome.verdict is not None
+    ]
+    origins = sorted(
+        {outcome.incident.origin_service for outcome in outcomes} - {None},
+        key=str,
+    )
+    severities = [outcome.incident.severity.value for outcome in outcomes]
+    states = sorted({outcome.incident.state.value for outcome in outcomes})
+    confirmed = sum(1 for outcome in outcomes if outcome.confirmed)
     return (
         _axis_column(tick, EvidenceAxis.SECURITY),
         _axis_column(tick, EvidenceAxis.RELIABILITY),
         _axis_column(tick, EvidenceAxis.CHANGE_CONFIG),
         _axis_column(tick, EvidenceAxis.BUSINESS_IMPACT),
         tick.fusion.status.value if verdict is None else verdict.verdict_class.value,
-        "—" if outcome is None or outcome.verdict is None else f"{outcome.verdict.confidence:.3f}",
-        str(len(tick.outcomes)),
-        "—" if outcome is None else (outcome.incident.origin_service or "—"),
-        "—" if outcome is None else outcome.incident.severity.value,
-        "—" if outcome is None else outcome.incident.state.value,
-        "—" if outcome is None else ("yes" if outcome.confirmed else "no"),
+        f"{max(confidences):.3f}" if confidences else "—",
+        str(len(outcomes)),
+        "+".join(str(origin) for origin in origins) or "—",
+        max(severities, key=_SEVERITY_ORDER.index) if severities else "—",
+        "+".join(states) or "—",
+        f"{confirmed}/{len(outcomes)}" if outcomes else "—",
     )
 
 

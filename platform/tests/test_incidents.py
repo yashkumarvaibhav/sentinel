@@ -200,6 +200,97 @@ def test_a_bridging_episode_merges_two_incidents_under_the_older_anchor() -> Non
     assert set(merged[0].merged_incident_ids) == absorbed
 
 
+def _combo_night() -> tuple[SymptomEpisode, ...]:
+    """The measured onsets of phase2-combo-503-dev-v11: an attack, a fault, a late night.
+
+    Every episode here ran long enough to overlap the next, which is exactly how
+    the whole 1004 s scenario used to collapse into one incident.
+    """
+    return (
+        symptom_episode(
+            kind=SymptomKind.RESIDUAL_EXCEED,
+            service="frontend",
+            signal="request_rate",
+            opened_offset_seconds=144.0,
+        ),
+        symptom_episode(
+            kind=SymptomKind.RATIO_DEFORM,
+            service="frontend",
+            signal="path_entropy",
+            opened_offset_seconds=180.0,
+        ),
+        symptom_episode(
+            kind=SymptomKind.EDGE_DEGRADED,
+            service="frontend",
+            signal="dependency.checkout",
+            opened_offset_seconds=344.0,
+        ),
+        symptom_episode(
+            kind=SymptomKind.EDGE_DEGRADED,
+            service="checkout",
+            signal="dependency.payment",
+            opened_offset_seconds=344.0,
+        ),
+        symptom_episode(
+            kind=SymptomKind.LOG_BURST,
+            service="payment",
+            signal="log_template_rate",
+            opened_offset_seconds=360.0,
+        ),
+        symptom_episode(
+            kind=SymptomKind.SILENCE,
+            service="frontend",
+            signal="request_rate",
+            opened_offset_seconds=902.0,
+        ),
+    )
+
+
+def test_a_whole_night_of_symptoms_is_not_one_incident() -> None:
+    incidents = _tracker().observe(ts=EPOCH + timedelta(seconds=1004.0), episodes=_combo_night())
+
+    assert len(incidents) > 1
+    services = [incident.services for incident in incidents]
+    # The attack on the frontend and the payment fault are separate problems.
+    assert ("frontend",) in services
+    assert ("checkout", "frontend", "payment") in services
+
+
+def test_each_separated_incident_keeps_its_own_origin() -> None:
+    incidents = _tracker().observe(ts=EPOCH + timedelta(seconds=1004.0), episodes=_combo_night())
+
+    origins = {incident.services: incident.origin_service for incident in incidents}
+    assert origins[("frontend",)] == "frontend"
+    assert origins[("checkout", "frontend", "payment")] == "payment"
+
+
+def test_a_late_symptom_cannot_join_a_storm_that_started_long_before() -> None:
+    """The join window is measured from the anchor, not from the nearest member."""
+    early = symptom_episode(
+        kind=SymptomKind.EDGE_DEGRADED,
+        service="checkout",
+        signal="dependency.payment",
+        opened_offset_seconds=100.0,
+    )
+    chain = tuple(
+        symptom_episode(
+            kind=SymptomKind.LOG_BURST,
+            service="checkout",
+            signal="log_template_rate",
+            opened_offset_seconds=offset,
+            episode_id=f"chain-{offset:.0f}",
+        )
+        for offset in (200.0, 300.0, 400.0)
+    )
+
+    incidents = _tracker().observe(ts=EPOCH + timedelta(seconds=600.0), episodes=(early, *chain))
+
+    # Each link overlaps the one before it; none of them is the same problem as
+    # a fault that started five minutes earlier.
+    assert len(incidents) > 1
+    assert all(len(incident.episode_ids) <= 2 for incident in incidents)
+
+
 def test_an_incident_is_watched_before_it_is_declared_over() -> None:
     tracker = _tracker()
     closed = symptom_episode(
