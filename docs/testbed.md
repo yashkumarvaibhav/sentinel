@@ -182,7 +182,65 @@ The two gaps are real and are recorded here rather than glossed:
   when the attack profiles are built — not a reason to reject the mesh.
 - **No protected cohort.** The load generator must tag personas (via header →
   baggage → resource attribute) to create a cohort dimension we control. That
-  lands with `config/cohorts.yml`.
+  lands with `config/cohorts.yml`. **Half of this is now closed** — the edge
+  proxy addresses each cohort by route/header (below), so a cohort can be
+  *acted on*. Emitting it as a telemetry dimension, so a cohort can be
+  *measured*, is still outstanding and is what the 5.6 guard will need.
 
 Both gaps affect *scenario authoring*, not the telemetry pipeline — which is
 what this phase had to prove.
+
+## The edge control surface
+
+The frontend proxy runs **our** Envoy configuration, vendored at
+`lab/testbed/envoy.tmpl.yaml` from the demo's own template at the app version
+the pinned chart ships. `lab-deploy.sh` publishes it as the `sentinel-edge-envoy`
+ConfigMap and stamps its checksum onto the pod, so a changed template actually
+rolls the proxy — the template is expanded by `envsubst` once, at container
+start, and a ConfigMap edit alone would never reach Envoy.
+
+**Why vendor at all.** The stock proxy has an admin listener but only a
+`static_layer_0`, so `POST /runtime_modify` is refused, and there is no
+rate-limit filter for it to modify. Without a control surface the action plane
+can scale a workload but cannot restrain a *cohort* — and the cohort rung is the
+one it is safe to fire during a legitimate surge, because it restricts the
+deforming behaviour rather than the service everyone else is using.
+
+Three additions, and nothing else changes: a listener-wide `local_ratelimit`
+filter **with no token bucket** (so it limits nothing by itself), one route per
+cohort in `config/cohorts.yml` carrying its own bucket and its own runtime keys,
+and a `sentinel` static runtime layer publishing those keys at `0` followed by
+an `admin_layer`. Every percentage ships at zero, so the cohort routes are
+behaviourally identical to the catch-all they sit above until the action plane
+deliberately raises a key — which is what makes it safe to land this on the
+testbed the scores are recorded against.
+
+**Two rungs, two mechanisms.** `sentinel.ratelimit.<cohort>.{enabled,enforced}`
+drives the rate-limit filter — traffic above the cohort's configured ceiling is
+**refused** with a 429. `sentinel.throttle.<cohort>.percent` drives the fault
+filter the demo already runs, through its `delay_percent_runtime` key — a share
+of the cohort is **slowed** and nobody is turned away. Two dials on one filter
+would have been one rung wearing two names; slowing a cohort you are not yet
+sure about is a different decision from refusing it. Note the per-route fault
+config replaces the listener's for these two routes, so the demo's header-driven
+delay does not apply to them; `/api/checkout` is not one of its targets and the
+other cohort route only matches traffic we tag ourselves.
+
+**Measured against a real Envoy** (`make lab-edge` runs the same image and the
+same template with no cluster attached):
+
+| Runtime key | Set to | Measured |
+|---|---|---|
+| `sentinel.ratelimit.checkout_users.{enabled,enforced}` | 100 | 20 rapid `/api/checkout`: 5 through, **15×429**. `/` and `x-sentinel-cohort: general` untouched at 200 |
+| `sentinel.throttle.checkout_users.percent` | 100 | `/api/checkout` 1.2 ms → **252 ms**; `/` still 1.6 ms |
+| `sentinel.throttle.checkout_users.percent` | 40 | 12 of 40 requests delayed |
+| either, back to | 0 | unlimited and undelayed again |
+
+`sentinel_edge.http_local_rate_limit.enabled` stayed at `0` throughout,
+confirming the listener-wide filter restrains nothing on its own.
+
+⚠️ **`POST /runtime_modify` returning `OK` proves nothing.** Envoy accepts a
+value that is not a valid percentage — writing `abc` stores `abc`, reports it
+verbatim in `/runtime`, and silently falls back to the filter's default of `0`.
+Anything driving this surface must validate before writing and read the key back
+afterwards.

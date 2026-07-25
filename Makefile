@@ -144,6 +144,10 @@ lab-deploy: ## Deploy the instrumented mesh into the testbed
 lab-undeploy: ## Remove the instrumented mesh, keeping the cluster
 	helm --kube-context k3d-sentinel-lab -n otel-demo uninstall astronomy
 
+.PHONY: lab-edge
+lab-edge: ## Run the owned edge proxy alone, with no cluster (ACTION=up|down|url)
+	./lab/testbed/envoy-sandbox.sh $(or $(ACTION),up)
+
 .PHONY: lab-chaos
 lab-chaos: ## Run a chaos experiment (EXPERIMENT=name)
 	./lab/testbed/lab-chaos.sh

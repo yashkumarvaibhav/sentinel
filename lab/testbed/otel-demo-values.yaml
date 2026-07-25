@@ -55,6 +55,19 @@ components:
     resources:
       limits:
         memory: 128Mi
+    # The edge is the only place a surgical remediation can happen: rate-limiting
+    # one cohort is the rung it is safe to fire *during* a legitimate surge,
+    # because it restrains the deforming behaviour and not the service everyone
+    # else is using. The stock proxy has no such surface — its admin listener
+    # has no admin runtime layer, so `/runtime_modify` is refused, and there is
+    # no rate-limit filter to control. lab/testbed/envoy.tmpl.yaml adds both,
+    # shipped inert; lab-deploy.sh publishes it as this ConfigMap and stamps the
+    # pod with its checksum so a changed template actually rolls the proxy.
+    mountedConfigMaps:
+      - name: sentinel-edge
+        existingConfigMap: sentinel-edge-envoy
+        mountPath: /home/envoy/envoy.tmpl.yaml
+        subPath: envoy.tmpl.yaml
 
   flagd:
     # flagd itself is essential — it is how faults get injected and what the

@@ -45,11 +45,28 @@ helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm
 helm repo add chaos-mesh https://charts.chaos-mesh.org >/dev/null 2>&1 || true
 helm repo update open-telemetry chaos-mesh >/dev/null
 
+# The edge proxy runs our own Envoy template, which adds the runtime control
+# surface the action plane rate-limits a cohort through (see envoy.tmpl.yaml).
+# It has to exist before the chart mounts it, and a ConfigMap change does not by
+# itself restart a pod — the template is expanded once, at container start — so
+# its checksum is stamped onto the pod and lets Helm do the rolling.
+ENVOY_TEMPLATE="${REPO_ROOT}/lab/testbed/envoy.tmpl.yaml"
+ENVOY_CONFIGMAP=sentinel-edge-envoy
+envoy_checksum=$(sha256sum "${ENVOY_TEMPLATE}" | cut -c1-16)
+
+echo "publishing the edge proxy configuration (${ENVOY_CONFIGMAP} @ ${envoy_checksum})"
+kubectl --context "${CONTEXT}" create namespace "${NAMESPACE}" \
+	--dry-run=client -o yaml | kubectl --context "${CONTEXT}" apply -f - >/dev/null
+kubectl --context "${CONTEXT}" -n "${NAMESPACE}" create configmap "${ENVOY_CONFIGMAP}" \
+	--from-file="envoy.tmpl.yaml=${ENVOY_TEMPLATE}" \
+	--dry-run=client -o yaml | kubectl --context "${CONTEXT}" apply -f - >/dev/null
+
 echo "deploying ${CHART} ${CHART_VERSION} as ${RELEASE}/${NAMESPACE}"
 helm --kube-context "${CONTEXT}" upgrade --install "${RELEASE}" "${CHART}" \
 	--version "${CHART_VERSION}" \
 	--namespace "${NAMESPACE}" --create-namespace \
 	--values "${VALUES}" \
+	--set-string "components.frontend-proxy.podAnnotations.sentinel-edge-config=${envoy_checksum}" \
 	--timeout 15m \
 	--wait
 
