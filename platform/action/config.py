@@ -43,6 +43,12 @@ _TRUTHY = frozenset({"1", "true", "yes", "on"})
 # Validated here so nothing that fails it can ever reach an argument vector.
 _KUBERNETES_NAME = re.compile(r"[a-z0-9]([-a-z0-9]*[a-z0-9])?")
 
+# One segment of an Envoy runtime key. Deliberately narrower than the key itself:
+# a segment carrying a dot would silently re-nest the key under a different
+# parent, and one carrying `&` or `=` would smuggle a second assignment into the
+# admin query string.
+_RUNTIME_SEGMENT = re.compile(r"[a-z0-9][a-z0-9_]*")
+
 type Identifier = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=253)
 ]
@@ -129,6 +135,49 @@ class KubernetesConfig(ActionConfigModel):
         return self
 
 
+class MeshConfig(ActionConfigModel):
+    """Which edge proxy the mesh actuator reaches, and which cohorts it may restrain.
+
+    ``cohorts`` maps a cohort in ``config/cohorts.yml`` to the runtime-key
+    segment the edge proxy publishes for it. The mapping is written down rather
+    than derived from the cohort id because the two artifacts belong to
+    different owners: a cohort is a statement about users, and a runtime key is
+    a fact about the proxy's committed configuration. A cohort that is not
+    mapped is refused, never guessed at.
+    """
+
+    context: Identifier
+    namespace: Identifier
+    workload: Identifier
+    component_label: Identifier = "app.kubernetes.io/component"
+    admin_port: Annotated[int, Field(ge=1, le=65_535)] = 10_000
+    ratelimit_key_prefix: Identifier = "sentinel.ratelimit"
+    throttle_key_prefix: Identifier = "sentinel.throttle"
+    cohorts: dict[Identifier, Identifier] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_mesh(self) -> Self:
+        if not self.cohorts:
+            raise ValueError(
+                "a mesh actuator that may restrain no cohort can do nothing; map at least one"
+            )
+        if _KUBERNETES_NAME.fullmatch(self.namespace) is None:
+            raise ValueError(f"{self.namespace} is not a valid Kubernetes namespace")
+        if _KUBERNETES_NAME.fullmatch(self.workload) is None:
+            raise ValueError(f"{self.workload} is not a valid Kubernetes object name")
+        unsafe = sorted(
+            name for name in self.cohorts.values() if _RUNTIME_SEGMENT.fullmatch(name) is None
+        )
+        if unsafe:
+            raise ValueError(f"not usable as runtime-key segments: {', '.join(unsafe)}")
+        if self.ratelimit_key_prefix == self.throttle_key_prefix:
+            raise ValueError(
+                "refusing and slowing a cohort are different effects and cannot share a "
+                "runtime key; one would silently overwrite the other"
+            )
+        return self
+
+
 class ActionConfig(ActionConfigModel):
     """One fully validated snapshot of how the action plane may execute."""
 
@@ -136,16 +185,23 @@ class ActionConfig(ActionConfigModel):
     execution: ExecutionConfig
     actuators: tuple[ActuatorConfig, ...] = ()
     kubernetes: KubernetesConfig | None = None
+    mesh: MeshConfig | None = None
 
     @model_validator(mode="after")
     def validate_actuators(self) -> Self:
         named = [entry.actuator for entry in self.actuators]
         if len(named) != len(set(named)):
             raise ValueError("each actuator may be configured at most once")
-        if ActuatorKind.KUBERNETES in self.enabled_actuators() and self.kubernetes is None:
+        enabled = self.enabled_actuators()
+        if ActuatorKind.KUBERNETES in enabled and self.kubernetes is None:
             raise ValueError(
                 "the kubernetes actuator is enabled but no `kubernetes:` section says which "
                 "cluster it may reach; an adapter with no stated target is not permitted"
+            )
+        if ActuatorKind.MESH in enabled and self.mesh is None:
+            raise ValueError(
+                "the mesh actuator is enabled but no `mesh:` section says which edge proxy it "
+                "may reach; an adapter with no stated target is not permitted"
             )
         return self
 

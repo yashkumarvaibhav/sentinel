@@ -46,6 +46,8 @@ actuators:
     enabled: true
   - actuator: KUBERNETES
     enabled: true
+  - actuator: MESH
+    enabled: true
 
 # The cluster the Kubernetes actuator may reach, and the only workloads it may
 # aim at. Enabling that adapter without this section is refused: an adapter with
@@ -77,3 +79,38 @@ kubernetes:
     cart: cart
     payment: payment
     email: email
+
+# The edge proxy the mesh actuator restrains a cohort at. Enabling that adapter
+# without this section is refused, for the same reason the Kubernetes one is: an
+# adapter with no stated target is not permitted.
+#
+# The proxy's own configuration is lab/testbed/envoy.tmpl.yaml, which publishes
+# the runtime keys named here and ships every one of them at zero. Note what is
+# NOT here: the rate itself. How much a cohort is allowed is a standing decision
+# about the service and lives in the proxy configuration an operator reviews;
+# this plane decides only whether, and how hard, that limit applies. A system
+# that could also pick the number could rate-limit a cohort to nothing by
+# getting one field wrong.
+mesh:
+  context: k3d-sentinel-lab
+  namespace: otel-demo
+
+  # The deployment whose pod carries the Envoy admin interface, and the label
+  # the demo puts on it. The admin port is reached through the API server's
+  # pod-proxy subresource, so it is never published anywhere.
+  workload: frontend-proxy
+  component_label: app.kubernetes.io/component
+  admin_port: 10000
+
+  # Two prefixes because refusing a cohort and slowing one are two mechanisms
+  # at the edge, not two settings of one. They may not be equal.
+  ratelimit_key_prefix: sentinel.ratelimit
+  throttle_key_prefix: sentinel.throttle
+
+  # A cohort in config/cohorts.yml -> the runtime-key segment the proxy
+  # publishes for it. Written down rather than derived, because a cohort is a
+  # statement about users and a runtime key is a fact about the proxy's
+  # committed configuration; an unmapped cohort is refused, never guessed.
+  cohorts:
+    checkout-users: checkout_users
+    general-traffic: general_traffic

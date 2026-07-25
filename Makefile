@@ -90,6 +90,11 @@ verify-action: ## Run the Kubernetes actuator against the live testbed (read-onl
 	$(PY) env SENTINEL_ACTION_K8S_INTEGRATION=1 \
 		pytest tests/test_action_kubernetes.py -k "real_testbed or stays_in_dry_run"
 
+.PHONY: verify-mesh
+verify-mesh: ## Run the mesh actuator against a real Envoy (needs `make lab-edge`)
+	$(PY) env SENTINEL_ACTION_MESH_INTEGRATION=1 \
+		pytest tests/test_action_mesh.py -k "real_envoy or dry_run"
+
 .PHONY: verify-ingest
 verify-ingest: ## Run the real raw bus to normalized bus/ClickHouse round trip
 	$(COMPOSE) run --rm --build -e SENTINEL_LAB_INGEST_INTEGRATION=1 ingest \

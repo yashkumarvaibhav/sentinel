@@ -14,6 +14,7 @@ from action.actuators.kubernetes import (
     KubectlUnavailableError,
     KubernetesActuator,
 )
+from action.actuators.mesh import EdgeUnreachableError, MeshActuator
 from action.actuators.simulated import SimulatedActuator, SimulatedCall
 
 __all__ = [
@@ -23,9 +24,11 @@ __all__ = [
     "ActuatorContractError",
     "ActuatorError",
     "ClusterCommand",
+    "EdgeUnreachableError",
     "KubectlCommand",
     "KubectlUnavailableError",
     "KubernetesActuator",
+    "MeshActuator",
     "SimulatedActuator",
     "SimulatedCall",
     "build_plan",
