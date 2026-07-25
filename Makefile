@@ -267,10 +267,18 @@ golden: data-pull ## Replay development goldens and diff semantic transcripts
 		--repo-root .. \
 		--captures-root "../$(or $(GOLDEN_CAPTURE_ROOT),data/captures/phase-1/goldens)" \
 		--goldens-root ../lab/goldens/phase-1
+	cd platform && PYTHONPATH=.. uv run python -m lab.scoring.decision_golden \
+		--repo-root .. \
+		--captures-root "../$(or $(GOLDEN_CAPTURE_ROOT),data/captures/phase-1/goldens)" \
+		--goldens-root ../lab/goldens/phase-4
 
 .PHONY: regen-golden
-regen-golden: data-pull ## Rewrite reviewed Phase 1 goldens from development captures
+regen-golden: data-pull ## Rewrite reviewed goldens from development captures
 	cd platform && PYTHONPATH=.. uv run python -m lab.scoring.golden \
 		--repo-root .. \
 		--captures-root "../$(or $(GOLDEN_CAPTURE_ROOT),data/captures/phase-1/goldens)" \
 		--goldens-root ../lab/goldens/phase-1 --write
+	cd platform && PYTHONPATH=.. uv run python -m lab.scoring.decision_golden \
+		--repo-root .. \
+		--captures-root "../$(or $(GOLDEN_CAPTURE_ROOT),data/captures/phase-1/goldens)" \
+		--goldens-root ../lab/goldens/phase-4 --write

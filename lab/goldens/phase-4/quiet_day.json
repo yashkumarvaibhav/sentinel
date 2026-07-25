@@ -1,0 +1,41 @@
+{
+  "capture_id": "phase1-quiet-101-golden-v1",
+  "covered_services": [
+    "accounting",
+    "ad",
+    "astronomy",
+    "cart",
+    "chaos-mesh",
+    "checkout",
+    "currency",
+    "email",
+    "flagd",
+    "fraud-detection",
+    "frontend",
+    "frontend-proxy",
+    "image-provider",
+    "kafka",
+    "load-generator",
+    "otelcol-contrib",
+    "payment",
+    "postgresql",
+    "product-catalog",
+    "quote",
+    "recommendation",
+    "score-quiet-day-101",
+    "shipping",
+    "valkey-cart"
+  ],
+  "decision_config_fingerprint": "768c3460dcb2-078392fb04bb-82371c5b25c7-1d0c321a8781",
+  "detector_config_fingerprint": "23d957af85fe1fa0cea7d8f4221c53ea571d1ffaa49a13de475de65f241d7030",
+  "episode_count": 0,
+  "honesty": {
+    "stimulus": "SIMULATED",
+    "telemetry": "REAL"
+  },
+  "scenario_id": "quiet_day",
+  "seed": 101,
+  "seed_purpose": "development",
+  "ticks": [],
+  "version": 1
+}

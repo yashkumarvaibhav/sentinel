@@ -94,7 +94,13 @@ def load_decision_configs(config_root: Path) -> DecisionConfigs:
 
 @dataclass(frozen=True)
 class DecisionReplay:
-    """Every judgement the decision plane made over one capture."""
+    """Every judgement the decision plane made over one capture.
+
+    The two fingerprints are carried with the judgements rather than alongside
+    them: a decision depends on both the detector configuration that produced
+    its episodes and the decision configuration that judged them, so a
+    transcript is only a pin if it states both.
+    """
 
     capture_id: str
     scenario_id: str
@@ -105,6 +111,8 @@ class DecisionReplay:
     covered_services: tuple[str, ...]
     episode_count: int
     ticks: tuple[DecisionTick, ...]
+    detector_fingerprint: str
+    decision_fingerprint: str
 
 
 def covered_services(capture: RuntimeCapture, *, detector: DetectorConfig) -> frozenset[str]:
@@ -169,6 +177,8 @@ def replay_capture_decisions(
             )
         )
     return DecisionReplay(
+        detector_fingerprint=config.fingerprint,
+        decision_fingerprint=decisions.fingerprint,
         capture_id=replay.capture_id,
         scenario_id=replay.scenario_id,
         seed=replay.seed,
@@ -280,6 +290,8 @@ def semantic_transcript(replay: DecisionReplay) -> bytes:
     value = {
         "capture_id": replay.capture_id,
         "covered_services": list(replay.covered_services),
+        "decision_config_fingerprint": replay.decision_fingerprint,
+        "detector_config_fingerprint": replay.detector_fingerprint,
         "episode_count": replay.episode_count,
         "honesty": {"stimulus": "SIMULATED", "telemetry": "REAL"},
         "scenario_id": replay.scenario_id,
@@ -288,9 +300,9 @@ def semantic_transcript(replay: DecisionReplay) -> bytes:
         "ticks": ticks,
         "version": 1,
     }
-    return (
-        json.dumps(value, allow_nan=False, separators=(",", ":"), sort_keys=True) + "\n"
-    ).encode()
+    # Indented, like the Phase-1 golden: this artifact's job is to be diffed by
+    # a person when it changes, and a one-line JSON diff shows nothing useful.
+    return (json.dumps(value, allow_nan=False, indent=2, sort_keys=True) + "\n").encode()
 
 
 def _round(value: float) -> float:

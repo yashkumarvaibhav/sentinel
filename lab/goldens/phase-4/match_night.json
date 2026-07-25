@@ -1,0 +1,609 @@
+{
+  "capture_id": "phase1-match-211-golden-v1",
+  "covered_services": [
+    "accounting",
+    "ad",
+    "astronomy",
+    "cart",
+    "chaos-mesh",
+    "checkout",
+    "currency",
+    "email",
+    "flagd",
+    "fraud-detection",
+    "frontend",
+    "frontend-proxy",
+    "image-provider",
+    "kafka",
+    "load-generator",
+    "otelcol-contrib",
+    "payment",
+    "postgresql",
+    "product-catalog",
+    "quote",
+    "recommendation",
+    "score-match-night-211-3f8dae41",
+    "shipping",
+    "valkey-cart"
+  ],
+  "decision_config_fingerprint": "768c3460dcb2-078392fb04bb-82371c5b25c7-1d0c321a8781",
+  "detector_config_fingerprint": "23d957af85fe1fa0cea7d8f4221c53ea571d1ffaa49a13de475de65f241d7030",
+  "episode_count": 1,
+  "honesty": {
+    "stimulus": "SIMULATED",
+    "telemetry": "REAL"
+  },
+  "scenario_id": "match_night",
+  "seed": 211,
+  "seed_purpose": "development",
+  "ticks": [
+    {
+      "axes": {
+        "BUSINESS_IMPACT": {
+          "contributing_kinds": [],
+          "score": 0.0,
+          "services": [],
+          "status": "SCORED",
+          "trend": "UNKNOWN"
+        },
+        "CHANGE_CONFIG": {
+          "contributing_kinds": [],
+          "score": 0.0,
+          "services": [],
+          "status": "INSUFFICIENT",
+          "trend": "UNKNOWN"
+        },
+        "RELIABILITY": {
+          "contributing_kinds": [],
+          "score": 0.0,
+          "services": [],
+          "status": "SCORED",
+          "trend": "UNKNOWN"
+        },
+        "SECURITY": {
+          "contributing_kinds": [
+            "RESIDUAL_EXCEED"
+          ],
+          "score": 0.45,
+          "services": [
+            "frontend"
+          ],
+          "status": "SCORED",
+          "trend": "UNKNOWN"
+        }
+      },
+      "fusion": {
+        "class": null,
+        "distribution": {},
+        "reason_subtype": null,
+        "rule_id": null,
+        "status": "INSUFFICIENT"
+      },
+      "incidents": [
+        {
+          "anchor_offset_seconds": 84.0,
+          "business_impact": 0.0,
+          "checks": {
+            "dependency_validity": "PASSED",
+            "memory_similarity": "BOOTSTRAP",
+            "temporal_causality": "PASSED",
+            "trace_coverage": "PASSED"
+          },
+          "confidence": null,
+          "confirmed": true,
+          "decision": {
+            "action": "ALERT",
+            "approval_reasons": 0,
+            "evidence_offset_seconds": 88.0,
+            "floors_applied": [],
+            "guards_applied": [],
+            "requires_human_approval": false,
+            "rule_id": "tell-someone-what-we-cannot-name",
+            "suppression": null,
+            "target_service": null
+          },
+          "episode_count": 1,
+          "kinds": [
+            "RESIDUAL_EXCEED"
+          ],
+          "matches": 0,
+          "origin_confidence": 0.65,
+          "origin_service": "frontend",
+          "services": [
+            "frontend"
+          ],
+          "severity": "LOW",
+          "state": "OPEN"
+        }
+      ],
+      "offset_seconds": 88.0
+    },
+    {
+      "axes": {
+        "BUSINESS_IMPACT": {
+          "contributing_kinds": [],
+          "score": 0.0,
+          "services": [],
+          "status": "SCORED",
+          "trend": "STEADY"
+        },
+        "CHANGE_CONFIG": {
+          "contributing_kinds": [],
+          "score": 0.0,
+          "services": [],
+          "status": "INSUFFICIENT",
+          "trend": "UNKNOWN"
+        },
+        "RELIABILITY": {
+          "contributing_kinds": [],
+          "score": 0.0,
+          "services": [],
+          "status": "SCORED",
+          "trend": "STEADY"
+        },
+        "SECURITY": {
+          "contributing_kinds": [
+            "RESIDUAL_EXCEED"
+          ],
+          "score": 0.45,
+          "services": [
+            "frontend"
+          ],
+          "status": "SCORED",
+          "trend": "STEADY"
+        }
+      },
+      "fusion": {
+        "class": null,
+        "distribution": {},
+        "reason_subtype": null,
+        "rule_id": null,
+        "status": "INSUFFICIENT"
+      },
+      "incidents": [
+        {
+          "anchor_offset_seconds": 84.0,
+          "business_impact": 0.0,
+          "checks": {
+            "dependency_validity": "PASSED",
+            "memory_similarity": "BOOTSTRAP",
+            "temporal_causality": "PASSED",
+            "trace_coverage": "PASSED"
+          },
+          "confidence": null,
+          "confirmed": true,
+          "decision": {
+            "action": "ALERT",
+            "approval_reasons": 0,
+            "evidence_offset_seconds": 90.0,
+            "floors_applied": [],
+            "guards_applied": [],
+            "requires_human_approval": false,
+            "rule_id": "tell-someone-what-we-cannot-name",
+            "suppression": null,
+            "target_service": null
+          },
+          "episode_count": 1,
+          "kinds": [
+            "RESIDUAL_EXCEED"
+          ],
+          "matches": 0,
+          "origin_confidence": 0.65,
+          "origin_service": "frontend",
+          "services": [
+            "frontend"
+          ],
+          "severity": "LOW",
+          "state": "OPEN"
+        }
+      ],
+      "offset_seconds": 90.0
+    },
+    {
+      "axes": {
+        "BUSINESS_IMPACT": {
+          "contributing_kinds": [],
+          "score": 0.0,
+          "services": [],
+          "status": "SCORED",
+          "trend": "STEADY"
+        },
+        "CHANGE_CONFIG": {
+          "contributing_kinds": [],
+          "score": 0.0,
+          "services": [],
+          "status": "INSUFFICIENT",
+          "trend": "UNKNOWN"
+        },
+        "RELIABILITY": {
+          "contributing_kinds": [],
+          "score": 0.0,
+          "services": [],
+          "status": "SCORED",
+          "trend": "STEADY"
+        },
+        "SECURITY": {
+          "contributing_kinds": [
+            "RESIDUAL_EXCEED"
+          ],
+          "score": 0.45,
+          "services": [
+            "frontend"
+          ],
+          "status": "SCORED",
+          "trend": "STEADY"
+        }
+      },
+      "fusion": {
+        "class": null,
+        "distribution": {},
+        "reason_subtype": null,
+        "rule_id": null,
+        "status": "INSUFFICIENT"
+      },
+      "incidents": [
+        {
+          "anchor_offset_seconds": 84.0,
+          "business_impact": 0.0,
+          "checks": {
+            "dependency_validity": "PASSED",
+            "memory_similarity": "BOOTSTRAP",
+            "temporal_causality": "PASSED",
+            "trace_coverage": "PASSED"
+          },
+          "confidence": null,
+          "confirmed": true,
+          "decision": {
+            "action": "ALERT",
+            "approval_reasons": 0,
+            "evidence_offset_seconds": 92.0,
+            "floors_applied": [],
+            "guards_applied": [],
+            "requires_human_approval": false,
+            "rule_id": "tell-someone-what-we-cannot-name",
+            "suppression": null,
+            "target_service": null
+          },
+          "episode_count": 1,
+          "kinds": [
+            "RESIDUAL_EXCEED"
+          ],
+          "matches": 0,
+          "origin_confidence": 0.65,
+          "origin_service": "frontend",
+          "services": [
+            "frontend"
+          ],
+          "severity": "LOW",
+          "state": "OPEN"
+        }
+      ],
+      "offset_seconds": 92.0
+    },
+    {
+      "axes": {
+        "BUSINESS_IMPACT": {
+          "contributing_kinds": [],
+          "score": 0.0,
+          "services": [],
+          "status": "SCORED",
+          "trend": "STEADY"
+        },
+        "CHANGE_CONFIG": {
+          "contributing_kinds": [],
+          "score": 0.0,
+          "services": [],
+          "status": "INSUFFICIENT",
+          "trend": "UNKNOWN"
+        },
+        "RELIABILITY": {
+          "contributing_kinds": [],
+          "score": 0.0,
+          "services": [],
+          "status": "SCORED",
+          "trend": "STEADY"
+        },
+        "SECURITY": {
+          "contributing_kinds": [
+            "RESIDUAL_EXCEED"
+          ],
+          "score": 0.45,
+          "services": [
+            "frontend"
+          ],
+          "status": "SCORED",
+          "trend": "STEADY"
+        }
+      },
+      "fusion": {
+        "class": null,
+        "distribution": {},
+        "reason_subtype": null,
+        "rule_id": null,
+        "status": "INSUFFICIENT"
+      },
+      "incidents": [
+        {
+          "anchor_offset_seconds": 84.0,
+          "business_impact": 0.0,
+          "checks": {
+            "dependency_validity": "PASSED",
+            "memory_similarity": "BOOTSTRAP",
+            "temporal_causality": "PASSED",
+            "trace_coverage": "PASSED"
+          },
+          "confidence": null,
+          "confirmed": true,
+          "decision": {
+            "action": "ALERT",
+            "approval_reasons": 0,
+            "evidence_offset_seconds": 94.0,
+            "floors_applied": [],
+            "guards_applied": [],
+            "requires_human_approval": false,
+            "rule_id": "tell-someone-what-we-cannot-name",
+            "suppression": null,
+            "target_service": null
+          },
+          "episode_count": 1,
+          "kinds": [
+            "RESIDUAL_EXCEED"
+          ],
+          "matches": 0,
+          "origin_confidence": 0.65,
+          "origin_service": "frontend",
+          "services": [
+            "frontend"
+          ],
+          "severity": "LOW",
+          "state": "OPEN"
+        }
+      ],
+      "offset_seconds": 94.0
+    },
+    {
+      "axes": {
+        "BUSINESS_IMPACT": {
+          "contributing_kinds": [],
+          "score": 0.0,
+          "services": [],
+          "status": "SCORED",
+          "trend": "STEADY"
+        },
+        "CHANGE_CONFIG": {
+          "contributing_kinds": [],
+          "score": 0.0,
+          "services": [],
+          "status": "INSUFFICIENT",
+          "trend": "UNKNOWN"
+        },
+        "RELIABILITY": {
+          "contributing_kinds": [],
+          "score": 0.0,
+          "services": [],
+          "status": "SCORED",
+          "trend": "STEADY"
+        },
+        "SECURITY": {
+          "contributing_kinds": [
+            "RESIDUAL_EXCEED"
+          ],
+          "score": 0.45,
+          "services": [
+            "frontend"
+          ],
+          "status": "SCORED",
+          "trend": "STEADY"
+        }
+      },
+      "fusion": {
+        "class": null,
+        "distribution": {},
+        "reason_subtype": null,
+        "rule_id": null,
+        "status": "INSUFFICIENT"
+      },
+      "incidents": [
+        {
+          "anchor_offset_seconds": 84.0,
+          "business_impact": 0.0,
+          "checks": {
+            "dependency_validity": "PASSED",
+            "memory_similarity": "BOOTSTRAP",
+            "temporal_causality": "PASSED",
+            "trace_coverage": "PASSED"
+          },
+          "confidence": null,
+          "confirmed": true,
+          "decision": {
+            "action": "ALERT",
+            "approval_reasons": 0,
+            "evidence_offset_seconds": 96.0,
+            "floors_applied": [],
+            "guards_applied": [],
+            "requires_human_approval": false,
+            "rule_id": "tell-someone-what-we-cannot-name",
+            "suppression": null,
+            "target_service": null
+          },
+          "episode_count": 1,
+          "kinds": [
+            "RESIDUAL_EXCEED"
+          ],
+          "matches": 0,
+          "origin_confidence": 0.65,
+          "origin_service": "frontend",
+          "services": [
+            "frontend"
+          ],
+          "severity": "LOW",
+          "state": "OPEN"
+        }
+      ],
+      "offset_seconds": 96.0
+    },
+    {
+      "axes": {
+        "BUSINESS_IMPACT": {
+          "contributing_kinds": [],
+          "score": 0.0,
+          "services": [],
+          "status": "SCORED",
+          "trend": "STEADY"
+        },
+        "CHANGE_CONFIG": {
+          "contributing_kinds": [],
+          "score": 0.0,
+          "services": [],
+          "status": "INSUFFICIENT",
+          "trend": "UNKNOWN"
+        },
+        "RELIABILITY": {
+          "contributing_kinds": [],
+          "score": 0.0,
+          "services": [],
+          "status": "SCORED",
+          "trend": "STEADY"
+        },
+        "SECURITY": {
+          "contributing_kinds": [
+            "RESIDUAL_EXCEED"
+          ],
+          "score": 0.45,
+          "services": [
+            "frontend"
+          ],
+          "status": "SCORED",
+          "trend": "STEADY"
+        }
+      },
+      "fusion": {
+        "class": null,
+        "distribution": {},
+        "reason_subtype": null,
+        "rule_id": null,
+        "status": "INSUFFICIENT"
+      },
+      "incidents": [
+        {
+          "anchor_offset_seconds": 84.0,
+          "business_impact": 0.0,
+          "checks": {
+            "dependency_validity": "PASSED",
+            "memory_similarity": "BOOTSTRAP",
+            "temporal_causality": "PASSED",
+            "trace_coverage": "PASSED"
+          },
+          "confidence": null,
+          "confirmed": true,
+          "decision": {
+            "action": "ALERT",
+            "approval_reasons": 0,
+            "evidence_offset_seconds": 98.0,
+            "floors_applied": [],
+            "guards_applied": [],
+            "requires_human_approval": false,
+            "rule_id": "tell-someone-what-we-cannot-name",
+            "suppression": null,
+            "target_service": null
+          },
+          "episode_count": 1,
+          "kinds": [
+            "RESIDUAL_EXCEED"
+          ],
+          "matches": 0,
+          "origin_confidence": 0.65,
+          "origin_service": "frontend",
+          "services": [
+            "frontend"
+          ],
+          "severity": "LOW",
+          "state": "OPEN"
+        }
+      ],
+      "offset_seconds": 98.0
+    },
+    {
+      "axes": {
+        "BUSINESS_IMPACT": {
+          "contributing_kinds": [],
+          "score": 0.0,
+          "services": [],
+          "status": "SCORED",
+          "trend": "STEADY"
+        },
+        "CHANGE_CONFIG": {
+          "contributing_kinds": [],
+          "score": 0.0,
+          "services": [],
+          "status": "INSUFFICIENT",
+          "trend": "UNKNOWN"
+        },
+        "RELIABILITY": {
+          "contributing_kinds": [],
+          "score": 0.0,
+          "services": [],
+          "status": "SCORED",
+          "trend": "STEADY"
+        },
+        "SECURITY": {
+          "contributing_kinds": [
+            "RESIDUAL_EXCEED"
+          ],
+          "score": 0.45,
+          "services": [
+            "frontend"
+          ],
+          "status": "SCORED",
+          "trend": "STEADY"
+        }
+      },
+      "fusion": {
+        "class": null,
+        "distribution": {},
+        "reason_subtype": null,
+        "rule_id": null,
+        "status": "INSUFFICIENT"
+      },
+      "incidents": [
+        {
+          "anchor_offset_seconds": 84.0,
+          "business_impact": 0.0,
+          "checks": {
+            "dependency_validity": "PASSED",
+            "memory_similarity": "BOOTSTRAP",
+            "temporal_causality": "PASSED",
+            "trace_coverage": "PASSED"
+          },
+          "confidence": null,
+          "confirmed": true,
+          "decision": {
+            "action": "ALERT",
+            "approval_reasons": 0,
+            "evidence_offset_seconds": 100.0,
+            "floors_applied": [],
+            "guards_applied": [],
+            "requires_human_approval": false,
+            "rule_id": "tell-someone-what-we-cannot-name",
+            "suppression": null,
+            "target_service": null
+          },
+          "episode_count": 1,
+          "kinds": [
+            "RESIDUAL_EXCEED"
+          ],
+          "matches": 0,
+          "origin_confidence": 0.65,
+          "origin_service": "frontend",
+          "services": [
+            "frontend"
+          ],
+          "severity": "LOW",
+          "state": "OPEN"
+        }
+      ],
+      "offset_seconds": 100.0
+    }
+  ],
+  "version": 1
+}
