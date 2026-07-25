@@ -18,6 +18,13 @@ from decision.memory import (
     nearest,
     recognized,
 )
+from decision.pipeline import (
+    DecisionPipeline,
+    DecisionTick,
+    EpisodeSnapshot,
+    IncidentOutcome,
+    episode_timeline,
+)
 from decision.verdict import EvidenceFusion, FusionResult, FusionStatus
 from decision.verifier import verify_incident
 
@@ -27,11 +34,15 @@ __all__ = [
     "CausalCollapse",
     "ChangeConfigEvidenceAgent",
     "ChangeFeed",
+    "DecisionPipeline",
+    "DecisionTick",
+    "EpisodeSnapshot",
     "EvidenceAgent",
     "EvidenceFusion",
     "FlagChange",
     "FusionResult",
     "FusionStatus",
+    "IncidentOutcome",
     "IncidentSignature",
     "IncidentTracker",
     "OriginCandidate",
@@ -41,6 +52,7 @@ __all__ = [
     "SimilarIncident",
     "build_signature",
     "collapse_to_origin",
+    "episode_timeline",
     "nearest",
     "recognized",
     "verify_incident",
