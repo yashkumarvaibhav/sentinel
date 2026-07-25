@@ -19,7 +19,8 @@ export type SentinelContract =
   | Verification
   | Decision
   | ActionPlan
-  | ActionOutcome;
+  | ActionOutcome
+  | AuditEntry;
 export type TelemetryScalar = string | boolean | number;
 export type Identifier = string;
 export type FlowRefs = Identifier[];
@@ -196,6 +197,25 @@ export type Observed = HumanText[];
  * not assert whether the world changed - only a ``verify`` can settle that.
  */
 export type ActionStatus = "SIMULATED" | "APPLIED" | "VERIFIED" | "REVERTED" | "FAILED";
+export type Honesty4 = "REAL" | "SIMULATED";
+/**
+ * What kind of thing the ledger is recording.
+ *
+ * Deliberately small. The ledger records what the platform *decided* and what
+ * it *did about it*, which is the pair a person needs to reconstruct an
+ * incident; telemetry lives in the stores that are built for it.
+ */
+export type AuditEventKind =
+  | "DECISION"
+  | "ACTION_PLANNED"
+  | "ACTION_APPLIED"
+  | "ACTION_VERIFIED"
+  | "ACTION_REVERTED"
+  | "ACTION_REFUSED"
+  | "ROLLBACK"
+  | "BREAKER_OPENED"
+  | "APPROVAL";
+export type Sequence = number;
 
 /**
  * One event-time telemetry value, containing evidence but never answer-key data.
@@ -553,4 +573,25 @@ export interface ActionOutcome {
   revert_token?: Identifier | null;
   status: ActionStatus;
   ts: UtcDatetime;
+}
+/**
+ * One immutable record, bound to the entry before it by its own hash.
+ */
+export interface AuditEntry {
+  actor: Identifier;
+  body?: Body;
+  decision_id?: Identifier | null;
+  entry_hash: Identifier;
+  entry_id: Identifier;
+  honesty: Honesty4;
+  incident_id?: Identifier | null;
+  kind: AuditEventKind;
+  plan_id?: Identifier | null;
+  previous_hash: Identifier;
+  sequence: Sequence;
+  summary: HumanText;
+  ts: UtcDatetime;
+}
+export interface Body {
+  [k: string]: unknown;
 }

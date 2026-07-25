@@ -349,6 +349,116 @@
       "title": "AppliedSuppression",
       "type": "object"
     },
+    "AuditEntry": {
+      "additionalProperties": false,
+      "description": "One immutable record, bound to the entry before it by its own hash.",
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "body": {
+          "additionalProperties": true,
+          "propertyNames": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "title": "Body",
+          "type": "object"
+        },
+        "decision_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "entry_hash": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "entry_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "honesty": {
+          "enum": [
+            "REAL",
+            "SIMULATED"
+          ],
+          "title": "Honesty",
+          "type": "string"
+        },
+        "incident_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "$ref": "#/$defs/AuditEventKind"
+        },
+        "plan_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "previous_hash": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "sequence": {
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "summary": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "ts": {
+          "$ref": "#/$defs/UtcDatetime"
+        }
+      },
+      "required": [
+        "entry_id",
+        "sequence",
+        "ts",
+        "kind",
+        "actor",
+        "summary",
+        "previous_hash",
+        "entry_hash",
+        "honesty"
+      ],
+      "title": "AuditEntry",
+      "type": "object"
+    },
+    "AuditEventKind": {
+      "description": "What kind of thing the ledger is recording.\n\nDeliberately small. The ledger records what the platform *decided* and what\nit *did about it*, which is the pair a person needs to reconstruct an\nincident; telemetry lives in the stores that are built for it.",
+      "enum": [
+        "DECISION",
+        "ACTION_PLANNED",
+        "ACTION_APPLIED",
+        "ACTION_VERIFIED",
+        "ACTION_REVERTED",
+        "ACTION_REFUSED",
+        "ROLLBACK",
+        "BREAKER_OPENED",
+        "APPROVAL"
+      ],
+      "title": "AuditEventKind",
+      "type": "string"
+    },
     "ChangeEvent": {
       "additionalProperties": false,
       "description": "One recorded operator change, the raw material of deploy-correlated pressure.\n\nA change is a fact about the system's own history, never a conclusion about\nan incident. It carries its own honesty label because the MVP feed mixes an\noperator-maintained ledger with changes observed from the cluster.",
@@ -1426,6 +1536,9 @@
     },
     {
       "$ref": "#/$defs/ActionOutcome"
+    },
+    {
+      "$ref": "#/$defs/AuditEntry"
     }
   ],
   "title": "SentinelContract"

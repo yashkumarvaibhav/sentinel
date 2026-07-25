@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from pydantic.json_schema import JsonSchemaValue, models_json_schema
 
 from contracts.action import ActionOutcome, ActionPlan
+from contracts.audit import AuditEntry
 from contracts.context import ContextWindow
 from contracts.decision import (
     AgentAssessment,
@@ -42,6 +43,7 @@ PUBLIC_MODELS: tuple[type[BaseModel], ...] = (
     Decision,
     ActionPlan,
     ActionOutcome,
+    AuditEntry,
 )
 
 

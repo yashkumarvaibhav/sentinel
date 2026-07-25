@@ -12,6 +12,13 @@ from contracts.action import (
     ActuatorKind,
     action_idempotency_key,
 )
+from contracts.audit import (
+    GENESIS_HASH,
+    AuditEntry,
+    AuditEventKind,
+    audit_entry_hash,
+    canonical_body,
+)
 from contracts.context import ContextWindow
 from contracts.decision import (
     ACTING_ACTIONS,
@@ -56,6 +63,7 @@ __all__ = [
     "DESTRUCTIVE_ACTIONS",
     "EFFECTIVE_STATUSES",
     "ESCALATING_ACTIONS",
+    "GENESIS_HASH",
     "REQUIRED_CHECKS",
     "ActionKind",
     "ActionOutcome",
@@ -67,6 +75,8 @@ __all__ = [
     "AgentStatus",
     "AgentTrend",
     "AppliedSuppression",
+    "AuditEntry",
+    "AuditEventKind",
     "ChangeEvent",
     "ChangeKind",
     "CheckOutcome",
@@ -94,4 +104,6 @@ __all__ = [
     "Verification",
     "VerificationCheck",
     "action_idempotency_key",
+    "audit_entry_hash",
+    "canonical_body",
 ]
