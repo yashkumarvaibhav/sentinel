@@ -155,3 +155,43 @@ symptom_labels:
     stimulus_id: frontend_emitter_silence
     start_offset_seconds: 724
     end_offset_seconds: 944
+# What the decision plane ought to conclude, phase by phase. Each window is the
+# union of the evidence labels it is the consequence of, so it inherits their
+# measured offsets.
+decision_labels:
+  # The one genuine attack in the suite: this stimulus rewrites the path mix, so
+  # it deforms a behavioural ratio and can be recognised as hostile from
+  # behaviour rather than from volume. Attack recall is graded here, and it is
+  # graded while the legitimate match surge is running - which is the whole
+  # north-star shape: an attack hiding inside an event.
+  - label_id: behavior-attack-decision
+    expectation: ATTACK
+    origin_service: frontend
+    label_refs: [behavior-attack-volume, behavior-attack-path-entropy]
+  # payment fails; checkout's call to it degrades and the frontend edge degrades
+  # one hop further up. The origin is the service that never called anyone.
+  - label_id: payment-fault-decision
+    expectation: OPERATIONAL_FAULT
+    origin_service: payment
+    label_refs:
+      - payment-failure-log-burst
+      - checkout-payment-failure
+      - frontend-checkout-propagation
+  # A leaking container is our own fault, not a hostile one.
+  - label_id: email-saturation-decision
+    expectation: OPERATIONAL_FAULT
+    origin_service: email
+    label_refs: [email-memory-saturation]
+  # Traffic falls to a fifth with nothing on the calendar explaining it and
+  # nothing degraded. Real, worth telling someone about, and there is nothing to
+  # remediate - so it is UNEXPLAINED, and an autonomous action here would be a
+  # false act on a system that is working perfectly.
+  - label_id: measured-drop-decision
+    expectation: UNEXPLAINED
+    label_refs: [frontend-measured-rate-drop]
+  # The frontend proxy pod is killed outright: the emitter stops. That is an
+  # operational fault at the service that went silent.
+  - label_id: emitter-silence-decision
+    expectation: OPERATIONAL_FAULT
+    origin_service: frontend
+    label_refs: [frontend-emitter-silence]

@@ -23,3 +23,19 @@ residual_labels:
   - label_id: attack_core
     start_offset_seconds: 64
     end_offset_seconds: 84
+# The expectation here is UNEXPLAINED, not ATTACK, and that is deliberate.
+# This profile raises the primary load rate and nothing else: same clients, same
+# paths, same auth mix, just more of it. No behavioural ratio deforms, because
+# by construction none can. On volume alone a hostile flood and an unannounced
+# legitimate spike are the same observation, so naming this ATTACK would demand
+# a conclusion the evidence cannot support - exactly the inversion of the
+# guiding principle that build decision #56 was made to prevent (an event
+# explains volume, not behaviour; unexplained volume alone must never be able to
+# call something hostile). The honest answer is that something real is happening
+# that we cannot name: surface it, never suppress it, never act on it.
+# Attack RECALL is graded on combo_night, where the attack actually deforms
+# path entropy and can therefore be recognised from behaviour.
+decision_labels:
+  - label_id: volume-surge-decision
+    expectation: UNEXPLAINED
+    label_refs: [attack_core]

@@ -73,3 +73,11 @@ symptom_labels:
     stimulus_id: payment_failure
     start_offset_seconds: 84
     end_offset_seconds: 104
+# The whole storm is one fault, and it started at payment - the service that
+# calls nobody and that emits no symptom of its own. Both edges are consequences
+# of it, so the decision window is their union.
+decision_labels:
+  - label_id: payment-fault-decision
+    expectation: OPERATIONAL_FAULT
+    origin_service: payment
+    label_refs: [checkout-payment-failure, frontend-checkout-propagation]

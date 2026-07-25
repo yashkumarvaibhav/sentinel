@@ -36,3 +36,13 @@ residual_labels:
   - label_id: offset_core
     start_offset_seconds: 84
     end_offset_seconds: 100
+# What the decision plane ought to conclude. The unexplained offset is real
+# volume the calendar does not account for, and it deforms no behavioural ratio
+# and degrades no service - so there is nothing here that can honestly be named
+# an attack or a fault. UNEXPLAINED is the correct answer, not a lesser one: it
+# must be surfaced (never suppressed as "the expected event", because the event
+# demonstrably does not explain it) and it must never be acted on.
+decision_labels:
+  - label_id: unexplained-offset-decision
+    expectation: UNEXPLAINED
+    label_refs: [offset_core]

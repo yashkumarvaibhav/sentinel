@@ -64,6 +64,26 @@ type ScoredSymptomKind = Literal[
     "DROP",
     "SILENCE",
 ]
+# What the platform ought to conclude over a labelled window. Five of these are
+# the verdict classes; UNEXPLAINED is the sixth answer and it is not a lesser
+# one - it is the honest statement that evidence exists and no signature
+# accounts for it, which is the only correct answer to unexplained volume that
+# deforms no behaviour. A scenario that demands a class the evidence cannot
+# support would be an answer key that rewards guessing.
+type LabeledOutcome = Literal[
+    "EXPECTED_EVENT",
+    "UNEXPLAINED",
+    "ATTACK",
+    "OPERATIONAL_FAULT",
+    "CODE_CONFIG_FAULT",
+    "COMBINATION",
+]
+# The outcomes that name something the platform can be held to. The other two
+# say "nothing is wrong" and "we cannot say what is wrong", and neither can
+# name a culprit.
+NAMED_OUTCOMES: frozenset[str] = frozenset(
+    {"ATTACK", "OPERATIONAL_FAULT", "CODE_CONFIG_FAULT", "COMBINATION"}
+)
 
 
 class LabModel(BaseModel):
@@ -152,6 +172,44 @@ class SymptomLabelInterval(LabModel):
         return self
 
 
+class DecisionLabelInterval(LabModel):
+    """What the decision plane ought to conclude over one already-labelled window.
+
+    A decision label owns no interval of its own. It points at the residual and
+    symptom labels it is the consequence of, and its window is their union - so
+    it inherits the *measured* offsets those labels were materialized to when
+    the capture was recorded, and a decision expectation can therefore be added
+    to a profile without re-recording a single capture.
+
+    ``origin_service`` is required exactly when the expectation names a class:
+    a labelled fault or attack that cannot say which service it started at is
+    too weak to grade an origin against, and an outcome that names no class
+    cannot honestly name a culprit either.
+    """
+
+    label_id: Identifier
+    expectation: LabeledOutcome
+    label_refs: tuple[Identifier, ...] = Field(min_length=1)
+    origin_service: Identifier | None = None
+
+    @model_validator(mode="after")
+    def validate_expectation(self) -> Self:
+        if len(self.label_refs) != len(set(self.label_refs)):
+            raise ValueError(f"{self.label_id}: label_refs must be unique")
+        names_a_class = self.expectation in NAMED_OUTCOMES
+        if names_a_class and self.origin_service is None:
+            raise ValueError(
+                f"{self.label_id}: a labelled {self.expectation} must name the service it "
+                "started at, or it cannot grade an origin"
+            )
+        if not names_a_class and self.origin_service is not None:
+            raise ValueError(
+                f"{self.label_id}: {self.expectation} names no class, so it must not name "
+                "an originating service either"
+            )
+        return self
+
+
 class FlagdStimulus(LabModel):
     stimulus_id: Identifier
     kind: Literal["flagd"]
@@ -217,6 +275,7 @@ class ScenarioProfile(LabModel):
     stimuli: tuple[Stimulus, ...] = ()
     residual_labels: tuple[ResidualLabelInterval, ...] = ()
     symptom_labels: tuple[SymptomLabelInterval, ...] = ()
+    decision_labels: tuple[DecisionLabelInterval, ...] = ()
 
     @property
     def duration_seconds(self) -> int:
@@ -235,8 +294,17 @@ class ScenarioProfile(LabModel):
             raise ValueError("stimulus ids must be unique")
         label_ids = [label.label_id for label in self.residual_labels]
         label_ids.extend(label.label_id for label in self.symptom_labels)
+        evidence_ids = set(label_ids)
+        label_ids.extend(label.label_id for label in self.decision_labels)
         if len(label_ids) != len(set(label_ids)):
             raise ValueError("label ids must be unique")
+        for decision_label in self.decision_labels:
+            unknown = sorted(set(decision_label.label_refs) - evidence_ids)
+            if unknown:
+                raise ValueError(
+                    f"{decision_label.label_id} references unknown evidence labels: "
+                    f"{', '.join(unknown)}"
+                )
         duration = self.duration_seconds
         for context in self.contexts:
             if context.start_offset_seconds + context.duration_seconds > duration:
