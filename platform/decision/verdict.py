@@ -40,10 +40,18 @@ from decision.config import VerdictRuleConfig, VerdictRulesConfig
 
 
 class FusionStatus(StrEnum):
-    """Whether the evidence was enough to name a diagnosis at all."""
+    """Whether the evidence was enough to name a diagnosis at all.
+
+    The two refusals are different facts and lead to different actions.
+    ``NO_EVIDENCE`` means nothing was contributed by any axis - there is
+    nothing to diagnose, and nothing to do. ``INSUFFICIENT`` means evidence
+    was measured and no signature accounted for it - which is a reason to tell
+    a person, not a reason to relax.
+    """
 
     DECIDED = "DECIDED"
     INSUFFICIENT = "INSUFFICIENT"
+    NO_EVIDENCE = "NO_EVIDENCE"
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,8 +99,18 @@ class EvidenceFusion:
     def fuse(self, assessments: Sequence[AgentAssessment]) -> FusionResult:
         """Name the diagnosis the evidence supports, or refuse to name one."""
         readings, ts, by_axis = self._readings(assessments)
-        distribution = self._distribution(readings)
-        rule = self._first_matching_rule(readings)
+        present = _contributed_kinds(by_axis)
+        if not present:
+            # Nothing contributed anything. That is not a calm diagnosis, it is
+            # the absence of one: naming a class here would be inventing an
+            # event to explain a tick where nothing happened.
+            return FusionResult(
+                status=FusionStatus.NO_EVIDENCE,
+                verdict=None,
+                note="no axis contributed evidence at this tick, so there is nothing to diagnose",
+            )
+        distribution = self._distribution(readings, present)
+        rule = self._first_matching_rule(readings, present)
         if rule is None:
             return FusionResult(
                 status=FusionStatus.INSUFFICIENT,
@@ -134,7 +152,7 @@ class EvidenceFusion:
                 assessment.assessment_id
                 for assessment in sorted(assessments, key=lambda item: item.axis.value)
             ),
-            rejected_alternatives=self._rejected(rule, readings),
+            rejected_alternatives=self._rejected(rule, readings, present),
         )
         return FusionResult(
             status=FusionStatus.DECIDED,
@@ -181,10 +199,12 @@ class EvidenceFusion:
         return readings, ts, by_axis
 
     def _first_matching_rule(
-        self, readings: Mapping[EvidenceAxis, _AxisReading]
+        self,
+        readings: Mapping[EvidenceAxis, _AxisReading],
+        present: frozenset[SymptomKind],
     ) -> VerdictRuleConfig | None:
         for rule in self._configuration.rules:
-            if self._failed_requirement(rule, readings) is None:
+            if self._failed_requirement(rule, readings, present) is None:
                 return rule
         return None
 
@@ -192,8 +212,14 @@ class EvidenceFusion:
         self,
         rule: VerdictRuleConfig,
         readings: Mapping[EvidenceAxis, _AxisReading],
+        present: frozenset[SymptomKind],
     ) -> str | None:
         """Return the first unmet requirement of a rule, or None if all hold."""
+        refuting = sorted(
+            kind.value for kind in rule.forbids_kinds if SymptomKind(kind.value) in present
+        )
+        if refuting:
+            return f"{', '.join(refuting)} contributed evidence this tick"
         for axis in rule.lit:
             reading = readings[axis]
             if not reading.lit:
@@ -221,7 +247,11 @@ class EvidenceFusion:
                 return f"{axis.value} is lit at {reading.score:.2f}"
         return None
 
-    def _distribution(self, readings: Mapping[EvidenceAxis, _AxisReading]) -> dict[str, float]:
+    def _distribution(
+        self,
+        readings: Mapping[EvidenceAxis, _AxisReading],
+        present: frozenset[SymptomKind],
+    ) -> dict[str, float]:
         supports: dict[str, float] = {}
         for rule in self._configuration.rules:
             support = 1.0
@@ -229,6 +259,10 @@ class EvidenceFusion:
                 support *= readings[axis].score
             for axis in (*rule.calm, *rule.absent):
                 support *= 1.0 - readings[axis].score
+            # A refuted signature carries no mass in the soft reading either,
+            # so the crisp answer and the distribution stay one belief.
+            if any(SymptomKind(kind.value) in present for kind in rule.forbids_kinds):
+                support = 0.0
             supports[rule.verdict_class.value] = support
         total = sum(supports.values())
         if total <= 0.0:
@@ -268,12 +302,13 @@ class EvidenceFusion:
         self,
         winner: VerdictRuleConfig,
         readings: Mapping[EvidenceAxis, _AxisReading],
+        present: frozenset[SymptomKind],
     ) -> tuple[RejectedAlternative, ...]:
         rejected: list[RejectedAlternative] = []
         for rule in self._configuration.rules:
             if rule.rule_id == winner.rule_id:
                 continue
-            failure = self._failed_requirement(rule, readings)
+            failure = self._failed_requirement(rule, readings, present)
             reason = (
                 f"ruled out because {failure}"
                 if failure is not None
@@ -293,6 +328,13 @@ def _evidence_for(
         if assessment is not None:
             items.extend(assessment.evidence)
     return tuple(items)
+
+
+def _contributed_kinds(by_axis: Mapping[EvidenceAxis, AgentAssessment]) -> frozenset[SymptomKind]:
+    """Every kind that actually contributed to any axis at this tick."""
+    return frozenset(
+        kind for assessment in by_axis.values() for kind in assessment.contributing_kinds
+    )
 
 
 def _corroborating_kinds(

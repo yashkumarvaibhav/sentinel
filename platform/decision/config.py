@@ -441,6 +441,12 @@ class VerdictRuleConfig(DecisionConfigModel):
     nobody could measure is never treated as quiet. ``absent`` is the weaker
     requirement that the axis is not established as lit, so a missing feed
     narrows a diagnosis instead of blocking it.
+
+    ``forbids_kinds`` disqualifies a rule when a named symptom kind contributed
+    anywhere this tick, whatever the axis arithmetic says. It exists because
+    some diagnoses are positive claims that a specific observation refutes: a
+    surge cannot be "fully explained by its context" while an unexplained
+    residual is still being measured, however quiet every axis is.
     """
 
     rule_id: Identifier
@@ -449,12 +455,15 @@ class VerdictRuleConfig(DecisionConfigModel):
     lit: tuple[NamedAxis, ...] = ()
     calm: tuple[NamedAxis, ...] = ()
     absent: tuple[NamedAxis, ...] = ()
+    forbids_kinds: tuple[ClaimedKind, ...] = ()
 
     @model_validator(mode="after")
     def validate_rule(self) -> Self:
         for name, axes in (("lit", self.lit), ("calm", self.calm), ("absent", self.absent)):
             if len(axes) != len(set(axes)):
                 raise ValueError(f"{self.rule_id}: {name} axes must be unique")
+        if len(self.forbids_kinds) != len(set(self.forbids_kinds)):
+            raise ValueError(f"{self.rule_id}: forbidden kinds must be unique")
         overlapping = (set(self.lit) & set(self.calm)) | (set(self.lit) & set(self.absent))
         if overlapping:
             names = ", ".join(sorted(axis.value for axis in overlapping))

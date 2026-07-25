@@ -59,7 +59,7 @@ def test_security_claims_behavioral_signals_but_not_conversion() -> None:
 
     assert security.weight_for(SymptomKind.RATIO_DEFORM, "path_entropy") == 0.85
     assert security.weight_for(SymptomKind.RATIO_DEFORM, "conversion_ratio") is None
-    assert security.weight_for(SymptomKind.RESIDUAL_EXCEED, "request_rate") == 0.60
+    assert security.weight_for(SymptomKind.RESIDUAL_EXCEED, "request_rate") == 0.45
     assert security.weight_for(SymptomKind.SATURATION, "container_memory") is None
 
 

@@ -75,10 +75,15 @@ rules:
       services degraded with no hostile behavior and no recent change of ours
       to explain it
 
-  # Everything the context plane already explains.
+  # Everything the context plane already explains. This is a positive claim,
+  # not the table's fallback: an unexplained residual is direct proof that the
+  # context did NOT explain the volume, so it refutes this rule outright even
+  # while every axis sits below its threshold. Without that, a surge the band
+  # could not account for was being reported as fully explained.
   - rule_id: explained-by-context
     verdict_class: EXPECTED_EVENT
     calm: [SECURITY, RELIABILITY]
+    forbids_kinds: [RESIDUAL_EXCEED]
     reason: >-
       the surge deforms no behavioral ratio and degrades no service, so the
       context that explains its volume explains all of it

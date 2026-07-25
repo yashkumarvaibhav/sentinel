@@ -244,13 +244,69 @@ def test_hostility_inside_a_real_fault_is_a_combination() -> None:
     assert verdict.distribution[VerdictClass.ATTACK.value] < verdict.distribution["COMBINATION"]
 
 
-def test_a_quiet_tick_with_full_coverage_is_explained_by_context() -> None:
+def test_a_tick_where_nothing_contributed_is_not_a_diagnosis_at_all() -> None:
+    """Naming a class here would invent an event to explain an empty tick."""
     result = _fusion().fuse(_assess())
+
+    assert result.status is FusionStatus.NO_EVIDENCE
+    assert result.verdict is None
+
+
+def test_a_fully_explained_surge_is_the_expected_event() -> None:
+    """A symptom that lights nothing, with the volume accounted for, is the event."""
+    result = _fusion().fuse(
+        _assess(
+            symptom_episode(
+                kind=SymptomKind.LOG_BURST,
+                service="frontend",
+                signal="log.template_rate",
+                peak_score=0.1,
+            )
+        )
+    )
 
     verdict = result.verdict
     assert verdict is not None
     assert verdict.verdict_class is VerdictClass.EXPECTED_EVENT
-    assert verdict.evidence == ()
+
+
+def test_an_unexplained_residual_refutes_the_claim_that_context_explained_it() -> None:
+    """The residual is direct proof the band did not account for the volume."""
+    result = _fusion().fuse(
+        _assess(symptom_episode(kind=SymptomKind.RESIDUAL_EXCEED, peak_score=0.9))
+    )
+
+    assert result.status is FusionStatus.INSUFFICIENT
+    assert result.verdict is None
+    assert "RESIDUAL_EXCEED" not in result.note
+
+
+def test_residual_volume_alone_never_calls_something_hostile() -> None:
+    """An event explains volume, not behavior: volume alone is not an accusation."""
+    result = _fusion().fuse(
+        _assess(symptom_episode(kind=SymptomKind.RESIDUAL_EXCEED, peak_score=1.0))
+    )
+
+    assert result.status is not FusionStatus.DECIDED
+
+
+def test_residual_still_corroborates_a_deformation_it_arrives_with() -> None:
+    result = _fusion().fuse(
+        _assess(
+            symptom_episode(
+                kind=SymptomKind.RATIO_DEFORM,
+                service="frontend",
+                signal="path_entropy",
+                peak_score=1.0,
+            ),
+            symptom_episode(kind=SymptomKind.RESIDUAL_EXCEED, peak_score=1.0),
+        )
+    )
+
+    verdict = result.verdict
+    assert verdict is not None
+    assert verdict.verdict_class is VerdictClass.ATTACK
+    assert SymptomKind.RESIDUAL_EXCEED in verdict.corroborating_kinds
 
 
 def test_every_losing_class_is_recorded_with_the_requirement_it_failed() -> None:
@@ -275,13 +331,38 @@ def test_every_losing_class_is_recorded_with_the_requirement_it_failed() -> None
 
 def test_the_distribution_covers_every_class_and_sums_to_one() -> None:
     result = _fusion().fuse(
-        _assess(symptom_episode(kind=SymptomKind.RESIDUAL_EXCEED, peak_score=0.7))
+        _assess(
+            symptom_episode(
+                kind=SymptomKind.RATIO_DEFORM,
+                service="frontend",
+                signal="path_entropy",
+                peak_score=0.7,
+            )
+        )
     )
 
     verdict = result.verdict
     assert verdict is not None
     assert set(verdict.distribution) == {member.value for member in VerdictClass}
     assert sum(verdict.distribution.values()) == pytest.approx(1.0)
+
+
+def test_a_refuted_signature_carries_no_mass_in_the_soft_reading_either() -> None:
+    result = _fusion().fuse(
+        _assess(
+            symptom_episode(
+                kind=SymptomKind.EDGE_DEGRADED,
+                service="checkout",
+                signal="dependency.payment",
+                peak_score=1.0,
+            ),
+            symptom_episode(kind=SymptomKind.RESIDUAL_EXCEED, peak_score=0.2),
+        )
+    )
+
+    verdict = result.verdict
+    assert verdict is not None
+    assert verdict.distribution[VerdictClass.EXPECTED_EVENT.value] == 0.0
 
 
 def test_corroboration_from_independent_kinds_raises_confidence() -> None:
@@ -367,11 +448,26 @@ def test_a_missing_change_feed_still_allows_diagnosing_a_fault() -> None:
 
 
 def test_an_unmeasured_axis_is_uncertainty_not_good_news() -> None:
+    """A lit security axis cannot be called an attack while reliability is unseen."""
+    blind = _fusion().fuse(
+        (
+            _stub(EvidenceAxis.SECURITY, score=0.9, kinds=(SymptomKind.RATIO_DEFORM,)),
+            _stub(EvidenceAxis.RELIABILITY, score=0.0, status=AgentStatus.INSUFFICIENT),
+            _stub(EvidenceAxis.CHANGE_CONFIG, score=0.0, status=AgentStatus.INSUFFICIENT),
+            _stub(EvidenceAxis.BUSINESS_IMPACT, score=0.0, status=AgentStatus.INSUFFICIENT),
+        )
+    )
+
+    assert blind.status is FusionStatus.INSUFFICIENT
+    assert blind.verdict is None
+
+
+def test_a_tick_nobody_could_measure_at_all_has_nothing_to_diagnose() -> None:
     blind = _fusion().fuse(
         tuple(_stub(axis, score=0.0, status=AgentStatus.INSUFFICIENT) for axis in EvidenceAxis)
     )
 
-    assert blind.status is FusionStatus.INSUFFICIENT
+    assert blind.status is FusionStatus.NO_EVIDENCE
     assert blind.verdict is None
 
 

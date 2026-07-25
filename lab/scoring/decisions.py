@@ -291,7 +291,7 @@ def _tick_row(tick: DecisionTick) -> tuple[str, ...]:
         _axis_column(tick, EvidenceAxis.RELIABILITY),
         _axis_column(tick, EvidenceAxis.CHANGE_CONFIG),
         _axis_column(tick, EvidenceAxis.BUSINESS_IMPACT),
-        "INSUFFICIENT" if verdict is None else verdict.verdict_class.value,
+        tick.fusion.status.value if verdict is None else verdict.verdict_class.value,
         "—" if outcome is None or outcome.verdict is None else f"{outcome.verdict.confidence:.3f}",
         str(len(tick.outcomes)),
         "—" if outcome is None else (outcome.incident.origin_service or "—"),
@@ -367,6 +367,9 @@ def render_decision_report(
         "- Telemetry is **REAL**; the injected context/fault/attack stimuli are **SIMULATED**.",
         "- `CHG` is `—` on a capture: a capture records telemetry, not deploys, so the "
         "change axis reports insufficiency rather than a calm zero.",
+        "- A verdict column of `INSUFFICIENT` means evidence was measured and no signature "
+        "accounted for it; `NO_EVIDENCE` means nothing contributed at all. They are different "
+        "facts and lead to different decisions.",
         "",
     ]
     for replay in replays:

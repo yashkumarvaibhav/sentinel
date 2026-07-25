@@ -3,10 +3,11 @@
 Every judgement the decision plane makes on the captures below: the four independent axis scores, the fused verdict, the incidents the storm collapsed into, the named origin and the four deterministic verification checks. **No private label is read.** This is the evidence the Phase-4 a-priori numbers are frozen on, before any held-out seed is spent. It gates nothing on its own.
 
 - Runtime detector config fingerprint: `23d957af85fe1fa0cea7d8f4221c53ea571d1ffaa49a13de475de65f241d7030`.
-- Decision config fingerprint (agents-rules-incidents): `336c65626799-a0650bb4c3c7-82371c5b25c7`.
+- Decision config fingerprint (agents-rules-incidents): `768c3460dcb2-078392fb04bb-82371c5b25c7`.
 - Offsets are seconds from each capture's anchor; the replay is deterministic.
 - Telemetry is **REAL**; the injected context/fault/attack stimuli are **SIMULATED**.
 - `CHG` is `—` on a capture: a capture records telemetry, not deploys, so the change axis reports insufficiency rather than a calm zero.
+- A verdict column of `INSUFFICIENT` means evidence was measured and no signature accounted for it; `NO_EVIDENCE` means nothing contributed at all. They are different facts and lead to different decisions.
 
 ## phase1-quiet-101-golden-v1
 
@@ -26,7 +27,7 @@ Consecutive ticks whose judgement is identical are folded into one row, so every
 
 | t(s) | ticks | SEC | REL | CHG | BIZ | verdict | conf | incidents | origin | severity | state | verified |
 |---|---:|---:|---:|---:|---:|---|---:|---:|---|---|---|---|
-| 88..100 | 7 | 0.600 | 0.000 | — | 0.000 | ATTACK | 0.680 | 1 | frontend | LOW | OPEN | yes |
+| 88..100 | 7 | 0.450 | 0.000 | — | 0.000 | INSUFFICIENT | — | 1 | frontend | LOW | OPEN | yes |
 
 Final verification detail:
 
@@ -47,7 +48,7 @@ Consecutive ticks whose judgement is identical are folded into one row, so every
 | t(s) | ticks | SEC | REL | CHG | BIZ | verdict | conf | incidents | origin | severity | state | verified |
 |---|---:|---:|---:|---:|---:|---|---:|---:|---|---|---|---|
 | 104..110 | 4 | 0.000 | 0.978 | — | 0.000 | OPERATIONAL_FAULT | 0.647 | 1 | payment | LOW | OPEN | yes |
-| 144 | 1 | 0.000 | 0.000 | — | 0.000 | EXPECTED_EVENT | 0.700 | 1 | payment | LOW | MONITORING | yes |
+| 144 | 1 | 0.000 | 0.000 | — | 0.000 | NO_EVIDENCE | — | 1 | payment | LOW | MONITORING | yes |
 
 Final verification detail:
 
@@ -67,8 +68,8 @@ Consecutive ticks whose judgement is identical are folded into one row, so every
 
 | t(s) | ticks | SEC | REL | CHG | BIZ | verdict | conf | incidents | origin | severity | state | verified |
 |---|---:|---:|---:|---:|---:|---|---:|---:|---|---|---|---|
-| 148..298 | 76 | 0.600 | 0.000 | — | 0.000 | ATTACK | 0.680 | 1 | frontend | LOW | OPEN | yes |
-| 300..324 | 13 | 0.940 | 0.000 | — | 0.000 | ATTACK | 0.882 | 1 | frontend | LOW | OPEN | yes |
+| 148..298 | 76 | 0.450 | 0.000 | — | 0.000 | INSUFFICIENT | — | 1 | frontend | LOW | OPEN | yes |
+| 300..324 | 13 | 0.917 | 0.000 | — | 0.000 | ATTACK | 0.900 | 1 | frontend | LOW | OPEN | yes |
 | 330 | 1 | 0.850 | 0.000 | — | 0.000 | ATTACK | 0.755 | 1 | frontend | LOW | OPEN | yes |
 | 348..478 | 66 | 0.850 | 0.978 | — | 0.000 | COMBINATION | 0.849 | 1 | payment | LOW | OPEN | no |
 | 480..514 | 18 | 0.850 | 0.992 | — | 0.000 | COMBINATION | 0.953 | 1 | payment | LOW | OPEN | no |
@@ -79,7 +80,7 @@ Consecutive ticks whose judgement is identical are folded into one row, so every
 | 668..688 | 11 | 0.000 | 0.974 | — | 0.711 | OPERATIONAL_FAULT | 0.846 | 1 | payment | HIGH | OPEN | no |
 | 690..718 | 15 | 0.000 | 0.868 | — | 0.711 | OPERATIONAL_FAULT | 0.730 | 1 | payment | HIGH | OPEN | no |
 | 720..722 | 2 | 0.000 | 0.622 | — | 0.711 | OPERATIONAL_FAULT | 0.593 | 1 | payment | HIGH | OPEN | no |
-| 728 | 1 | 0.000 | 0.000 | — | 0.000 | EXPECTED_EVENT | 0.700 | 1 | payment | LOW | MONITORING | no |
+| 728 | 1 | 0.000 | 0.000 | — | 0.000 | NO_EVIDENCE | — | 1 | payment | LOW | MONITORING | no |
 | 904 | 1 | 0.000 | 0.380 | — | 0.431 | EXPECTED_EVENT | 0.586 | 1 | payment | MEDIUM | OPEN | no |
 | 906 | 1 | 0.000 | 0.385 | — | 0.436 | EXPECTED_EVENT | 0.585 | 1 | payment | MEDIUM | OPEN | no |
 | 908 | 1 | 0.000 | 0.390 | — | 0.442 | EXPECTED_EVENT | 0.583 | 1 | payment | MEDIUM | OPEN | no |
@@ -100,7 +101,7 @@ Consecutive ticks whose judgement is identical are folded into one row, so every
 | 938 | 1 | 0.000 | 0.465 | — | 0.527 | EXPECTED_EVENT | 0.560 | 1 | payment | HIGH | OPEN | no |
 | 940 | 1 | 0.000 | 0.470 | — | 0.533 | EXPECTED_EVENT | 0.559 | 1 | payment | HIGH | OPEN | no |
 | 942 | 1 | 0.000 | 0.475 | — | 0.538 | EXPECTED_EVENT | 0.557 | 1 | payment | HIGH | OPEN | no |
-| 946..1004 | 2 | 0.000 | 0.000 | — | 0.000 | EXPECTED_EVENT | 0.700 | 1 | payment | LOW | MONITORING | no |
+| 946..1004 | 2 | 0.000 | 0.000 | — | 0.000 | NO_EVIDENCE | — | 1 | payment | LOW | MONITORING | no |
 
 Final verification detail:
 

@@ -32,10 +32,16 @@ axes:
           - interarrival_cv
           - crowd_coherence
       # Unexplained residual is suspicious but not discriminating on its own -
-      # a mis-trusted event calendar produces it too. Weighted below the
-      # behavioral evidence that a real event cannot fake.
+      # a mis-trusted event calendar produces it too. The weight is therefore
+      # held BELOW this axis's 0.50 threshold on purpose: an event explains
+      # volume, not behavior, so residual volume alone must never be enough to
+      # call something hostile. Measured on the match_night development capture,
+      # the old 0.60 lit the axis from residual alone and diagnosed a legitimate
+      # event as ATTACK at 0.68 confidence. Combined with any behavioral
+      # deformation it still adds (0.45 with one deformed ratio gives 0.92), so
+      # this weakens nothing an attack actually produces.
       - kind: RESIDUAL_EXCEED
-        weight: 0.60
+        weight: 0.45
 
   # The shape a self-inflicted fault leaves behind. Deliberately blind to who is
   # calling: a fault stays visible during an attack, and an attack cannot
