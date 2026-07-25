@@ -89,6 +89,7 @@
             "temporal_causality": "PASSED",
             "trace_coverage": "PASSED"
           },
+          "class": null,
           "confidence": null,
           "confirmed": true,
           "decision": {
@@ -103,6 +104,7 @@
             "target_service": null
           },
           "episode_count": 1,
+          "fusion_status": "INSUFFICIENT",
           "kinds": [
             "RESIDUAL_EXCEED"
           ],
@@ -170,6 +172,7 @@
             "temporal_causality": "PASSED",
             "trace_coverage": "PASSED"
           },
+          "class": null,
           "confidence": null,
           "confirmed": true,
           "decision": {
@@ -184,6 +187,7 @@
             "target_service": null
           },
           "episode_count": 1,
+          "fusion_status": "INSUFFICIENT",
           "kinds": [
             "RESIDUAL_EXCEED"
           ],
@@ -251,6 +255,7 @@
             "temporal_causality": "PASSED",
             "trace_coverage": "PASSED"
           },
+          "class": null,
           "confidence": null,
           "confirmed": true,
           "decision": {
@@ -265,6 +270,7 @@
             "target_service": null
           },
           "episode_count": 1,
+          "fusion_status": "INSUFFICIENT",
           "kinds": [
             "RESIDUAL_EXCEED"
           ],
@@ -332,6 +338,7 @@
             "temporal_causality": "PASSED",
             "trace_coverage": "PASSED"
           },
+          "class": null,
           "confidence": null,
           "confirmed": true,
           "decision": {
@@ -346,6 +353,7 @@
             "target_service": null
           },
           "episode_count": 1,
+          "fusion_status": "INSUFFICIENT",
           "kinds": [
             "RESIDUAL_EXCEED"
           ],
@@ -413,6 +421,7 @@
             "temporal_causality": "PASSED",
             "trace_coverage": "PASSED"
           },
+          "class": null,
           "confidence": null,
           "confirmed": true,
           "decision": {
@@ -427,6 +436,7 @@
             "target_service": null
           },
           "episode_count": 1,
+          "fusion_status": "INSUFFICIENT",
           "kinds": [
             "RESIDUAL_EXCEED"
           ],
@@ -494,6 +504,7 @@
             "temporal_causality": "PASSED",
             "trace_coverage": "PASSED"
           },
+          "class": null,
           "confidence": null,
           "confirmed": true,
           "decision": {
@@ -508,6 +519,7 @@
             "target_service": null
           },
           "episode_count": 1,
+          "fusion_status": "INSUFFICIENT",
           "kinds": [
             "RESIDUAL_EXCEED"
           ],
@@ -575,6 +587,7 @@
             "temporal_causality": "PASSED",
             "trace_coverage": "PASSED"
           },
+          "class": null,
           "confidence": null,
           "confirmed": true,
           "decision": {
@@ -589,6 +602,7 @@
             "target_service": null
           },
           "episode_count": 1,
+          "fusion_status": "INSUFFICIENT",
           "kinds": [
             "RESIDUAL_EXCEED"
           ],

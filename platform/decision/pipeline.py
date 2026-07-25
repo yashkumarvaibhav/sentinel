@@ -24,11 +24,24 @@ was consulted is a fact about this loop. A caller that claimed
 ``DEPLOY_MARKER`` coverage while no feed was wired would be asserting evidence
 that does not exist, so that is rejected rather than believed.
 
-**A tick has one verdict and may have several incidents.** The agents measure
-the whole tick, so the diagnosis is tick-wide; the verification, the origin and
-(from the policy gate onward) the decision are per incident. A combination is
-therefore one COMBINATION verdict over two separately verified incidents, which
-is what an operator sees too.
+**A tick is measured twice, and the two passes answer different questions.**
+The first pass measures the whole tick: that is what the incident tracker needs
+(an incident's impact is a projection of the business agent's own evidence onto
+its episodes, so the assessment has to exist before the incident does) and it
+is an honest view in its own right - what was going on in the mesh at this
+moment. The second pass runs the same four agents again over each incident's
+*own* episodes, and that is what the diagnosis, the memory signature and the
+decision are computed from.
+
+The second pass exists because the first one is not a safe basis for action. A
+single tick-wide verdict is attached to every incident in the tick, so one
+incident's evidence can authorise an action against another: measured on
+``combo_night``, ``email``'s memory saturation lit RELIABILITY to 0.974 and the
+resulting OPERATIONAL_FAULT was inherited by a ``frontend`` incident that was
+merely carrying a deliberate traffic drop - 28 autonomous actions against a
+service that was working perfectly. Each incident therefore keeps **its own
+agent instances**, because agents carry trend state and "SECURITY is rising"
+has to mean this problem rather than the mesh.
 
 Nothing here proposes anything, nothing calls a model, and nothing reads a
 clock: the same episode stream always produces the same judgements.
@@ -96,10 +109,15 @@ class EpisodeSnapshot:
 class IncidentOutcome:
     """Everything the decision plane concluded about one incident at one tick.
 
-    ``verdict`` is the tick's diagnosis after this incident's own memory
-    recognition has been folded in, so two incidents in the same tick can carry
-    the same class with different confidence. It is ``None`` exactly when
-    fusion refused to name a class at all.
+    ``verdict`` is **this incident's own** diagnosis, fused from agents that saw
+    only this incident's episodes and then nudged by its own memory
+    recognition. Two incidents in the same tick can therefore carry different
+    classes entirely. It is ``None`` exactly when fusion refused to name a class
+    for this incident.
+
+    ``assessments`` and ``fusion`` are that per-incident measurement, kept
+    alongside the verdict so the reasoning behind an incident can be read back
+    without re-deriving it.
 
     ``decision`` always exists: a gate that declined to answer would leave an
     incident with no stated handling, so even "nothing is happening" is a
@@ -112,6 +130,8 @@ class IncidentOutcome:
     decision: Decision
     matches: tuple[SimilarIncident, ...]
     signature: IncidentSignature | None
+    assessments: tuple[AgentAssessment, ...] = ()
+    fusion: FusionResult | None = None
 
     @property
     def confirmed(self) -> bool:
@@ -121,7 +141,12 @@ class IncidentOutcome:
 
 @dataclass(frozen=True, slots=True)
 class DecisionTick:
-    """One pass of the loop: what was measured, what it means, what was checked."""
+    """One pass of the loop: what was measured, what it means, what was checked.
+
+    ``assessments`` and ``fusion`` are the tick-wide measurement - the state of
+    the mesh at this moment. They are deliberately NOT what any incident is
+    judged on; each outcome carries its own.
+    """
 
     ts: datetime
     assessments: tuple[AgentAssessment, ...]
@@ -184,6 +209,9 @@ class DecisionPipeline:
         self._incidents = incidents
         self._topology = topology
         self._changes = changes
+        self._agents_config = agents
+        self._criticality = criticality
+        self._incident_agents: dict[str, tuple[EvidenceAgent, ...]] = {}
         self._memory: list[IncidentSignature] = list(memory)
         self._peaks: dict[str, tuple[float, IncidentSignature]] = {}
         self._remembered: set[str] = set()
@@ -201,8 +229,26 @@ class DecisionPipeline:
 
     @property
     def agents(self) -> tuple[EvidenceAgent, ...]:
-        """The four independent agents, in axis order."""
+        """The four independent agents measuring the whole tick, in axis order."""
         return (self._business, self._change, self._reliability, self._security)
+
+    def _agents_for(self, incident_id: str) -> tuple[EvidenceAgent, ...]:
+        """This incident's own agents, built once and kept for their trend state."""
+        held = self._incident_agents.get(incident_id)
+        if held is not None:
+            return held
+        configuration = self._agents_config
+        built: tuple[EvidenceAgent, ...] = (
+            BusinessImpactEvidenceAgent(
+                configuration=configuration.axis(EvidenceAxis.BUSINESS_IMPACT),
+                criticality=self._criticality,
+            ),
+            ChangeConfigEvidenceAgent(configuration=configuration.axis(EvidenceAxis.CHANGE_CONFIG)),
+            ReliabilityEvidenceAgent(configuration=configuration.axis(EvidenceAxis.RELIABILITY)),
+            SecurityEvidenceAgent(configuration=configuration.axis(EvidenceAxis.SECURITY)),
+        )
+        self._incident_agents[incident_id] = built
+        return built
 
     def observe(
         self,
@@ -234,9 +280,8 @@ class DecisionPipeline:
             self._judge(
                 incident,
                 ts=moment,
+                window=window,
                 episodes=window.episodes,
-                assessments=assessments,
-                fusion=fusion,
                 covered_services=covered_services,
             )
             for incident in incidents
@@ -283,12 +328,25 @@ class DecisionPipeline:
         incident: Incident,
         *,
         ts: datetime,
+        window: AgentEvidenceWindow,
         episodes: Sequence[SymptomEpisode],
-        assessments: Sequence[AgentAssessment],
-        fusion: FusionResult,
         covered_services: frozenset[str],
     ) -> IncidentOutcome:
-        """Check one incident, let memory nudge it, and decide what happens about it."""
+        """Diagnose ONE incident from its own evidence, check it, and decide.
+
+        The agents here see this incident's episodes and nothing else, so a
+        problem elsewhere in the mesh cannot lend it a diagnosis - which is the
+        whole reason this pass exists.
+        """
+        members = set(incident.episode_ids)
+        own = AgentEvidenceWindow(
+            ts=window.ts,
+            episodes=tuple(item for item in window.episodes if item.episode_id in members),
+            covered_kinds=window.covered_kinds,
+            changes=window.changes,
+        )
+        assessments = tuple(agent.assess(own) for agent in self._agents_for(incident.incident_id))
+        fusion = self._fusion.fuse(assessments)
         verdict = fusion.verdict if fusion.status is FusionStatus.DECIDED else None
         signature = build_signature(incident, assessments=assessments, verdict=verdict)
         matches = (
@@ -326,6 +384,8 @@ class DecisionPipeline:
             decision=decision,
             matches=matches,
             signature=signature,
+            assessments=assessments,
+            fusion=fusion,
         )
 
     def _remember(self, outcomes: Sequence[IncidentOutcome]) -> None:
@@ -348,6 +408,9 @@ class DecisionPipeline:
                     self._peaks[incident_id] = (strength, signature)
             if outcome.incident.state is not IncidentState.RESOLVED:
                 continue
+            # The incident is over: its agents can go with it, so a long run
+            # cannot accumulate trend state for problems that ended hours ago.
+            self._incident_agents.pop(incident_id, None)
             peak = self._peaks.pop(incident_id, None)
             self._remembered.add(incident_id)
             if peak is not None:

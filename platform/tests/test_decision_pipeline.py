@@ -193,6 +193,61 @@ def test_the_storm_is_judged_as_one_incident_with_a_verdict_and_a_verification()
     assert outcome.verification.confirmed is True
 
 
+def test_one_incidents_evidence_cannot_diagnose_another() -> None:
+    """The defect the decision score found: a tick-wide verdict lends itself around.
+
+    A behavioural deformation on the frontend and a saturating container on
+    email are two unrelated problems. Measured tick-wide, both axes are lit and
+    every incident in the tick reads COMBINATION - which is how `email`'s
+    saturation came to authorise 28 autonomous actions against a healthy
+    frontend. Diagnosed per incident, each says only what its own evidence
+    supports.
+    """
+    hostile = symptom_episode(
+        kind=SymptomKind.RATIO_DEFORM,
+        service="frontend",
+        signal="path_entropy",
+        opened_offset_seconds=0.0,
+    )
+    saturating = symptom_episode(
+        kind=SymptomKind.SATURATION,
+        service="email",
+        signal="container_memory",
+        # Far outside the anchor join window, so these stay separate incidents.
+        opened_offset_seconds=600.0,
+    )
+    ticks = _run(_pipeline(), episode_timeline((hostile, saturating)))
+
+    final = ticks[-1]
+    assert len(final.outcomes) == 2
+    by_service = {outcome.incident.services[0]: outcome for outcome in final.outcomes}
+    frontend = by_service["frontend"]
+    email = by_service["email"]
+    assert frontend.verdict is not None
+    assert email.verdict is not None
+    assert frontend.verdict.verdict_class is VerdictClass.ATTACK
+    assert email.verdict.verdict_class is VerdictClass.OPERATIONAL_FAULT
+    # The tick-wide view still honestly reports that both axes are lit; it is
+    # simply not what either incident is judged on.
+    assert final.fusion.verdict is not None
+    assert final.fusion.verdict.verdict_class is VerdictClass.COMBINATION
+
+
+def test_an_incident_is_diagnosed_from_its_own_episodes_only() -> None:
+    ticks = _run(_pipeline(), episode_timeline(_cascade()))
+
+    for tick in ticks:
+        for outcome in tick.outcomes:
+            assert outcome.fusion is not None
+            members = set(outcome.incident.episode_ids)
+            for assessment in outcome.assessments:
+                # Every service an axis scored must belong to this incident.
+                assert set(assessment.services) <= set(outcome.incident.services)
+            assert members <= {
+                episode.episode_id for episode in _cascade() if episode.episode_id in members
+            }
+
+
 def test_every_incident_leaves_the_loop_with_a_stated_decision() -> None:
     ticks = _run(_pipeline(), episode_timeline(_cascade()))
 

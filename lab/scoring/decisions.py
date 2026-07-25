@@ -257,6 +257,12 @@ def semantic_transcript(replay: DecisionReplay) -> bytes:
                         "confidence": (
                             None if outcome.verdict is None else _round(outcome.verdict.confidence)
                         ),
+                        "class": (
+                            None if outcome.verdict is None else outcome.verdict.verdict_class.value
+                        ),
+                        "fusion_status": (
+                            None if outcome.fusion is None else outcome.fusion.status.value
+                        ),
                         "confirmed": outcome.verification.confirmed,
                         "decision": {
                             "action": outcome.decision.action.value,
@@ -347,6 +353,14 @@ def _tick_row(tick: DecisionTick) -> tuple[str, ...]:
         key=str,
     )
     severities = [outcome.incident.severity.value for outcome in outcomes]
+    diagnoses = sorted(
+        {
+            outcome.verdict.verdict_class.value
+            if outcome.verdict is not None
+            else (outcome.fusion.status.value if outcome.fusion is not None else "—")
+            for outcome in outcomes
+        }
+    )
     states = sorted({outcome.incident.state.value for outcome in outcomes})
     confirmed = sum(1 for outcome in outcomes if outcome.confirmed)
     actions = sorted(
@@ -360,6 +374,7 @@ def _tick_row(tick: DecisionTick) -> tuple[str, ...]:
         _axis_column(tick, EvidenceAxis.CHANGE_CONFIG),
         _axis_column(tick, EvidenceAxis.BUSINESS_IMPACT),
         tick.fusion.status.value if verdict is None else verdict.verdict_class.value,
+        "+".join(diagnoses) or "—",
         f"{max(confidences):.3f}" if confidences else "—",
         str(len(outcomes)),
         "+".join(str(origin) for origin in origins) or "—",
@@ -389,9 +404,9 @@ def _render_replay(replay: DecisionReplay) -> list[str]:
             "Consecutive ticks whose judgement is identical are folded into one row, so every "
             "row below is a change in what the plane concluded.",
             "",
-            "| t(s) | ticks | SEC | REL | CHG | BIZ | verdict | conf | incidents | origin "
-            "| severity | state | verified | decision | approval |",
-            "|---|---:|---:|---:|---:|---:|---|---:|---:|---|---|---|---|---|---:|",
+            "| t(s) | ticks | SEC | REL | CHG | BIZ | tick-wide | per-incident | conf "
+            "| incidents | origin | severity | state | verified | decision | approval |",
+            "|---|---:|---:|---:|---:|---:|---|---|---:|---:|---|---|---|---|---|---:|",
         ]
     )
     for row, group in groupby(replay.ticks, key=_tick_row):
@@ -458,6 +473,10 @@ def render_decision_report(
         "- A verdict column of `INSUFFICIENT` means evidence was measured and no signature "
         "accounted for it; `NO_EVIDENCE` means nothing contributed at all. They are different "
         "facts and lead to different decisions.",
+        "- `tick-wide` is what the whole mesh measured at that moment; `per-incident` is what "
+        "each incident's **own** episodes support, and it is what the verdict, the memory "
+        "signature and the decision are computed from. One incident's evidence can no longer "
+        "lend a diagnosis to another.",
         "- `decision` is the policy gate's answer per incident, and `approval` counts the "
         "incidents whose decision requires a person to sign off. A decision is taken on the "
         "incident's **peak** evidence with its **current** verification, so a storm that has "
