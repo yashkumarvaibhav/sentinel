@@ -17,7 +17,9 @@ export type SentinelContract =
   | Verdict
   | Incident
   | Verification
-  | Decision;
+  | Decision
+  | ActionPlan
+  | ActionOutcome;
 export type TelemetryScalar = string | boolean | number;
 export type Identifier = string;
 export type FlowRefs = Identifier[];
@@ -155,6 +157,44 @@ export type RequiresHumanApproval = boolean;
  * named services is not worth reporting.
  */
 export type SuppressionKind = "CHANGE_FREEZE" | "MAINTENANCE";
+/**
+ * The rungs of the remediation ladder, cheapest and safest first.
+ *
+ * The ordering of the rungs into ladders, and which rung a given diagnosis
+ * earns, is operator-owned configuration - this enum is only the vocabulary
+ * those ladders are written in.
+ */
+export type ActionKind =
+  "OBSERVE" | "RATE_LIMIT" | "THROTTLE" | "SCALE" | "FLAG_FLIP" | "RESTART" | "ISOLATE" | "ROLLBACK";
+/**
+ * Which system an action is carried out against.
+ *
+ * ``SIMULATED`` is a first-class member rather than a test fixture: the
+ * platform must be demonstrable end to end with no cluster attached, and an
+ * adapter that touches nothing has to say so in the audit trail like any
+ * other.
+ */
+export type ActuatorKind = "KUBERNETES" | "MESH" | "FEATURE_FLAG" | "SIMULATED";
+export type Honesty2 = "REAL" | "SIMULATED";
+export type ActionParameterValue = string | boolean | number;
+export type RequiresHumanApproval1 = boolean;
+export type Reversible = boolean;
+export type Approvals = Identifier[];
+export type Deduplicated = boolean;
+export type DryRun = boolean;
+export type Honesty3 = "REAL" | "SIMULATED";
+export type Observed = HumanText[];
+/**
+ * How far one action got, and whether the world was touched.
+ *
+ * ``SIMULATED`` means nothing was touched - either the caller asked for a
+ * simulation or the executor is in dry-run mode. ``APPLIED`` means the effect
+ * was put in place; ``VERIFIED`` means it was afterwards observed to actually
+ * be in place, which is a different and stronger claim. ``FAILED`` is the
+ * honest answer when an actuator could not finish, and it deliberately does
+ * not assert whether the world changed - only a ``verify`` can settle that.
+ */
+export type ActionStatus = "SIMULATED" | "APPLIED" | "VERIFIED" | "REVERTED" | "FAILED";
 
 /**
  * One event-time telemetry value, containing evidence but never answer-key data.
@@ -453,4 +493,62 @@ export interface AppliedSuppression {
   owner: Identifier;
   reason: HumanText;
   window_id: Identifier;
+}
+/**
+ * One concrete, reversible effect an actuator proposes to put in place.
+ *
+ * A plan is built from a decision that already decided to act, and it carries
+ * the safety-critical facts forward unchanged: the target service is the
+ * origin the causal collapse computed from evidence, and the approval
+ * requirement is the policy gate's, never the adapter's opinion.
+ *
+ * ``expected_effect`` is required because an action nobody can check is not
+ * something this platform takes: it states, in advance, what ``verify`` should
+ * find once the effect is in place.
+ */
+export interface ActionPlan {
+  action_kind: ActionKind;
+  actuator: ActuatorKind;
+  decision_id: Identifier;
+  estimated_blast_fraction: Probability;
+  expected_effect: HumanText;
+  honesty: Honesty2;
+  idempotency_key: Identifier;
+  incident_id: Identifier;
+  parameters?: Parameters;
+  plan_id: Identifier;
+  reason: HumanText;
+  requires_human_approval: RequiresHumanApproval1;
+  reversible: Reversible;
+  target_ref: Identifier;
+  target_service: Identifier;
+  ts: UtcDatetime;
+}
+export interface Parameters {
+  [k: string]: ActionParameterValue;
+}
+/**
+ * What one actuator call actually did, recorded whether it worked or not.
+ *
+ * ``dry_run`` and ``SIMULATED`` are the same fact stated twice, and the
+ * contract keeps them in agreement: this is the single place that makes "we
+ * were only pretending" impossible to confuse with "we changed production".
+ *
+ * ``deduplicated`` marks an outcome that was returned *without* calling the
+ * actuator, because the effect this key names was already in place. It is not
+ * a failure and not a no-op error - it is the idempotency key doing its job.
+ */
+export interface ActionOutcome {
+  approvals?: Approvals;
+  deduplicated?: Deduplicated;
+  detail: HumanText;
+  dry_run: DryRun;
+  honesty: Honesty3;
+  idempotency_key: Identifier;
+  observed?: Observed;
+  outcome_id: Identifier;
+  plan_id: Identifier;
+  revert_token?: Identifier | null;
+  status: ActionStatus;
+  ts: UtcDatetime;
 }

@@ -1,0 +1,46 @@
+# The action plane: how the platform is allowed to carry out what it decided.
+#
+# The policy gate (config/policies/action-policy.yml) says WHAT should happen to
+# an incident. This file says how the machinery that carries it out behaves -
+# whether it touches anything at all, how long one actor may hold a target, and
+# which adapters are permitted to run.
+#
+# Everything here fails closed. An actuator that is not listed is disabled; a
+# lease that cannot be taken stops the action rather than queuing it; and
+# `dry_run` may be forced ON by the environment but can never be forced OFF.
+version: 1
+
+execution:
+  # Ship safe. Nothing this platform decides touches a real cluster until an
+  # operator deliberately sets this to false for a deployment that wants live
+  # remediation. In dry-run every apply and revert is routed to the actuator's
+  # own simulation and recorded as SIMULATED, so a dry-run run produces a full,
+  # honest audit trail of what WOULD have happened.
+  #
+  # SENTINEL_ACTION_FORCE_DRY_RUN=1 in the environment overrides this to true.
+  # The override is deliberately one-way: an env var that could switch a system
+  # from pretending to acting is a footgun, and the file is the reviewed
+  # artifact.
+  dry_run: true
+
+  # How long one actor may hold a target before the lease is considered stale
+  # and reclaimable. This exists so a crashed executor cannot block remediation
+  # of a service forever - and it must comfortably exceed the slowest actuator
+  # call, because two actors overlapping on one target is exactly what the lease
+  # prevents. 120s covers a Kubernetes rollout undo with room to spare.
+  lease_ttl_seconds: 120.0
+
+  # How many distinct effects the in-process journal remembers. The journal is
+  # what makes an apply idempotent, so an effect that is still IN FORCE is never
+  # evicted, whatever the capacity says; only released keys (reverted or failed)
+  # are dropped, oldest first. Filling this with in-force effects means thousands
+  # of un-reverted actions are outstanding, which is a runaway rather than a
+  # capacity problem, so it stops instead of forgetting.
+  journal_capacity: 4096
+
+# Which adapters may run. An actuator missing from this list is refused, so
+# landing an adapter and enabling it are two separate, reviewable steps.
+# Kubernetes, mesh and feature-flag adapters are enabled as they land.
+actuators:
+  - actuator: SIMULATED
+    enabled: true

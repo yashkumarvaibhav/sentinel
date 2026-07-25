@@ -1,5 +1,226 @@
 {
   "$defs": {
+    "ActionKind": {
+      "description": "The rungs of the remediation ladder, cheapest and safest first.\n\nThe ordering of the rungs into ladders, and which rung a given diagnosis\nearns, is operator-owned configuration - this enum is only the vocabulary\nthose ladders are written in.",
+      "enum": [
+        "OBSERVE",
+        "RATE_LIMIT",
+        "THROTTLE",
+        "SCALE",
+        "FLAG_FLIP",
+        "RESTART",
+        "ISOLATE",
+        "ROLLBACK"
+      ],
+      "title": "ActionKind",
+      "type": "string"
+    },
+    "ActionOutcome": {
+      "additionalProperties": false,
+      "description": "What one actuator call actually did, recorded whether it worked or not.\n\n``dry_run`` and ``SIMULATED`` are the same fact stated twice, and the\ncontract keeps them in agreement: this is the single place that makes \"we\nwere only pretending\" impossible to confuse with \"we changed production\".\n\n``deduplicated`` marks an outcome that was returned *without* calling the\nactuator, because the effect this key names was already in place. It is not\na failure and not a no-op error - it is the idempotency key doing its job.",
+      "properties": {
+        "approvals": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "title": "Approvals",
+          "type": "array"
+        },
+        "deduplicated": {
+          "default": false,
+          "title": "Deduplicated",
+          "type": "boolean"
+        },
+        "detail": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "dry_run": {
+          "title": "Dry Run",
+          "type": "boolean"
+        },
+        "honesty": {
+          "enum": [
+            "REAL",
+            "SIMULATED"
+          ],
+          "title": "Honesty",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "observed": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/HumanText"
+          },
+          "title": "Observed",
+          "type": "array"
+        },
+        "outcome_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "revert_token": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "$ref": "#/$defs/ActionStatus"
+        },
+        "ts": {
+          "$ref": "#/$defs/UtcDatetime"
+        }
+      },
+      "required": [
+        "outcome_id",
+        "ts",
+        "plan_id",
+        "idempotency_key",
+        "status",
+        "dry_run",
+        "detail",
+        "honesty"
+      ],
+      "title": "ActionOutcome",
+      "type": "object"
+    },
+    "ActionParameterValue": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "ActionPlan": {
+      "additionalProperties": false,
+      "description": "One concrete, reversible effect an actuator proposes to put in place.\n\nA plan is built from a decision that already decided to act, and it carries\nthe safety-critical facts forward unchanged: the target service is the\norigin the causal collapse computed from evidence, and the approval\nrequirement is the policy gate's, never the adapter's opinion.\n\n``expected_effect`` is required because an action nobody can check is not\nsomething this platform takes: it states, in advance, what ``verify`` should\nfind once the effect is in place.",
+      "properties": {
+        "action_kind": {
+          "$ref": "#/$defs/ActionKind"
+        },
+        "actuator": {
+          "$ref": "#/$defs/ActuatorKind"
+        },
+        "decision_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "estimated_blast_fraction": {
+          "$ref": "#/$defs/Probability"
+        },
+        "expected_effect": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "honesty": {
+          "enum": [
+            "REAL",
+            "SIMULATED"
+          ],
+          "title": "Honesty",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "incident_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "parameters": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ActionParameterValue"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "title": "Parameters",
+          "type": "object"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "reason": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "requires_human_approval": {
+          "title": "Requires Human Approval",
+          "type": "boolean"
+        },
+        "reversible": {
+          "title": "Reversible",
+          "type": "boolean"
+        },
+        "target_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "target_service": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "ts": {
+          "$ref": "#/$defs/UtcDatetime"
+        }
+      },
+      "required": [
+        "plan_id",
+        "ts",
+        "decision_id",
+        "incident_id",
+        "actuator",
+        "action_kind",
+        "target_service",
+        "target_ref",
+        "reason",
+        "expected_effect",
+        "reversible",
+        "requires_human_approval",
+        "estimated_blast_fraction",
+        "idempotency_key",
+        "honesty"
+      ],
+      "title": "ActionPlan",
+      "type": "object"
+    },
+    "ActionStatus": {
+      "description": "How far one action got, and whether the world was touched.\n\n``SIMULATED`` means nothing was touched - either the caller asked for a\nsimulation or the executor is in dry-run mode. ``APPLIED`` means the effect\nwas put in place; ``VERIFIED`` means it was afterwards observed to actually\nbe in place, which is a different and stronger claim. ``FAILED`` is the\nhonest answer when an actuator could not finish, and it deliberately does\nnot assert whether the world changed - only a ``verify`` can settle that.",
+      "enum": [
+        "SIMULATED",
+        "APPLIED",
+        "VERIFIED",
+        "REVERTED",
+        "FAILED"
+      ],
+      "title": "ActionStatus",
+      "type": "string"
+    },
+    "ActuatorKind": {
+      "description": "Which system an action is carried out against.\n\n``SIMULATED`` is a first-class member rather than a test fixture: the\nplatform must be demonstrable end to end with no cluster attached, and an\nadapter that touches nothing has to say so in the audit trail like any\nother.",
+      "enum": [
+        "KUBERNETES",
+        "MESH",
+        "FEATURE_FLAG",
+        "SIMULATED"
+      ],
+      "title": "ActuatorKind",
+      "type": "string"
+    },
     "AgentAssessment": {
       "additionalProperties": false,
       "description": "One agent's evidence-backed verdict about one axis at one event time.\n\nA calm axis (``SCORED`` at ``0.0`` with no evidence) is a genuine finding:\nthe claimed detectors ran and saw nothing. An axis whose detectors produced\nno coverage is ``INSUFFICIENT`` instead, so absence of evidence is never\nsilently reported as evidence of absence.",
@@ -1191,6 +1412,12 @@
     },
     {
       "$ref": "#/$defs/Decision"
+    },
+    {
+      "$ref": "#/$defs/ActionPlan"
+    },
+    {
+      "$ref": "#/$defs/ActionOutcome"
     }
   ],
   "title": "SentinelContract"

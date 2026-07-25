@@ -1,5 +1,17 @@
 """Typed contracts between planes: Pydantic models, exported to JSON Schema."""
 
+from contracts.action import (
+    DEDUPLICABLE_STATUSES,
+    DESTRUCTIVE_ACTIONS,
+    EFFECTIVE_STATUSES,
+    ActionKind,
+    ActionOutcome,
+    ActionParameterValue,
+    ActionPlan,
+    ActionStatus,
+    ActuatorKind,
+    action_idempotency_key,
+)
 from contracts.context import ContextWindow
 from contracts.decision import (
     ACTING_ACTIONS,
@@ -40,8 +52,17 @@ from contracts.telemetry import Observation
 
 __all__ = [
     "ACTING_ACTIONS",
+    "DEDUPLICABLE_STATUSES",
+    "DESTRUCTIVE_ACTIONS",
+    "EFFECTIVE_STATUSES",
     "ESCALATING_ACTIONS",
     "REQUIRED_CHECKS",
+    "ActionKind",
+    "ActionOutcome",
+    "ActionParameterValue",
+    "ActionPlan",
+    "ActionStatus",
+    "ActuatorKind",
     "AgentAssessment",
     "AgentStatus",
     "AgentTrend",
@@ -72,4 +93,5 @@ __all__ = [
     "VerdictClass",
     "Verification",
     "VerificationCheck",
+    "action_idempotency_key",
 ]
