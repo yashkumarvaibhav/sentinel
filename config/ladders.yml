@@ -58,11 +58,17 @@ ladders:
         actuator: MESH
         minimum_confidence: 0.70
         autonomous: true
-        maximum_blast_fraction: 0.35
+        # 20, not more: `general-traffic` is capped at 20% in cohorts.yml, and
+        # the blast guard holds this rung to the operator's own statement about
+        # the cohort rather than to the ladder's ambition. Raising it is an edit
+        # to cohorts.yml by whoever owns that cohort, not to this file.
+        maximum_blast_fraction: 0.20
         ttl_seconds: 600
+        canary_parameter: delayed_percent
+        canary_shares: [5, 20]
         parameters:
           cohort: general-traffic
-          delayed_percent: 25
+          delayed_percent: 20
 
       # Hold the cohort to its committed ceiling, and add capacity at the same
       # time so the legitimate share of the surge keeps its headroom.
@@ -71,12 +77,18 @@ ladders:
         actuator: MESH
         minimum_confidence: 0.85
         autonomous: true
-        maximum_blast_fraction: 1.0
+        maximum_blast_fraction: 0.20
         ttl_seconds: 900
         paired_with: add-headroom-for-the-surge
+        # Widen rather than fire: apply the limit to a tenth of the excess, look
+        # at the protected signals, and only then reach for all of it. The last
+        # share must equal the rung's own `enforced_percent`, so a completed
+        # canary never stops short of what the operator asked for.
+        canary_parameter: enforced_percent
+        canary_shares: [5, 10, 20]
         parameters:
           cohort: general-traffic
-          enforced_percent: 100
+          enforced_percent: 20
 
       # Cordoning is destructive and expensive to undo, so it is never autonomous
       # however certain the evidence looks.

@@ -395,7 +395,7 @@ def test_a_resolved_rung_may_not_also_carry_literal_parameters() -> None:
 def test_a_rung_states_a_ceiling_the_adapter_is_measured_against() -> None:
     """The ladder owns the number; the 5.6 guard will own what to do about it."""
     choice = _committed().select(_decision(confidence=0.72)).primary
-    assert choice.maximum_blast_fraction == 0.35
+    assert choice.maximum_blast_fraction == 0.20
     assert choice.permits(_plan(0.2))
     assert not choice.permits(_plan(0.8))
 

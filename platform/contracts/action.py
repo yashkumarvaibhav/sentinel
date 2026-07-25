@@ -246,6 +246,11 @@ class ActionOutcome(ContractModel):
     deduplicated: bool = False
     observed: tuple[HumanText, ...] = ()
     approvals: tuple[Identifier, ...] = ()
+    # Which safety gates this action was actually held to. Recorded rather than
+    # assumed, because "the guard would have caught it" is not a claim anybody
+    # can check after the fact - an outcome that passed no gate should be
+    # visibly distinguishable from one that passed all of them.
+    gates_passed: tuple[Identifier, ...] = ()
     revert_token: Identifier | None = None
     honesty: Literal["REAL", "SIMULATED"]
 
@@ -253,6 +258,7 @@ class ActionOutcome(ContractModel):
     def validate_outcome(self) -> Self:
         """Keep an untouched world and a changed one impossible to confuse."""
         ensure_unique(self.approvals, field_name="approvals")
+        ensure_unique(self.gates_passed, field_name="gates_passed")
         simulated = self.status is ActionStatus.SIMULATED
         if simulated != self.dry_run:
             raise ValueError(

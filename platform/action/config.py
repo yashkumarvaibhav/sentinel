@@ -257,6 +257,11 @@ class LadderRung(ActionConfigModel):
     parameters: dict[Identifier, ActionParameterValue] = Field(default_factory=dict)
     parameters_from: Literal["committed_flag"] | None = None
     paired_with: Identifier | None = None
+    # The parameter a canary widens, and the shares it walks. Only a rung whose
+    # effect HAS a share can be canaried - scaling to two replicas is not
+    # something you do a tenth of - so both are optional and validated together.
+    canary_parameter: Identifier | None = None
+    canary_shares: tuple[Annotated[int, Field(ge=1, le=100)], ...] = ()
 
     @model_validator(mode="after")
     def validate_rung(self) -> Self:

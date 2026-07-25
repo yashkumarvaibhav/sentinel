@@ -69,6 +69,8 @@ class RungChoice:
     requires_human_approval: bool
     maximum_blast_fraction: float
     reason: str
+    canary_parameter: str | None = None
+    canary_shares: tuple[int, ...] = ()
 
     def expires_at(self, applied_at: datetime) -> datetime:
         """When the platform gives this effect back if nobody else does."""
@@ -200,6 +202,8 @@ class RemediationLadder:
             requires_human_approval=decision.requires_human_approval or not rung.autonomous,
             maximum_blast_fraction=rung.maximum_blast_fraction,
             reason=ladder.reason,
+            canary_parameter=rung.canary_parameter,
+            canary_shares=rung.canary_shares,
         )
 
     def _companion(self, rung: LadderRung, ladder: Ladder, decision: Decision) -> RungChoice | None:

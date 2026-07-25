@@ -34,6 +34,22 @@ from action.config import (
     resolve_dry_run,
 )
 from action.executor import TWO_KEY_APPROVERS, ActionExecutor
+from action.guards import (
+    BLAST_CAP_GATE,
+    CANARY_GATE,
+    PROTECTED_COHORT_GATE,
+    BlastRadiusExceededError,
+    BlastRadiusGuard,
+    CanaryResult,
+    CanaryRollout,
+    CanaryStep,
+    CollateralProbe,
+    CollateralReport,
+    GuardRefusedError,
+    ProtectedCohortError,
+    guarded_apply,
+    with_gates,
+)
 from action.journal import ActionJournal, ActionJournalFullError
 from action.ladder import (
     LadderError,
@@ -47,7 +63,10 @@ from action.ladder import (
 from action.leases import LeaseRegistry, TargetBusyError, TargetLease
 
 __all__ = [
+    "BLAST_CAP_GATE",
+    "CANARY_GATE",
     "FORCE_DRY_RUN_ENV",
+    "PROTECTED_COHORT_GATE",
     "TWO_KEY_APPROVERS",
     "ActionConfig",
     "ActionConfigLoadError",
@@ -59,12 +78,20 @@ __all__ = [
     "ActuatorConfig",
     "ActuatorContractError",
     "ActuatorError",
+    "BlastRadiusExceededError",
+    "BlastRadiusGuard",
+    "CanaryResult",
+    "CanaryRollout",
+    "CanaryStep",
     "ClusterCommand",
+    "CollateralProbe",
+    "CollateralReport",
     "EdgeUnreachableError",
     "ExecutionConfig",
     "FlagActuator",
     "FlagProviderError",
     "FlagsConfig",
+    "GuardRefusedError",
     "KubectlCommand",
     "KubectlUnavailableError",
     "KubernetesActuator",
@@ -78,6 +105,7 @@ __all__ = [
     "MeshActuator",
     "MeshConfig",
     "NoRungAvailableError",
+    "ProtectedCohortError",
     "RemediationLadder",
     "RestraintRegistry",
     "RungChoice",
@@ -87,7 +115,9 @@ __all__ = [
     "TargetBusyError",
     "TargetLease",
     "build_plan",
+    "guarded_apply",
     "load_action_config",
     "load_ladder_config",
     "resolve_dry_run",
+    "with_gates",
 ]

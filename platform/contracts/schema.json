@@ -39,6 +39,14 @@
           "title": "Dry Run",
           "type": "boolean"
         },
+        "gates_passed": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "title": "Gates Passed",
+          "type": "array"
+        },
         "honesty": {
           "enum": [
             "REAL",

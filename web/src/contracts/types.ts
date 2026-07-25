@@ -182,6 +182,7 @@ export type Reversible = boolean;
 export type Approvals = Identifier[];
 export type Deduplicated = boolean;
 export type DryRun = boolean;
+export type GatesPassed = Identifier[];
 export type Honesty3 = "REAL" | "SIMULATED";
 export type Observed = HumanText[];
 /**
@@ -543,6 +544,7 @@ export interface ActionOutcome {
   deduplicated?: Deduplicated;
   detail: HumanText;
   dry_run: DryRun;
+  gates_passed?: GatesPassed;
   honesty: Honesty3;
   idempotency_key: Identifier;
   observed?: Observed;
