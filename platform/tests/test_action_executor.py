@@ -229,7 +229,9 @@ class _LyingActuator(Actuator):
     def verify(self, plan: ActionPlan, *, ts: datetime) -> ActionOutcome:
         return self._claim(plan, ts, ActionStatus.VERIFIED)
 
-    def revert(self, plan: ActionPlan, *, ts: datetime) -> ActionOutcome:
+    def revert(
+        self, plan: ActionPlan, *, ts: datetime, revert_token: str | None = None
+    ) -> ActionOutcome:
         return self._claim(plan, ts, ActionStatus.REVERTED)
 
     def _claim(self, plan: ActionPlan, ts: datetime, status: ActionStatus) -> ActionOutcome:
@@ -327,6 +329,16 @@ def test_reverting_what_was_never_applied_is_refused() -> None:
     with pytest.raises(ActionRejectedError, match="no effect"):
         executor.revert(plan, ts=TICK, owner="executor-a")
     assert adapter.call_count("revert") == 0
+
+
+def test_the_adapter_gets_back_the_revert_token_it_minted() -> None:
+    """The state to undo to cannot live in the plan, so it travels with the outcome."""
+    executor, adapter = _executor()
+    plan = _plan(adapter)
+    applied = executor.apply(plan, ts=TICK, owner="executor-a")
+    assert applied.revert_token is not None
+    executor.revert(plan, ts=TICK + timedelta(seconds=5), owner="executor-a")
+    assert adapter.reverted_with == [applied.revert_token]
 
 
 def test_a_second_revert_is_deduplicated() -> None:

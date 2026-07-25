@@ -163,5 +163,25 @@ class Actuator(ABC):
         """Check the target itself for the effect the plan said to expect."""
 
     @abstractmethod
-    def revert(self, plan: ActionPlan, *, ts: datetime) -> ActionOutcome:
-        """Put the target back the way it was before this plan was applied."""
+    def revert(
+        self,
+        plan: ActionPlan,
+        *,
+        ts: datetime,
+        revert_token: str | None = None,
+    ) -> ActionOutcome:
+        """Put the target back the way it was before this plan was applied.
+
+        ``revert_token`` is whatever this adapter returned from its own ``apply``
+        and is **opaque to everything else** - the executor carries it from the
+        journal back to the adapter that minted it, and nothing in between
+        interprets it.
+
+        It exists because the state to undo *to* cannot live in the plan.
+        ``parameters`` is hashed into the idempotency key, so recording "was 3
+        replicas" there would give two plans that both scale to 6 different
+        keys depending on where they started - and "the same effect is one
+        effect" is the property the whole idempotency design rests on. The
+        starting state is a fact about one *application*, not about the effect,
+        so it travels with the outcome instead.
+        """

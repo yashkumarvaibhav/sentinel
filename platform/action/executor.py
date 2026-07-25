@@ -167,8 +167,15 @@ class ActionExecutor:
             )
         if already.status is ActionStatus.REVERTED:
             return self._deduplicated(plan, already, ts=ts, approvals=approvals)
+        # The token the adapter minted on its own apply, carried back to it
+        # untouched. Nothing between the two ends interprets it.
+        token = already.revert_token
         with self._leases.hold(plan.target_ref, owner=owner, now=ts):
-            outcome = self._checked(plan, actuator.revert(plan, ts=ts), expect_simulated=False)
+            outcome = self._checked(
+                plan,
+                actuator.revert(plan, ts=ts, revert_token=token),
+                expect_simulated=False,
+            )
         recorded = _with_approvals(outcome, approvals)
         self._journal.record(recorded)
         return recorded

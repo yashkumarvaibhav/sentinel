@@ -75,6 +75,9 @@ class SimulatedActuator(Actuator):
     # assuming it - which is the only version of it worth testing an executor
     # against.
     in_place: set[str] = field(default_factory=set)
+    # Every token this adapter was handed back on a revert, in order, so a test
+    # can assert the executor returned the one this adapter itself minted.
+    reverted_with: list[str | None] = field(default_factory=list)
 
     def plan(
         self,
@@ -155,9 +158,16 @@ class SimulatedActuator(Actuator):
             observed=(plan.expected_effect,),
         )
 
-    def revert(self, plan: ActionPlan, *, ts: datetime) -> ActionOutcome:
+    def revert(
+        self,
+        plan: ActionPlan,
+        *,
+        ts: datetime,
+        revert_token: str | None = None,
+    ) -> ActionOutcome:
         """Put the simulated target back the way it was."""
         self._record("revert", plan, ts)
+        self.reverted_with.append(revert_token)
         if not plan.reversible:
             raise ActionRejectedError(
                 f"{plan.action_kind.value} on {plan.target_ref} cannot be undone"
