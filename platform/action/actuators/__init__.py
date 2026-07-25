@@ -7,6 +7,7 @@ from action.actuators.base import (
     ActuatorError,
     build_plan,
 )
+from action.actuators.flags import FlagActuator, FlagProviderError
 from action.actuators.kubernetes import (
     SUPPORTED_RUNGS,
     ClusterCommand,
@@ -25,6 +26,8 @@ __all__ = [
     "ActuatorError",
     "ClusterCommand",
     "EdgeUnreachableError",
+    "FlagActuator",
+    "FlagProviderError",
     "KubectlCommand",
     "KubectlUnavailableError",
     "KubernetesActuator",

@@ -95,6 +95,11 @@ verify-mesh: ## Run the mesh actuator against a real Envoy (needs `make lab-edge
 	$(PY) env SENTINEL_ACTION_MESH_INTEGRATION=1 \
 		pytest tests/test_action_mesh.py -k "real_envoy or dry_run"
 
+.PHONY: verify-flags
+verify-flags: ## Run the flag actuator against a real flagd (needs `make lab-flags`)
+	$(PY) env SENTINEL_ACTION_FLAGS_INTEGRATION=1 \
+		pytest tests/test_action_flags.py -k "real_flagd or dry_run"
+
 .PHONY: verify-ingest
 verify-ingest: ## Run the real raw bus to normalized bus/ClickHouse round trip
 	$(COMPOSE) run --rm --build -e SENTINEL_LAB_INGEST_INTEGRATION=1 ingest \
@@ -152,6 +157,10 @@ lab-undeploy: ## Remove the instrumented mesh, keeping the cluster
 .PHONY: lab-edge
 lab-edge: ## Run the owned edge proxy alone, with no cluster (ACTION=up|down|url)
 	./lab/testbed/envoy-sandbox.sh $(or $(ACTION),up)
+
+.PHONY: lab-flags
+lab-flags: ## Run the testbed's flag provider alone, with no cluster (ACTION=up|down|url)
+	./lab/testbed/flagd-sandbox.sh $(or $(ACTION),up)
 
 .PHONY: lab-chaos
 lab-chaos: ## Run a chaos experiment (EXPERIMENT=name)

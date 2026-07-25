@@ -244,3 +244,32 @@ value that is not a valid percentage — writing `abc` stores `abc`, reports it
 verbatim in `/runtime`, and silently falls back to the filter's default of `0`.
 Anything driving this surface must validate before writing and read the key back
 afterwards.
+
+## The flag control surface
+
+Feature flags are how this testbed injects faults *and* how the platform undoes
+them, which is what makes a flag remediation provable rather than asserted: the
+same `paymentFailure` that breaks the cascade scenario is the one the action
+plane sets back to `off`.
+
+**How a flag actually changes.** flagd reads `demo.flagd.json` from an
+`emptyDir` that an `init-config` container copies the `flagd-config` ConfigMap
+into **at pod start**. Patching the ConfigMap therefore changes nothing until
+flagd is rolled — the mechanism the scenario runner already uses, and the reason
+`FLAG_FLIP` claims a blast fraction of 1.0: putting one service's flag back
+restarts the provider *every* service evaluates against.
+
+**How a flag is read back.** flagd serves OFREP on port **8016**:
+`POST /ofrep/v1/evaluate/flags/<key>` answers with the `variant` it is actually
+serving, and accepts an empty body — so it is reachable through the same
+API-server pod-proxy transport the mesh actuator uses, with nothing published and
+nothing required inside the flagd image. A ConfigMap that says `off` only proves
+a file was written; the provider's own answer is the claim worth making.
+
+**Measured against a real flagd** (`make lab-flags` runs the pinned chart's own
+flag document under the same image, with no cluster attached): `paymentFailure`
+served `off`; setting the document to `100%` and waiting had it serve `100%`;
+applying the remediation and waiting had it serve `off` again, with
+`cartFailure` and `kafkaQueueProblems` unchanged throughout. An unknown flag
+answers **404** with `FLAG_NOT_FOUND`, and `GET` on the evaluate path answers
+**405** — the read must be a POST.

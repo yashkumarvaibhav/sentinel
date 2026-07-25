@@ -178,6 +178,56 @@ class MeshConfig(ActionConfigModel):
         return self
 
 
+class FlagRemediation(ActionConfigModel):
+    """One flag the platform may set, and the single variant it may set it to.
+
+    The variant is committed rather than passed in, and that is the whole safety
+    design of this adapter. The testbed's flags are *fault injectors*:
+    ``paymentFailure: on`` is a weapon and ``paymentFailure: off`` is a remedy.
+    An actuator that could write any variant could cause the incident it was
+    dispatched to fix, so the set of (flag, variant) pairs it may ever write is
+    exactly this table.
+    """
+
+    service: Identifier
+    variant: Identifier
+
+
+class FlagsConfig(ActionConfigModel):
+    """Where the flag document lives, and which flags may be put back to safe."""
+
+    context: Identifier
+    namespace: Identifier
+    config_map: Identifier
+    document_key: Identifier
+    workload: Identifier
+    component_label: Identifier = "app.kubernetes.io/component"
+    ofrep_port: Annotated[int, Field(ge=1, le=65_535)] = 8_016
+    rollout_timeout_seconds: Annotated[int, Field(ge=1, le=900)] = 120
+    remediations: dict[Identifier, FlagRemediation] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_flags(self) -> Self:
+        if not self.remediations:
+            raise ValueError(
+                "a flag actuator with no remediation may set nothing; list at least one flag"
+            )
+        unsafe = sorted(
+            name
+            for name in (self.namespace, self.workload, self.config_map)
+            if _KUBERNETES_NAME.fullmatch(name) is None
+        )
+        if unsafe:
+            raise ValueError(f"not valid Kubernetes object names: {', '.join(unsafe)}")
+        return self
+
+    def flags_for(self, service: str) -> tuple[str, ...]:
+        """Every flag whose remediation affects this service, in a stable order."""
+        return tuple(
+            sorted(flag for flag, entry in self.remediations.items() if entry.service == service)
+        )
+
+
 class ActionConfig(ActionConfigModel):
     """One fully validated snapshot of how the action plane may execute."""
 
@@ -186,6 +236,7 @@ class ActionConfig(ActionConfigModel):
     actuators: tuple[ActuatorConfig, ...] = ()
     kubernetes: KubernetesConfig | None = None
     mesh: MeshConfig | None = None
+    flags: FlagsConfig | None = None
 
     @model_validator(mode="after")
     def validate_actuators(self) -> Self:
@@ -202,6 +253,11 @@ class ActionConfig(ActionConfigModel):
             raise ValueError(
                 "the mesh actuator is enabled but no `mesh:` section says which edge proxy it "
                 "may reach; an adapter with no stated target is not permitted"
+            )
+        if ActuatorKind.FEATURE_FLAG in enabled and self.flags is None:
+            raise ValueError(
+                "the feature-flag actuator is enabled but no `flags:` section says which flags "
+                "it may set; an adapter with no stated target is not permitted"
             )
         return self
 

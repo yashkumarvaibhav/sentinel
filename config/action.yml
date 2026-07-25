@@ -48,6 +48,8 @@ actuators:
     enabled: true
   - actuator: MESH
     enabled: true
+  - actuator: FEATURE_FLAG
+    enabled: true
 
 # The cluster the Kubernetes actuator may reach, and the only workloads it may
 # aim at. Enabling that adapter without this section is refused: an adapter with
@@ -114,3 +116,53 @@ mesh:
   cohorts:
     checkout-users: checkout_users
     general-traffic: general_traffic
+
+# The feature flags the platform may put back to safe. This is the rung that
+# answers a SELF-INFLICTED incident: when the evidence is a flag flip, the remedy
+# is to undo the change, not to scale the victim.
+#
+# The safety design is the shape of this table. Every flag here is a fault
+# INJECTOR in the testbed - `paymentFailure: on` is how the cascade scenario
+# breaks payment - so each entry commits the single variant the platform may
+# ever write, and it is always the safe one. An actuator that could set any
+# variant could cause the incident it was dispatched to fix.
+#
+# The service is stated the same way `deployments.yml` states it for the change
+# feed, and for the same reason: the flag that affects a service is an operator's
+# statement, and a decision may only flip a flag that affects the service its
+# evidence named. Note the mapping cannot be reversed automatically - payment has
+# two flags - which is why the ladder names the flag and this table checks it.
+flags:
+  context: k3d-sentinel-lab
+  namespace: otel-demo
+
+  # The demo's flagd reads its document from an emptyDir an init container copies
+  # this ConfigMap into at pod start, so patching it changes nothing until flagd
+  # is rolled. That is why FLAG_FLIP claims a blast fraction of 1.0.
+  config_map: flagd-config
+  document_key: demo.flagd.json
+  workload: flagd
+  component_label: app.kubernetes.io/component
+
+  # flagd's OFREP port, reached through the API server's pod-proxy so nothing is
+  # published. Verification asks the provider what variant it is actually
+  # serving; a ConfigMap that says `off` only proves we wrote a file.
+  ofrep_port: 8016
+  rollout_timeout_seconds: 120
+
+  remediations:
+    paymentFailure:
+      service: payment
+      variant: "off"
+    paymentUnreachable:
+      service: payment
+      variant: "off"
+    cartFailure:
+      service: cart
+      variant: "off"
+    emailMemoryLeak:
+      service: email
+      variant: "off"
+    kafkaQueueProblems:
+      service: checkout
+      variant: "off"
