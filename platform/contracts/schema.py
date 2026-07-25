@@ -16,6 +16,7 @@ from contracts.context import ContextWindow
 from contracts.decision import (
     AgentAssessment,
     ChangeEvent,
+    Decision,
     Incident,
     Verdict,
     Verification,
@@ -37,6 +38,7 @@ PUBLIC_MODELS: tuple[type[BaseModel], ...] = (
     Verdict,
     Incident,
     Verification,
+    Decision,
 )
 
 

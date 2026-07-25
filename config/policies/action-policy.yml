@@ -1,0 +1,199 @@
+# The policy gate: what the platform is allowed to DO about an incident.
+#
+# This file is the whole policy. It is evaluated by one deterministic in-process
+# evaluator (`decision/decide.py`) - there is no second engine, and there must
+# never be one, because two evaluators of the same rules drift.
+#
+# The gate runs in four stages, each with exactly one job:
+#
+#   1. rules   - propose an action from the situation. Ordered; first match wins.
+#   2. guards  - may only REPLACE an acting action with a non-acting fallback.
+#                These are the safety-critical parameters.
+#   3. floors  - may only RAISE a gate that would otherwise stay quiet. Validated
+#                to non-acting rungs, so no floor can ever create an action.
+#   4. windows - the operator's explicit, owned override, applied last.
+#
+# The decision is taken on the incident's PEAK evidence (the strongest verdict
+# and worst severity while it was unresolved) with the CURRENT verification -
+# each input read at whichever tick is the more conservative one. A storm that
+# has gone quiet for one tick is still the storm; a confirmation that no longer
+# holds is no longer a confirmation.
+version: 1
+
+# Read top down; the first rule whose stated requirements all hold proposes the
+# action. Unlike the fusion table, this one MUST end in a catch-all: fusion may
+# refuse to name a diagnosis, but a gate that declines to decide leaves an
+# incident with no stated handling at all.
+rules:
+  # An incident whose symptoms have stayed clear for the whole quiet period is
+  # over. Suppressing it is not silence about a problem, it is the absence of
+  # one - and it is listed first so nothing below can page for history.
+  - rule_id: resolved-incident-needs-nothing
+    action: SUPPRESS
+    incident_states: [RESOLVED]
+    reason: >-
+      every symptom of this incident closed and stayed closed for the configured
+      quiet period, so there is nothing left to act on
+
+  # A verified attack is the one case where waiting for a human is the expensive
+  # option: contain the immediate harm on the evidence-computed target, then
+  # bring in a person. COMBINATION counts - it contains an attack by definition.
+  - rule_id: contain-a-verified-attack
+    action: AUTO_CONTAIN_THEN_ESCALATE
+    verdict_classes: [ATTACK, COMBINATION]
+    requires_confirmation: true
+    minimum_confidence: 0.70
+    reason: >-
+      hostile behavior is confirmed against telemetry, so the immediate harm is
+      contained on the named origin and a person is brought in at once
+
+  # Hostility we are not sure of is a person's call, never the platform's.
+  - rule_id: hand-over-an-unverified-attack
+    action: ESCALATE_TO_HUMAN
+    verdict_classes: [ATTACK, COMBINATION]
+    reason: >-
+      the evidence points at hostile behavior but does not survive the
+      deterministic checks, so it goes to a person untouched
+
+  # Our own faults are what autonomous, reversible remediation is for.
+  - rule_id: remediate-a-verified-fault
+    action: ACT
+    verdict_classes: [OPERATIONAL_FAULT, CODE_CONFIG_FAULT]
+    requires_confirmation: true
+    minimum_confidence: 0.75
+    reason: >-
+      a confirmed fault with a named origin is exactly what graded reversible
+      remediation exists for
+
+  - rule_id: hand-over-a-fault-we-cannot-confirm
+    action: ESCALATE_TO_HUMAN
+    verdict_classes: [OPERATIONAL_FAULT, CODE_CONFIG_FAULT]
+    reason: >-
+      services are degrading but the hypothesis is unconfirmed or too weak to
+      act on, so a person decides
+
+  # Evidence was measured and no signature accounted for it. This is the shape
+  # an attack hiding inside a legitimate surge produces, so it is the one thing
+  # the gate must never suppress and must never act on.
+  - rule_id: tell-someone-what-we-cannot-name
+    action: ALERT
+    fusion_statuses: [INSUFFICIENT]
+    reason: >-
+      something is happening that no signature accounts for; that is a reason to
+      tell a person, not a reason to relax
+
+  # Nothing contributed at any axis. Different fact, opposite decision.
+  - rule_id: nothing-is-happening
+    action: SUPPRESS
+    fusion_statuses: [NO_EVIDENCE]
+    reason: >-
+      no axis contributed evidence, so there is nothing to diagnose and nothing
+      to do
+
+  - rule_id: context-explains-the-surge
+    action: SUPPRESS
+    verdict_classes: [EXPECTED_EVENT]
+    reason: >-
+      the surge deforms no behavioral ratio and degrades no service, so the
+      context that explains its volume explains all of it
+
+  # The mandatory catch-all. If the table above did not recognise the situation,
+  # that itself is a reason to involve a person.
+  - rule_id: anything-unrecognised-goes-to-a-person
+    action: ESCALATE_TO_HUMAN
+    reason: >-
+      no rung of the ladder recognised this situation, and an unrecognised
+      situation is a person's call
+
+# The least the gate may do, given a fact it measured itself. Floors exist
+# because a diagnosis can be calm while the system is not: every axis can sit
+# below its threshold while a service quietly goes silent and users feel it.
+# Calling that "the expected event" is the same error as calling unexplained
+# volume an attack, and lowering the axis thresholds to fix it would buy this
+# false calm back as false alarms on held-out seeds. A floor is the honest
+# instrument instead - it raises attention without claiming a diagnosis, and it
+# can never authorise an action.
+floors:
+  - floor_id: measured-user-impact-is-never-silent
+    minimum_action: ALERT
+    minimum_business_impact: 0.20
+    incident_states: [OPEN, MITIGATING, MONITORING]
+    reason: >-
+      users are measurably affected by this incident, whatever class the fused
+      evidence settled on
+
+  - floor_id: a-live-incident-that-matters-is-never-silent
+    minimum_action: ALERT
+    minimum_severity: MEDIUM
+    incident_states: [OPEN, MITIGATING, MONITORING]
+    reason: >-
+      the incident is still live at a severity someone would want to know about
+
+  - floor_id: critical-severity-reaches-a-person
+    minimum_action: ESCALATE_TO_HUMAN
+    minimum_severity: CRITICAL
+    incident_states: [OPEN, MITIGATING, MONITORING]
+    reason: >-
+      an incident measured at critical severity is a person's problem even when
+      the platform is already handling it
+
+# What the platform must have before it touches production. Every one of these
+# is computed from telemetry, committed topology or the verification - never
+# taken from a model. They are a fixed set rather than a rule language on
+# purpose: a reader can see the complete list of things that stop an action.
+guards:
+  # An unconfirmed hypothesis is never auto-acted on, whatever its class.
+  require_verification: true
+  # An action needs a target, and the target is the collapsed origin - computed
+  # from onset, reachability and accusation over committed topology. No origin
+  # means no target, and an action with no target is not an action.
+  require_named_origin: true
+  # Acting on an incident whose symptoms have all closed remediates nothing and
+  # can only cause collateral. The person still hears about it.
+  require_active_incident: true
+  # Confidence is floor + fit + corroboration (verdict-rules.yml). One loud axis
+  # cannot reach this on its own, which is the intent.
+  minimum_act_confidence: 0.75
+  # Blast radius: beyond this many symptomatic services the storm is bigger than
+  # anything a single reversible action should be aimed at.
+  maximum_affected_services: 3
+  # Where a blocked action goes. Validated to be non-acting.
+  fallback_action: ESCALATE_TO_HUMAN
+
+# When a human must sign off. An approval requirement never blocks containment -
+# it records that a person is in the loop and, for an ACT, that the action plane
+# must hold it until someone approves.
+approval:
+  # Measured user impact at this level is not a machine's decision to make.
+  severities: [CRITICAL, HIGH]
+  # Anything touching a service the topology calls critical.
+  service_criticalities: [critical]
+  # A storm this wide is a human's problem even when each part looks routine.
+  minimum_affected_services: 3
+
+# Change-freeze and maintenance windows. Each needs an owner, a reason and an
+# expiry: an anonymous, permanent silence is the failure mode these are meant to
+# prevent, and an expired window stops applying by itself.
+#
+#   - window_id: platform-change-freeze-2026-q3
+#     kind: CHANGE_FREEZE          # forbids autonomous action, quiets nothing
+#     owner: platform-oncall
+#     reason: quarterly change freeze; no autonomous remediation in production
+#     starts_ts: 2026-07-01T00:00:00Z
+#     expires_ts: 2026-10-01T00:00:00Z
+#     services: []                 # empty covers every service
+#
+#   - window_id: email-relay-migration
+#     kind: MAINTENANCE            # expected disruption; must name what it covers
+#     owner: messaging-team
+#     reason: relay migration, degraded delivery expected
+#     starts_ts: 2026-08-02T01:00:00Z
+#     expires_ts: 2026-08-02T04:00:00Z
+#     services: [email]
+#     applies_to_classes: [OPERATIONAL_FAULT, CODE_CONFIG_FAULT]
+#     maximum_action: ALERT
+#
+# A maintenance window may NOT list ATTACK or COMBINATION (validated): a
+# published window would otherwise be an invitation. No window is in force -
+# shipping a live one would quietly change every replay.
+suppressions: []

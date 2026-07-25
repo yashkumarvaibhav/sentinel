@@ -1,5 +1,6 @@
 """Decision plane: evidence agents, fusion verdict, causal collapse, verifier, policy gate."""
 
+from contracts import FusionStatus
 from decision.agents import (
     AgentEvidenceWindow,
     BusinessImpactEvidenceAgent,
@@ -10,6 +11,7 @@ from decision.agents import (
 )
 from decision.causal import CausalCollapse, OriginCandidate, collapse_to_origin
 from decision.changes import ChangeFeed, FlagChange, RolloutEvent
+from decision.decide import LIVE_STATES, IncidentEvidence, PolicyGate, severity_rank
 from decision.incidents import IncidentTracker
 from decision.memory import (
     IncidentSignature,
@@ -25,10 +27,11 @@ from decision.pipeline import (
     IncidentOutcome,
     episode_timeline,
 )
-from decision.verdict import EvidenceFusion, FusionResult, FusionStatus
+from decision.verdict import EvidenceFusion, FusionResult
 from decision.verifier import verify_incident
 
 __all__ = [
+    "LIVE_STATES",
     "AgentEvidenceWindow",
     "BusinessImpactEvidenceAgent",
     "CausalCollapse",
@@ -42,10 +45,12 @@ __all__ = [
     "FlagChange",
     "FusionResult",
     "FusionStatus",
+    "IncidentEvidence",
     "IncidentOutcome",
     "IncidentSignature",
     "IncidentTracker",
     "OriginCandidate",
+    "PolicyGate",
     "ReliabilityEvidenceAgent",
     "RolloutEvent",
     "SecurityEvidenceAgent",
@@ -55,5 +60,6 @@ __all__ = [
     "episode_timeline",
     "nearest",
     "recognized",
+    "severity_rank",
     "verify_incident",
 ]

@@ -23,13 +23,13 @@ import json
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from enum import StrEnum
 
 from contracts import (
     AgentAssessment,
     AgentStatus,
     EvidenceAxis,
     EvidenceItem,
+    FusionStatus,
     ReasonSubtype,
     RejectedAlternative,
     SymptomKind,
@@ -37,21 +37,6 @@ from contracts import (
     VerdictClass,
 )
 from decision.config import VerdictRuleConfig, VerdictRulesConfig
-
-
-class FusionStatus(StrEnum):
-    """Whether the evidence was enough to name a diagnosis at all.
-
-    The two refusals are different facts and lead to different actions.
-    ``NO_EVIDENCE`` means nothing was contributed by any axis - there is
-    nothing to diagnose, and nothing to do. ``INSUFFICIENT`` means evidence
-    was measured and no signature accounted for it - which is a reason to tell
-    a person, not a reason to relax.
-    """
-
-    DECIDED = "DECIDED"
-    INSUFFICIENT = "INSUFFICIENT"
-    NO_EVIDENCE = "NO_EVIDENCE"
 
 
 @dataclass(frozen=True, slots=True)

@@ -16,7 +16,8 @@ export type SentinelContract =
   | AgentAssessment
   | Verdict
   | Incident
-  | Verification;
+  | Verification
+  | Decision;
 export type TelemetryScalar = string | boolean | number;
 export type Identifier = string;
 export type FlowRefs = Identifier[];
@@ -129,6 +130,31 @@ export type Checks = [VerificationCheck, ...VerificationCheck[]];
  */
 export type CheckOutcome = "PASSED" | "FAILED" | "BOOTSTRAP";
 export type Confirmed = boolean;
+/**
+ * What the platform does about one incident, on a graded ladder.
+ *
+ * ``SUPPRESS`` is silence with a stated reason - nothing is happening, or an
+ * operator has taken responsibility for the noise. ``ALERT`` tells a person
+ * without paging them. ``ACT`` is autonomous, reversible remediation.
+ * ``ESCALATE_TO_HUMAN`` hands the problem over untouched.
+ * ``AUTO_CONTAIN_THEN_ESCALATE`` does both: contain the immediate harm, then
+ * bring in a person, which is the only sane answer to a verified attack.
+ */
+export type DecisionAction = "SUPPRESS" | "ALERT" | "ACT" | "ESCALATE_TO_HUMAN" | "AUTO_CONTAIN_THEN_ESCALATE";
+export type ApprovalReasons = HumanText[];
+export type Confirmed1 = boolean;
+export type FloorsApplied = Identifier[];
+export type GuardsApplied = Identifier[];
+export type RequiresHumanApproval = boolean;
+/**
+ * Why an operator asked the platform to hold back.
+ *
+ * ``CHANGE_FREEZE`` forbids autonomous action without quieting anything: the
+ * problem is still reported, we simply do not touch production during the
+ * freeze. ``MAINTENANCE`` is the stronger claim that expected disruption on
+ * named services is not worth reporting.
+ */
+export type SuppressionKind = "CHANGE_FREEZE" | "MAINTENANCE";
 
 /**
  * One event-time telemetry value, containing evidence but never answer-key data.
@@ -375,4 +401,56 @@ export interface VerificationCheck {
   detail: HumanText;
   name: Identifier;
   outcome: CheckOutcome;
+}
+/**
+ * What the platform decided to do about one incident, and what it may not do.
+ *
+ * The decision is taken on the incident's strongest evidence rather than on
+ * whatever the latest tick happened to read - a storm that has gone quiet for
+ * a moment is still the storm - and ``evidence_ts`` records the tick that
+ * evidence was measured at, so a decision never quietly presents old evidence
+ * as current.
+ *
+ * Three safety properties are enforced here rather than left to the gate,
+ * because the contract is the last thing between a hypothesis and production:
+ * an acting decision must be confirmed, must carry a verdict, and must name a
+ * ``target_service`` that was computed from evidence. ``requires_human_approval``
+ * is derived from ``approval_reasons`` so a decision can never claim to be
+ * approved-free while listing the reasons it is not.
+ */
+export interface Decision {
+  action: DecisionAction;
+  approval_reasons?: ApprovalReasons;
+  confidence?: Probability | null;
+  confirmed: Confirmed1;
+  decision_id: Identifier;
+  evidence_ts: UtcDatetime;
+  floors_applied?: FloorsApplied;
+  guards_applied?: GuardsApplied;
+  incident_id: Identifier;
+  reason: HumanText;
+  requires_human_approval: RequiresHumanApproval;
+  rule_id: Identifier;
+  severity: IncidentSeverity;
+  suppression?: AppliedSuppression | null;
+  target_service?: Identifier | null;
+  ts: UtcDatetime;
+  verdict_class?: VerdictClass | null;
+  verdict_id?: Identifier | null;
+  verification_id: Identifier;
+}
+/**
+ * The operator-owned window that held a decision back, and who owns it.
+ *
+ * A window that could not name an owner, a reason and an expiry would be an
+ * anonymous, permanent silence. All three are required, so every suppressed
+ * decision records the person who took responsibility for it and the moment
+ * that responsibility runs out.
+ */
+export interface AppliedSuppression {
+  expires_ts: UtcDatetime;
+  kind: SuppressionKind;
+  owner: Identifier;
+  reason: HumanText;
+  window_id: Identifier;
 }

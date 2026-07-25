@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal, Self
@@ -32,10 +32,15 @@ from pydantic import (
 )
 
 from contracts import (
+    ACTING_ACTIONS,
     ChangeKind,
+    DecisionAction,
     EvidenceAxis,
+    FusionStatus,
     IncidentSeverity,
+    IncidentState,
     ReasonSubtype,
+    SuppressionKind,
     SymptomKind,
     VerdictClass,
 )
@@ -93,6 +98,50 @@ def _named_reason_subtype(value: object) -> object:
     return value
 
 
+def _named_decision_action(value: object) -> object:
+    """Accept the YAML spelling of a decision action under strict validation."""
+    if isinstance(value, str):
+        try:
+            return DecisionAction(value)
+        except ValueError as error:
+            known = ", ".join(member.value for member in DecisionAction)
+            raise ValueError(f"unknown decision action {value!r}; known are {known}") from error
+    return value
+
+
+def _named_fusion_status(value: object) -> object:
+    """Accept the YAML spelling of a fusion status under strict validation."""
+    if isinstance(value, str):
+        try:
+            return FusionStatus(value)
+        except ValueError as error:
+            known = ", ".join(member.value for member in FusionStatus)
+            raise ValueError(f"unknown fusion status {value!r}; known are {known}") from error
+    return value
+
+
+def _named_incident_state(value: object) -> object:
+    """Accept the YAML spelling of an incident state under strict validation."""
+    if isinstance(value, str):
+        try:
+            return IncidentState(value)
+        except ValueError as error:
+            known = ", ".join(member.value for member in IncidentState)
+            raise ValueError(f"unknown incident state {value!r}; known are {known}") from error
+    return value
+
+
+def _named_suppression_kind(value: object) -> object:
+    """Accept the YAML spelling of a suppression kind under strict validation."""
+    if isinstance(value, str):
+        try:
+            return SuppressionKind(value)
+        except ValueError as error:
+            known = ", ".join(member.value for member in SuppressionKind)
+            raise ValueError(f"unknown suppression kind {value!r}; known are {known}") from error
+    return value
+
+
 def _named_severity(value: object) -> object:
     """Accept the YAML spelling of an incident severity under strict validation."""
     if isinstance(value, str):
@@ -121,6 +170,10 @@ type NamedChangeKind = Annotated[ChangeKind, BeforeValidator(_named_change_kind)
 type NamedVerdictClass = Annotated[VerdictClass, BeforeValidator(_named_verdict_class)]
 type NamedReasonSubtype = Annotated[ReasonSubtype, BeforeValidator(_named_reason_subtype)]
 type NamedSeverity = Annotated[IncidentSeverity, BeforeValidator(_named_severity)]
+type NamedDecisionAction = Annotated[DecisionAction, BeforeValidator(_named_decision_action)]
+type NamedFusionStatus = Annotated[FusionStatus, BeforeValidator(_named_fusion_status)]
+type NamedIncidentState = Annotated[IncidentState, BeforeValidator(_named_incident_state)]
+type NamedSuppressionKind = Annotated[SuppressionKind, BeforeValidator(_named_suppression_kind)]
 type UtcDatetime = Annotated[datetime, AfterValidator(_utc)]
 type Identifier = Annotated[
     str,
@@ -421,6 +474,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--deployments", type=Path, help="committed change-evidence ledger")
     parser.add_argument("--verdict-rules", type=Path, help="ordered evidence-fusion rule table")
     parser.add_argument("--incidents", type=Path, help="incident clustering policy")
+    parser.add_argument("--policy", type=Path, help="action-policy gate configuration")
     args = parser.parse_args(argv)
     print(f"evidence-agent configuration valid: {load_evidence_agents(args.agents).fingerprint}")
     if args.deployments is not None:
@@ -431,6 +485,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"verdict rules valid: {fingerprint}")
     if args.incidents is not None:
         print(f"incident policy valid: {load_incidents(args.incidents).fingerprint}")
+    if args.policy is not None:
+        print(f"action policy valid: {load_action_policy(args.policy).fingerprint}")
     return 0
 
 
@@ -705,5 +761,264 @@ def load_incidents(path: Path) -> IncidentsConfig:
     """Load and strictly validate the incident clustering configuration."""
     try:
         return IncidentsConfig.model_validate(_document(path))
+    except ValidationError as error:
+        raise DecisionConfigLoadError(f"{path.name}: {error}") from error
+
+
+class ActionRuleConfig(DecisionConfigModel):
+    """One rung of the ladder: the situation, and the action it proposes.
+
+    Every requirement is optional and an omitted one is simply not asked about,
+    so the last rule in the table can - and must - require nothing at all.
+    """
+
+    rule_id: Identifier
+    action: NamedDecisionAction
+    reason: Summary
+    verdict_classes: tuple[NamedVerdictClass, ...] = ()
+    fusion_statuses: tuple[NamedFusionStatus, ...] = ()
+    incident_states: tuple[NamedIncidentState, ...] = ()
+    requires_confirmation: bool | None = None
+    minimum_confidence: Probability | None = None
+    minimum_severity: NamedSeverity | None = None
+
+    @model_validator(mode="after")
+    def validate_rule(self) -> Self:
+        for name, values in (
+            ("verdict_classes", self.verdict_classes),
+            ("fusion_statuses", self.fusion_statuses),
+            ("incident_states", self.incident_states),
+        ):
+            if len(values) != len(set(values)):
+                raise ValueError(f"{self.rule_id}: {name} must be unique")
+        return self
+
+    @property
+    def requires_nothing(self) -> bool:
+        """Whether this rule matches every situation, as the catch-all must."""
+        return not (
+            self.verdict_classes
+            or self.fusion_statuses
+            or self.incident_states
+            or self.requires_confirmation is not None
+            or self.minimum_confidence is not None
+            or self.minimum_severity is not None
+        )
+
+
+class ActionFloorConfig(DecisionConfigModel):
+    """The least the gate may do given a measured fact, whatever a rule proposed.
+
+    A floor exists to stop the platform going quiet on something real. It can
+    therefore only raise attention, never grant authority: ``minimum_action`` is
+    validated to be a non-acting rung.
+    """
+
+    floor_id: Identifier
+    minimum_action: NamedDecisionAction
+    reason: Summary
+    fusion_statuses: tuple[NamedFusionStatus, ...] = ()
+    minimum_severity: NamedSeverity | None = None
+    minimum_business_impact: Probability | None = None
+    incident_states: tuple[NamedIncidentState, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_floor(self) -> Self:
+        if self.minimum_action in ACTING_ACTIONS:
+            raise ValueError(
+                f"{self.floor_id}: a floor may raise attention but never create an action "
+                f"({self.minimum_action.value} touches production)"
+            )
+        if not (
+            self.fusion_statuses
+            or self.minimum_severity is not None
+            or self.minimum_business_impact is not None
+        ):
+            raise ValueError(f"{self.floor_id}: a floor that asks nothing raises everything")
+        return self
+
+
+class ActionGuardsConfig(DecisionConfigModel):
+    """The evidence every autonomous action must have, and where it goes without it.
+
+    These are the safety-critical parameters, and they are deliberately a fixed
+    set rather than a rule language: a reader can see the complete list of
+    things that stop the platform touching production. Each is computed from
+    telemetry, topology or the verification - never from a model.
+    """
+
+    require_verification: bool
+    require_named_origin: bool
+    require_active_incident: bool
+    minimum_act_confidence: Probability
+    maximum_affected_services: int = Field(ge=1, le=1000)
+    fallback_action: NamedDecisionAction
+
+    @model_validator(mode="after")
+    def validate_guards(self) -> Self:
+        if self.fallback_action in ACTING_ACTIONS:
+            raise ValueError(
+                "the guard fallback must not itself touch production: "
+                f"{self.fallback_action.value} is an acting rung"
+            )
+        return self
+
+
+class ApprovalPolicyConfig(DecisionConfigModel):
+    """When a person has to sign off, stated as facts about the incident.
+
+    Nothing here is a model output: severity comes from measured impact, the
+    blast radius is a count of affected services, and criticality comes from
+    committed topology.
+    """
+
+    severities: tuple[NamedSeverity, ...] = ()
+    service_criticalities: tuple[str, ...] = ()
+    minimum_affected_services: int | None = Field(default=None, ge=1, le=1000)
+
+    @model_validator(mode="after")
+    def validate_approval(self) -> Self:
+        if len(self.severities) != len(set(self.severities)):
+            raise ValueError("approval severities must be unique")
+        unknown = sorted(set(self.service_criticalities) - set(CRITICALITY_LEVELS))
+        if unknown:
+            raise ValueError(f"unknown service criticality: {', '.join(unknown)}")
+        if len(self.service_criticalities) != len(set(self.service_criticalities)):
+            raise ValueError("approval criticalities must be unique")
+        return self
+
+
+class SuppressionWindowConfig(DecisionConfigModel):
+    """One operator-owned window in which the platform holds back, and until when.
+
+    An owner, a reason and an expiry are all required: an anonymous, permanent
+    silence is exactly the failure mode suppression windows are supposed to
+    prevent. A ``MAINTENANCE`` window must name the services it covers and the
+    diagnoses it covers, and it may **never** cover a hostile one - otherwise a
+    published maintenance window would be an invitation.
+    """
+
+    window_id: Identifier
+    kind: NamedSuppressionKind
+    owner: Identifier
+    reason: Summary
+    starts_ts: UtcDatetime
+    expires_ts: UtcDatetime
+    services: tuple[Identifier, ...] = ()
+    applies_to_classes: tuple[NamedVerdictClass, ...] = ()
+    maximum_action: NamedDecisionAction | None = None
+
+    @model_validator(mode="after")
+    def validate_window(self) -> Self:
+        if self.expires_ts <= self.starts_ts:
+            raise ValueError(f"{self.window_id}: a window must expire after it starts")
+        if len(self.services) != len(set(self.services)):
+            raise ValueError(f"{self.window_id}: services must be unique")
+        if len(self.applies_to_classes) != len(set(self.applies_to_classes)):
+            raise ValueError(f"{self.window_id}: applies_to_classes must be unique")
+        if self.kind is SuppressionKind.CHANGE_FREEZE:
+            if self.applies_to_classes or self.maximum_action is not None:
+                raise ValueError(
+                    f"{self.window_id}: a change freeze forbids autonomous action and quiets "
+                    "nothing, so it takes no class list and no maximum action"
+                )
+            return self
+        if not self.services:
+            raise ValueError(
+                f"{self.window_id}: a maintenance window must name the services it covers; "
+                "a blanket maintenance window is a permanent blind spot"
+            )
+        if not self.applies_to_classes:
+            raise ValueError(
+                f"{self.window_id}: a maintenance window must name the diagnoses it covers"
+            )
+        hostile = sorted(
+            member.value
+            for member in self.applies_to_classes
+            if member in (VerdictClass.ATTACK, VerdictClass.COMBINATION)
+        )
+        if hostile:
+            raise ValueError(
+                f"{self.window_id}: a maintenance window may never cover {', '.join(hostile)} - "
+                "a published window would otherwise be an invitation"
+            )
+        if self.maximum_action is None:
+            raise ValueError(f"{self.window_id}: a maintenance window must state its cap")
+        if self.maximum_action in ACTING_ACTIONS:
+            raise ValueError(
+                f"{self.window_id}: a suppression cap must not itself touch production"
+            )
+        return self
+
+    def covers(self, ts: datetime, services: Iterable[str]) -> bool:
+        """Whether this window is in force at one moment for one set of services."""
+        if not self.starts_ts <= ts < self.expires_ts:
+            return False
+        return not self.services or bool(set(self.services) & set(services))
+
+
+class ActionPolicyConfig(DecisionConfigModel):
+    """One fully validated snapshot of the policy the gate answers from."""
+
+    version: Literal[1]
+    rules: tuple[ActionRuleConfig, ...] = Field(min_length=1)
+    floors: tuple[ActionFloorConfig, ...] = ()
+    guards: ActionGuardsConfig
+    approval: ApprovalPolicyConfig
+    suppressions: tuple[SuppressionWindowConfig, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_policy(self) -> Self:
+        ids = [rule.rule_id for rule in self.rules]
+        if len(ids) != len(set(ids)):
+            raise ValueError("action rule ids must be unique")
+        floors = [floor.floor_id for floor in self.floors]
+        if len(floors) != len(set(floors)):
+            raise ValueError("action floor ids must be unique")
+        windows = [window.window_id for window in self.suppressions]
+        if len(windows) != len(set(windows)):
+            raise ValueError("suppression window ids must be unique")
+        # A gate must always answer. Fusion may refuse to name a diagnosis, but
+        # refusing to decide would leave an incident with no stated handling at
+        # all, so the table is required to end in a rule that matches anything.
+        early = [rule.rule_id for rule in self.rules[:-1] if rule.requires_nothing]
+        if early:
+            raise ValueError(
+                f"only the last rule may match everything; these shadow the table: "
+                f"{', '.join(early)}"
+            )
+        if not self.rules[-1].requires_nothing:
+            raise ValueError(
+                "the last rule must match every situation: a gate that can decline to decide "
+                "leaves an incident with no stated handling"
+            )
+        return self
+
+    @property
+    def fingerprint(self) -> str:
+        """Content hash recorded with any decision taken under this policy."""
+        rendered = json.dumps(
+            self.model_dump(mode="json"),
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+
+    def windows_in_force(
+        self,
+        ts: datetime,
+        *,
+        services: Iterable[str],
+    ) -> tuple[SuppressionWindowConfig, ...]:
+        """Every window covering these services at this moment, in committed order."""
+        held = tuple(services)
+        return tuple(window for window in self.suppressions if window.covers(ts, held))
+
+
+def load_action_policy(path: Path) -> ActionPolicyConfig:
+    """Load and strictly validate the action-policy gate configuration."""
+    try:
+        return ActionPolicyConfig.model_validate(_document(path))
     except ValidationError as error:
         raise DecisionConfigLoadError(f"{path.name}: {error}") from error

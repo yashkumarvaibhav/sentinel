@@ -44,6 +44,7 @@ from contracts import (
     AgentAssessment,
     ChangeEvent,
     EvidenceAxis,
+    FusionStatus,
     Incident,
     IncidentState,
     SymptomEpisode,
@@ -70,7 +71,7 @@ from decision.memory import (
     nearest,
     recognized,
 )
-from decision.verdict import EvidenceFusion, FusionResult, FusionStatus
+from decision.verdict import EvidenceFusion, FusionResult
 from decision.verifier import verify_incident
 
 

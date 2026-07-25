@@ -14,6 +14,7 @@ from contracts import (
     CheckOutcome,
     EpisodeStatus,
     EvidenceAxis,
+    FusionStatus,
     IncidentState,
     SymptomEpisode,
     SymptomKind,
@@ -29,7 +30,6 @@ from decision import (
 from decision.agents import CHANGE_COVERAGE_KIND
 from decision.config import load_evidence_agents, load_incidents, load_verdict_rules
 from decision.memory import SIGNATURE_AXES, IncidentSignature
-from decision.verdict import FusionStatus
 from tests.factories import EPOCH, symptom_episode
 
 CONFIG_ROOT = Path(__file__).resolve().parents[2] / "config"

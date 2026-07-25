@@ -445,3 +445,149 @@ class Verification(ContractModel):
         if self.confirmed != passing:
             raise ValueError("confirmed must be true exactly when no check failed")
         return self
+
+
+class FusionStatus(StrEnum):
+    """Whether the evidence was enough to name a diagnosis at all.
+
+    The two refusals are different facts and lead to different decisions.
+    ``NO_EVIDENCE`` means nothing was contributed by any axis - there is nothing
+    to diagnose, and nothing to do. ``INSUFFICIENT`` means evidence was
+    measured and no signature accounted for it - which is a reason to tell a
+    person, not a reason to relax.
+    """
+
+    DECIDED = "DECIDED"
+    INSUFFICIENT = "INSUFFICIENT"
+    NO_EVIDENCE = "NO_EVIDENCE"
+
+
+class DecisionAction(StrEnum):
+    """What the platform does about one incident, on a graded ladder.
+
+    ``SUPPRESS`` is silence with a stated reason - nothing is happening, or an
+    operator has taken responsibility for the noise. ``ALERT`` tells a person
+    without paging them. ``ACT`` is autonomous, reversible remediation.
+    ``ESCALATE_TO_HUMAN`` hands the problem over untouched.
+    ``AUTO_CONTAIN_THEN_ESCALATE`` does both: contain the immediate harm, then
+    bring in a person, which is the only sane answer to a verified attack.
+    """
+
+    SUPPRESS = "SUPPRESS"
+    ALERT = "ALERT"
+    ACT = "ACT"
+    ESCALATE_TO_HUMAN = "ESCALATE_TO_HUMAN"
+    AUTO_CONTAIN_THEN_ESCALATE = "AUTO_CONTAIN_THEN_ESCALATE"
+
+
+# The two rungs that touch production. Everything the contract enforces about
+# evidence applies to exactly these, so the set is named once.
+ACTING_ACTIONS: frozenset[DecisionAction] = frozenset(
+    {DecisionAction.ACT, DecisionAction.AUTO_CONTAIN_THEN_ESCALATE}
+)
+
+# The two rungs that are a claim on a person's attention. Naming them here
+# keeps "a human is being brought in" one fact rather than two spellings.
+ESCALATING_ACTIONS: frozenset[DecisionAction] = frozenset(
+    {DecisionAction.ESCALATE_TO_HUMAN, DecisionAction.AUTO_CONTAIN_THEN_ESCALATE}
+)
+
+
+class SuppressionKind(StrEnum):
+    """Why an operator asked the platform to hold back.
+
+    ``CHANGE_FREEZE`` forbids autonomous action without quieting anything: the
+    problem is still reported, we simply do not touch production during the
+    freeze. ``MAINTENANCE`` is the stronger claim that expected disruption on
+    named services is not worth reporting.
+    """
+
+    CHANGE_FREEZE = "CHANGE_FREEZE"
+    MAINTENANCE = "MAINTENANCE"
+
+
+class AppliedSuppression(ContractModel):
+    """The operator-owned window that held a decision back, and who owns it.
+
+    A window that could not name an owner, a reason and an expiry would be an
+    anonymous, permanent silence. All three are required, so every suppressed
+    decision records the person who took responsibility for it and the moment
+    that responsibility runs out.
+    """
+
+    window_id: Identifier
+    kind: SuppressionKind
+    owner: Identifier
+    reason: HumanText
+    expires_ts: UtcDatetime
+
+
+class Decision(ContractModel):
+    """What the platform decided to do about one incident, and what it may not do.
+
+    The decision is taken on the incident's strongest evidence rather than on
+    whatever the latest tick happened to read - a storm that has gone quiet for
+    a moment is still the storm - and ``evidence_ts`` records the tick that
+    evidence was measured at, so a decision never quietly presents old evidence
+    as current.
+
+    Three safety properties are enforced here rather than left to the gate,
+    because the contract is the last thing between a hypothesis and production:
+    an acting decision must be confirmed, must carry a verdict, and must name a
+    ``target_service`` that was computed from evidence. ``requires_human_approval``
+    is derived from ``approval_reasons`` so a decision can never claim to be
+    approved-free while listing the reasons it is not.
+    """
+
+    decision_id: Identifier
+    ts: UtcDatetime
+    incident_id: Identifier
+    action: DecisionAction
+    rule_id: Identifier
+    reason: HumanText
+    evidence_ts: UtcDatetime
+    severity: IncidentSeverity
+    confirmed: bool
+    verification_id: Identifier
+    requires_human_approval: bool
+    verdict_class: VerdictClass | None = None
+    verdict_id: Identifier | None = None
+    confidence: Probability | None = None
+    target_service: Identifier | None = None
+    approval_reasons: tuple[HumanText, ...] = ()
+    guards_applied: tuple[Identifier, ...] = ()
+    floors_applied: tuple[Identifier, ...] = ()
+    suppression: AppliedSuppression | None = None
+
+    @field_validator("guards_applied", "floors_applied")
+    @classmethod
+    def unique_policy_steps(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        """A guard or floor is applied at most once to one decision."""
+        return ensure_unique(values, field_name="policy steps")
+
+    @model_validator(mode="after")
+    def validate_decision(self) -> Self:
+        """Keep the evidence honest and make an unbacked action unrepresentable."""
+        if self.evidence_ts > self.ts:
+            raise ValueError("a decision cannot be taken on evidence from the future")
+        named = (self.verdict_class is None, self.verdict_id is None, self.confidence is None)
+        if len(set(named)) != 1:
+            raise ValueError("a verdict, its id and its confidence are recorded together or not")
+        if self.requires_human_approval != bool(self.approval_reasons):
+            raise ValueError(
+                "requires_human_approval must be true exactly when approval reasons are recorded"
+            )
+        if self.action in ESCALATING_ACTIONS and not self.requires_human_approval:
+            raise ValueError(f"{self.action.value} must state why a human is being brought in")
+        if self.action not in ACTING_ACTIONS:
+            return self
+        if not self.confirmed:
+            raise ValueError(f"{self.action.value} requires a confirmed verification")
+        if self.verdict_class is None:
+            raise ValueError(f"{self.action.value} requires a verdict to act on")
+        if self.target_service is None:
+            raise ValueError(
+                f"{self.action.value} requires an evidence-computed target service; "
+                "an action with no target is not an action"
+            )
+        return self

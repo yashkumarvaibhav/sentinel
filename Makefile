@@ -41,7 +41,7 @@ verify-py: ## Lint, typecheck and test the Python planes
 	$(PY) python -m contracts export --check
 	$(PY) python -m common.config --path ../config
 	$(PY) python -m ml.config --path ../config/ml-training.yml --envelopes ../config/ml-envelopes.yml --forecast ../config/ml-forecast.yml --anomaly ../config/ml-anomaly.yml --autoencoder ../config/ml-autoencoder.yml --calibration ../config/ml-calibration.yml --drift ../config/ml-drift.yml
-	$(PY) python -m decision --agents ../config/decision-agents.yml --deployments ../config/deployments.yml --verdict-rules ../config/verdict-rules.yml --incidents ../config/incidents.yml
+	$(PY) python -m decision --agents ../config/decision-agents.yml --deployments ../config/deployments.yml --verdict-rules ../config/verdict-rules.yml --incidents ../config/incidents.yml --policy ../config/policies/action-policy.yml
 	$(PY) pytest
 
 .PHONY: verify-web
@@ -71,7 +71,7 @@ contracts: ## Export JSON Schema and regenerate TypeScript contracts
 config-check: ## Validate all versioned operator configuration
 	$(PY) python -m common.config --path ../config
 	$(PY) python -m ml.config --path ../config/ml-training.yml --envelopes ../config/ml-envelopes.yml --forecast ../config/ml-forecast.yml --anomaly ../config/ml-anomaly.yml --autoencoder ../config/ml-autoencoder.yml --calibration ../config/ml-calibration.yml --drift ../config/ml-drift.yml
-	$(PY) python -m decision --agents ../config/decision-agents.yml --deployments ../config/deployments.yml --verdict-rules ../config/verdict-rules.yml --incidents ../config/incidents.yml
+	$(PY) python -m decision --agents ../config/decision-agents.yml --deployments ../config/deployments.yml --verdict-rules ../config/verdict-rules.yml --incidents ../config/incidents.yml --policy ../config/policies/action-policy.yml
 
 .PHONY: migrate
 migrate: ## Apply idempotent ClickHouse and Postgres migrations
