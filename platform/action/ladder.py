@@ -146,6 +146,36 @@ class RemediationLadder:
             companion=self._companion(chosen, ladder, decision),
         )
 
+    def rank(self, choice: RungChoice) -> int | None:
+        """How high up its own ladder a chosen rung sits; the weakest is 0.
+
+        The ordering already exists - a ladder is committed weakest-first and the
+        loader rejects one whose minimum confidences decrease - so this reads it
+        rather than deriving a second one. It is what lets the remediation loop
+        answer "is this a stronger answer than the one already standing?" without
+        comparing confidences, which would be comparing the *evidence* rather
+        than the *response* the operator committed to it.
+
+        **A companion ranks as ``None``, and that is a real answer rather than a
+        failure.** A companion rides with the rung that named it and is never an
+        answer on its own, so "how far up the escalation is it?" is a question
+        with no meaning - and a caller that compared it with a primary would be
+        ordering two things that are not on the same scale. Not knowing where a
+        rung sits is only an error when the rung is not in the committed
+        configuration at all.
+        """
+        ladder = self._configuration.for_ladder(choice.ladder_id)
+        if ladder is None:
+            raise LadderError(f"no committed ladder is named {choice.ladder_id}")
+        for index, rung in enumerate(ladder.rungs):
+            if rung.rung_id == choice.rung_id:
+                return index
+        if any(rung.rung_id == choice.rung_id for rung in ladder.companions):
+            return None
+        raise LadderError(
+            f"{choice.rung_id} is neither a rung nor a companion of {ladder.ladder_id}"
+        )
+
     def _ladder_for(self, decision: Decision) -> Ladder:
         if decision.action not in ACTING_ACTIONS:
             raise LadderError(
@@ -231,6 +261,18 @@ class StandingRestraint:
     plan: ActionPlan
     choice: RungChoice
     applied_at: datetime
+    # Where this effect falls in the order they were applied in. A timestamp is
+    # not enough: several effects are routinely applied within one tick - every
+    # step of a canary, a rung and its companion - and they carry the SAME
+    # `applied_at`. Undoing them requires knowing which came last, and a stable
+    # sort over equal timestamps silently yields the order they were applied in
+    # rather than its reverse.
+    sequence: int = 0
+
+    @property
+    def order(self) -> tuple[datetime, int]:
+        """The total order effects were applied in, with ties broken honestly."""
+        return (self.applied_at, self.sequence)
 
     @property
     def expires_at(self) -> datetime:
@@ -246,10 +288,13 @@ class RestraintRegistry:
     listed the moment it is older than the rung allowed.
     """
 
-    __slots__ = ("_standing",)
+    __slots__ = ("_applied", "_standing")
 
     def __init__(self) -> None:
         self._standing: dict[str, StandingRestraint] = {}
+        # Monotonic across the registry's life, never reused. It is the only
+        # thing that can order two effects applied in the same tick.
+        self._applied = 0
 
     def __len__(self) -> int:
         return len(self._standing)
@@ -266,8 +311,9 @@ class RestraintRegistry:
 
     def record(self, plan: ActionPlan, choice: RungChoice, *, applied_at: datetime) -> None:
         """Remember an effect that is now standing, keyed by the effect itself."""
+        self._applied += 1
         self._standing[plan.idempotency_key] = StandingRestraint(
-            plan=plan, choice=choice, applied_at=applied_at
+            plan=plan, choice=choice, applied_at=applied_at, sequence=self._applied
         )
 
     def release(self, plan: ActionPlan) -> None:
@@ -275,8 +321,25 @@ class RestraintRegistry:
         self._standing.pop(plan.idempotency_key, None)
 
     def standing(self) -> tuple[StandingRestraint, ...]:
-        """Everything in force, oldest first."""
-        return tuple(sorted(self._standing.values(), key=lambda entry: entry.applied_at))
+        """Everything in force, in the order it was applied.
+
+        Ordered by ``order`` rather than by ``applied_at`` so that reversing this
+        sequence really is the order to undo it in. Sorting on the timestamp
+        alone leaves effects from one tick tied, and a stable sort then returns
+        ties in the order they were applied - so a caller reversing the result
+        would unwind a canary forwards and leave the widest share it ever reached
+        still in place.
+        """
+        return tuple(sorted(self._standing.values(), key=lambda entry: entry.order))
+
+    def for_incident(self, incident_id: str) -> tuple[StandingRestraint, ...]:
+        """Everything currently in force because of one incident, oldest first.
+
+        The question the remediation loop asks before it acts: an incident this
+        platform has already answered, and whose answer has not yet been given
+        back, is not one to answer a second time.
+        """
+        return tuple(entry for entry in self.standing() if entry.plan.incident_id == incident_id)
 
     def expired(self, now: datetime) -> tuple[StandingRestraint, ...]:
         """Everything that has outlived its rung's TTL, oldest first.

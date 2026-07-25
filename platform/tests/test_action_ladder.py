@@ -421,6 +421,36 @@ def test_an_empty_registry_is_still_a_registry() -> None:
     assert len(RestraintRegistry()) == 0
 
 
+def test_effects_applied_in_one_tick_are_still_ordered_against_each_other() -> None:
+    """Reversing `standing()` must really be the order to undo it in.
+
+    Several effects are routinely applied within one tick - every step of a
+    canary, and a rung with its companion - so they carry the same
+    ``applied_at``. Ordering on the timestamp alone leaves them tied, and
+    ``sorted`` is stable, so a caller reversing the result would get the order
+    they were applied in rather than its reverse: a canary unwound forwards,
+    leaving the widest share it ever reached still in place.
+    """
+    registry = RestraintRegistry()
+    choice = _committed().select(_decision(confidence=0.72)).primary
+    adapter = SimulatedActuator(blast_fraction=0.1)
+    # Distinct parameters, so these are three separate effects with three keys -
+    # which is exactly what the steps of a canary are.
+    steps = [
+        adapter.plan(
+            _decision(), action_kind=ActionKind.SCALE, parameters={"replicas": count}, ts=TICK
+        )
+        for count in (2, 3, 4)
+    ]
+    for plan in steps:
+        registry.record(plan, choice, applied_at=TICK)
+
+    standing = registry.standing()
+    assert [entry.plan.plan_id for entry in standing] == [plan.plan_id for plan in steps]
+    undone = sorted(standing, key=lambda entry: entry.order, reverse=True)
+    assert [entry.plan.plan_id for entry in undone] == [plan.plan_id for plan in reversed(steps)]
+
+
 # --- the ladder and the adapters speak the same vocabulary ------------------
 
 

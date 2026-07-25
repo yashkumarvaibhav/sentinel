@@ -91,6 +91,13 @@ class ActionKind(StrEnum):
 # belongs to the rung, not to the label on the target.
 DESTRUCTIVE_ACTIONS: frozenset[ActionKind] = frozenset({ActionKind.ISOLATE, ActionKind.ROLLBACK})
 
+# The rungs that change nothing about the world. An OBSERVE is the platform
+# deciding to keep looking, and it is still a recorded, expiring answer to an
+# incident - but it is not an action against production, so the remediation
+# breaker does not count it. A breaker that tripped on watching would page a
+# person for the platform's own attentiveness.
+WATCHING_ACTIONS: frozenset[ActionKind] = frozenset({ActionKind.OBSERVE})
+
 
 class ActionStatus(StrEnum):
     """How far one action got, and whether the world was touched.

@@ -68,6 +68,13 @@ from action.ladder import (
     StandingRestraint,
 )
 from action.leases import LeaseRegistry, TargetBusyError, TargetLease
+from action.remediator import (
+    DEFAULT_OWNER,
+    AppliedEffect,
+    ReleasedRestraint,
+    RemediationRun,
+    Remediator,
+)
 from action.rollback import (
     RollbackResult,
     SloCollateralProbe,
@@ -79,6 +86,7 @@ from action.rollback import (
 __all__ = [
     "BLAST_CAP_GATE",
     "CANARY_GATE",
+    "DEFAULT_OWNER",
     "FORCE_DRY_RUN_ENV",
     "PROTECTED_COHORT_GATE",
     "TWO_KEY_APPROVERS",
@@ -93,6 +101,7 @@ __all__ = [
     "ActuatorConfig",
     "ActuatorContractError",
     "ActuatorError",
+    "AppliedEffect",
     "BlastRadiusExceededError",
     "BlastRadiusGuard",
     "BreakerConfig",
@@ -124,8 +133,11 @@ __all__ = [
     "MeshConfig",
     "NoRungAvailableError",
     "ProtectedCohortError",
+    "ReleasedRestraint",
     "RemediationBreaker",
     "RemediationLadder",
+    "RemediationRun",
+    "Remediator",
     "RestraintRegistry",
     "RollbackResult",
     "RungChoice",

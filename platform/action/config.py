@@ -364,6 +364,13 @@ class LadderConfig(ActionConfigModel):
         )
         return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
 
+    def for_ladder(self, ladder_id: str) -> Ladder | None:
+        """The ladder with this id, or none."""
+        for ladder in self.ladders:
+            if ladder.ladder_id == ladder_id:
+                return ladder
+        return None
+
     def for_verdict(self, verdict_class: str) -> Ladder | None:
         """The one ladder that answers this diagnosis, or none."""
         for ladder in self.ladders:

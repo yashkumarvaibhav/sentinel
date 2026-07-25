@@ -151,6 +151,18 @@ class VerifiedRollback:
         """The collateral probe this rollback's own judgement is based on."""
         return SloCollateralProbe(slos=self._slos, reader=self._reader)
 
+    @property
+    def reader(self) -> SloReader:
+        """The instrument every claim about this rollback was measured with.
+
+        Exposed so the remediation loop measures an action's *improvement* with
+        the same reader that measures its *harm*. Two readers would let the
+        platform widen an action on one instrument and undo it on another, and
+        the disagreement would look like a fault in the system rather than in the
+        measurement.
+        """
+        return self._reader
+
     def rollback_if_harmed(
         self,
         plan: ActionPlan,
