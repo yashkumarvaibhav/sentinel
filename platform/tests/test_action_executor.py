@@ -24,6 +24,7 @@ from action import (
     resolve_dry_run,
 )
 from action.config import FORCE_DRY_RUN_ENV
+from audit import AuditChain, verify_chain
 from contracts import (
     ESCALATING_ACTIONS,
     ActionKind,
@@ -31,6 +32,7 @@ from contracts import (
     ActionPlan,
     ActionStatus,
     ActuatorKind,
+    AuditEventKind,
     Decision,
     DecisionAction,
     IncidentSeverity,
@@ -88,6 +90,7 @@ def _executor(
     dry_run: bool = False,
     actuator: SimulatedActuator | None = None,
     capacity: int = 4096,
+    ledger: AuditChain | None = None,
 ) -> tuple[ActionExecutor, SimulatedActuator]:
     adapter = actuator or SimulatedActuator()
     configuration = _configuration(dry_run=dry_run, capacity=capacity)
@@ -96,6 +99,7 @@ def _executor(
             actuators=[adapter],
             configuration=configuration,
             dry_run=resolve_dry_run(configuration, environ={}),
+            ledger=ledger,
         ),
         adapter,
     )
@@ -580,3 +584,62 @@ def test_the_journal_never_forgets_an_effect_that_is_still_in_place() -> None:
     assert journal.in_force(plans[1].idempotency_key)
     assert journal.in_force(plans[2].idempotency_key)
     assert not journal.in_force(plans[0].idempotency_key)
+
+
+# --- the audit trail --------------------------------------------------------
+
+
+def test_every_action_the_executor_takes_is_written_down() -> None:
+    """The executor is the one place every action passes through, so it is the
+    one place the trail can be complete rather than well-intentioned."""
+    ledger = AuditChain()
+    executor, adapter = _executor(dry_run=False, ledger=ledger)
+    plan = _plan(adapter)
+
+    executor.apply(plan, ts=TICK, owner="operator")
+    executor.verify(plan, ts=TICK)
+    executor.revert(plan, ts=TICK, owner="operator")
+
+    kinds = [entry.kind for entry in ledger.entries()]
+    assert kinds == [
+        AuditEventKind.ACTION_APPLIED,
+        AuditEventKind.ACTION_VERIFIED,
+        AuditEventKind.ACTION_REVERTED,
+    ]
+    assert verify_chain(ledger.entries()).intact
+    assert all(entry.plan_id == plan.plan_id for entry in ledger.entries())
+    assert all(entry.incident_id == plan.incident_id for entry in ledger.entries())
+
+
+def test_a_refusal_is_written_down_before_it_is_raised() -> None:
+    """A caller that swallows the exception must not be able to erase the record."""
+    ledger = AuditChain()
+    executor, adapter = _executor(dry_run=False, ledger=ledger)
+    plan = _plan(adapter, action_kind=ActionKind.ROLLBACK, parameters={})
+
+    with pytest.raises(ActionRejectedError):
+        executor.apply(plan, ts=TICK, owner="operator")
+
+    entries = ledger.entries()
+    assert [entry.kind for entry in entries] == [AuditEventKind.ACTION_REFUSED]
+    assert "refused ROLLBACK" in entries[0].summary
+    assert entries[0].body["reason"]
+
+
+def test_a_dry_run_is_recorded_as_a_plan_and_labelled_simulated() -> None:
+    """Pretending is worth recording, and must never look like acting."""
+    ledger = AuditChain()
+    executor, adapter = _executor(dry_run=True, ledger=ledger)
+
+    executor.apply(_plan(adapter), ts=TICK, owner="operator")
+
+    entry = ledger.entries()[0]
+    assert entry.kind is AuditEventKind.ACTION_PLANNED
+    assert entry.honesty == "SIMULATED"
+
+
+def test_an_executor_with_no_ledger_still_works() -> None:
+    """The audit trail is a capability, not a dependency the plane cannot run without."""
+    executor, adapter = _executor(dry_run=False)
+
+    assert executor.apply(_plan(adapter), ts=TICK, owner="operator").status is ActionStatus.APPLIED

@@ -9,10 +9,12 @@ from audit.chain import (
     build_entry,
     verify_chain,
 )
+from audit.sink import AuditSink
 
 __all__ = [
     "AuditChain",
     "AuditChainError",
+    "AuditSink",
     "ChainForkedError",
     "ChainVerification",
     "body_digest",

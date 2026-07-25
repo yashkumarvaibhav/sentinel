@@ -20,6 +20,12 @@ eventually be adapters this repository did not write:
 * **An adapter cannot report against a plan it was not given.** Outcomes are
   checked to reference this plan and this key, so a buggy adapter cannot record
   an effect against somebody else's key and make the journal lie.
+* **Everything that happens here is written down, including the refusals.** The
+  executor is the one place every action passes through, which makes it the one
+  place an audit trail can be complete rather than well-intentioned. A refused
+  action is appended before the exception is re-raised: "we declined to do this,
+  and why" is exactly the record somebody will want later, and it is the one a
+  caller that swallows the exception would otherwise erase.
 
 Time is passed in. Nothing here reads a wall clock, so a capture replay executes
 and expires leases exactly as a live run does.
@@ -27,20 +33,35 @@ and expires leases exactly as a live run does.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
+from contextlib import contextmanager
 from datetime import datetime, timedelta
+from typing import Literal
 
 from action.actuators.base import ActionRejectedError, Actuator, ActuatorContractError
 from action.config import ActionConfig
 from action.journal import ActionJournal
 from action.leases import LeaseRegistry
+from audit import AuditSink
 from contracts import (
     DESTRUCTIVE_ACTIONS,
     ActionOutcome,
     ActionPlan,
     ActionStatus,
     ActuatorKind,
+    AuditEventKind,
 )
+
+# Which ledger entry each terminal status earns. A status with no entry here is
+# one the ledger would silently omit, so the mapping is exhaustive over the
+# statuses an executor can return rather than a lookup with a default.
+_AUDITED_STATUS: dict[ActionStatus, AuditEventKind] = {
+    ActionStatus.SIMULATED: AuditEventKind.ACTION_PLANNED,
+    ActionStatus.APPLIED: AuditEventKind.ACTION_APPLIED,
+    ActionStatus.VERIFIED: AuditEventKind.ACTION_VERIFIED,
+    ActionStatus.REVERTED: AuditEventKind.ACTION_REVERTED,
+    ActionStatus.FAILED: AuditEventKind.ACTION_REFUSED,
+}
 
 # A destructive rung needs two distinct people. One person with two accounts is
 # not two keys, which is why approvals are required to be distinct identities.
@@ -50,7 +71,7 @@ TWO_KEY_APPROVERS = 2
 class ActionExecutor:
     """Runs plans through their adapters under dry-run, idempotency and leases."""
 
-    __slots__ = ("_actuators", "_dry_run", "_journal", "_leases")
+    __slots__ = ("_actuators", "_dry_run", "_journal", "_leases", "_ledger")
 
     def __init__(
         self,
@@ -60,6 +81,7 @@ class ActionExecutor:
         dry_run: bool,
         journal: ActionJournal | None = None,
         leases: LeaseRegistry | None = None,
+        ledger: AuditSink | None = None,
     ) -> None:
         enabled = configuration.enabled_actuators()
         registered: dict[ActuatorKind, Actuator] = {}
@@ -86,6 +108,10 @@ class ActionExecutor:
             if leases is not None
             else LeaseRegistry(ttl=timedelta(seconds=configuration.execution.lease_ttl_seconds))
         )
+        # Optional, and `is None` for the same reason the journal is: an empty
+        # chain is falsy, and `ledger or AuditChain()` would hand the caller a
+        # ledger nothing writes to.
+        self._ledger = ledger
 
     @property
     def dry_run(self) -> bool:
@@ -112,18 +138,23 @@ class ActionExecutor:
     ) -> ActionOutcome:
         """Put the effect in place, exactly once, if everything permits it."""
         actuator = self._actuator_for(plan)
-        self._require_approval(plan, approvals)
-        if self._dry_run:
-            return self._checked(plan, actuator.simulate(plan, ts=ts), expect_simulated=True)
-        already = self._journal.latest(plan.idempotency_key)
-        if already is not None and already.in_force:
-            return self._deduplicated(plan, already, ts=ts, approvals=approvals)
-        self._journal.ensure_room(plan.idempotency_key)
-        with self._leases.hold(plan.target_ref, owner=owner, now=ts):
-            outcome = self._checked(plan, actuator.apply(plan, ts=ts), expect_simulated=False)
-        recorded = _with_approvals(outcome, approvals)
-        self._journal.record(recorded)
-        return recorded
+        with self._audited(plan, ts=ts, owner=owner):
+            self._require_approval(plan, approvals)
+            if self._dry_run:
+                simulated = self._checked(
+                    plan, actuator.simulate(plan, ts=ts), expect_simulated=True
+                )
+                return self._record(simulated, plan, ts=ts, owner=owner)
+            already = self._journal.latest(plan.idempotency_key)
+            if already is not None and already.in_force:
+                duplicate = self._deduplicated(plan, already, ts=ts, approvals=approvals)
+                return self._record(duplicate, plan, ts=ts, owner=owner)
+            self._journal.ensure_room(plan.idempotency_key)
+            with self._leases.hold(plan.target_ref, owner=owner, now=ts):
+                outcome = self._checked(plan, actuator.apply(plan, ts=ts), expect_simulated=False)
+            recorded = _with_approvals(outcome, approvals)
+            self._journal.record(recorded)
+            return self._record(recorded, plan, ts=ts, owner=owner)
 
     def verify(self, plan: ActionPlan, *, ts: datetime) -> ActionOutcome:
         """Check the target for the effect the plan said to expect.
@@ -139,7 +170,7 @@ class ActionExecutor:
         outcome = self._checked(plan, actuator.verify(plan, ts=ts), expect_simulated=False)
         if not self._dry_run:
             self._journal.record(outcome)
-        return outcome
+        return self._record(outcome, plan, ts=ts, owner="verifier")
 
     def revert(
         self,
@@ -157,28 +188,103 @@ class ActionExecutor:
         outage. Approvers are still recorded when a person did ask for it.
         """
         actuator = self._actuator_for(plan)
-        if self._dry_run:
-            return self._checked(plan, actuator.simulate(plan, ts=ts), expect_simulated=True)
-        already = self._journal.latest(plan.idempotency_key)
-        if already is None:
-            raise ActionRejectedError(
-                f"nothing is recorded under {plan.idempotency_key[:16]}, so there is no effect "
-                "to put back; a revert is taken against something that happened"
+        with self._audited(plan, ts=ts, owner=owner):
+            if self._dry_run:
+                simulated = self._checked(
+                    plan, actuator.simulate(plan, ts=ts), expect_simulated=True
+                )
+                return self._record(simulated, plan, ts=ts, owner=owner)
+            already = self._journal.latest(plan.idempotency_key)
+            if already is None:
+                raise ActionRejectedError(
+                    f"nothing is recorded under {plan.idempotency_key[:16]}, so there is no "
+                    "effect to put back; a revert is taken against something that happened"
+                )
+            if already.status is ActionStatus.REVERTED:
+                duplicate = self._deduplicated(plan, already, ts=ts, approvals=approvals)
+                return self._record(duplicate, plan, ts=ts, owner=owner)
+            # The token the adapter minted on its own apply, carried back to it
+            # untouched. Nothing between the two ends interprets it.
+            token = already.revert_token
+            with self._leases.hold(plan.target_ref, owner=owner, now=ts):
+                outcome = self._checked(
+                    plan,
+                    actuator.revert(plan, ts=ts, revert_token=token),
+                    expect_simulated=False,
+                )
+            recorded = _with_approvals(outcome, approvals)
+            self._journal.record(recorded)
+            return self._record(recorded, plan, ts=ts, owner=owner)
+
+    @contextmanager
+    def _audited(self, plan: ActionPlan, *, ts: datetime, owner: str) -> Iterator[None]:
+        """Write a refusal down before it is raised.
+
+        A caller that catches the exception and moves on would otherwise leave no
+        trace that the platform declined to do something - which is exactly the
+        record somebody reconstructing an incident will look for.
+        """
+        try:
+            yield
+        except ActionRejectedError as refusal:
+            self._append(
+                ts=ts,
+                kind=AuditEventKind.ACTION_REFUSED,
+                actor=owner,
+                summary=f"refused {plan.action_kind.value} on {plan.target_ref}: {refusal}",
+                plan=plan,
+                body={"reason": str(refusal), "actuator": plan.actuator.value},
             )
-        if already.status is ActionStatus.REVERTED:
-            return self._deduplicated(plan, already, ts=ts, approvals=approvals)
-        # The token the adapter minted on its own apply, carried back to it
-        # untouched. Nothing between the two ends interprets it.
-        token = already.revert_token
-        with self._leases.hold(plan.target_ref, owner=owner, now=ts):
-            outcome = self._checked(
-                plan,
-                actuator.revert(plan, ts=ts, revert_token=token),
-                expect_simulated=False,
-            )
-        recorded = _with_approvals(outcome, approvals)
-        self._journal.record(recorded)
-        return recorded
+            raise
+
+    def _record(
+        self, outcome: ActionOutcome, plan: ActionPlan, *, ts: datetime, owner: str
+    ) -> ActionOutcome:
+        """Append what actually happened, and hand the outcome straight back."""
+        self._append(
+            ts=ts,
+            kind=_AUDITED_STATUS[outcome.status],
+            actor=owner,
+            summary=f"{outcome.status.value.lower()} {plan.action_kind.value} on "
+            f"{plan.target_ref}: {outcome.detail}",
+            plan=plan,
+            body={
+                "actuator": plan.actuator.value,
+                "deduplicated": outcome.deduplicated,
+                "gates_passed": list(outcome.gates_passed),
+                "idempotency_key": plan.idempotency_key,
+                "outcome_id": outcome.outcome_id,
+                "parameters": dict(plan.parameters),
+                "status": outcome.status.value,
+            },
+            honesty=outcome.honesty,
+        )
+        return outcome
+
+    def _append(
+        self,
+        *,
+        ts: datetime,
+        kind: AuditEventKind,
+        actor: str,
+        summary: str,
+        plan: ActionPlan,
+        body: dict[str, object],
+        honesty: Literal["REAL", "SIMULATED"] = "REAL",
+    ) -> None:
+        if self._ledger is None:
+            return
+        self._ledger.append(
+            ts=ts,
+            kind=kind,
+            actor=actor,
+            summary=summary,
+            body=body,
+            incident_id=plan.incident_id,
+            decision_id=plan.decision_id,
+            plan_id=plan.plan_id,
+            honesty=honesty,
+        )
 
     def _actuator_for(self, plan: ActionPlan) -> Actuator:
         actuator = self._actuators.get(plan.actuator)
