@@ -181,6 +181,11 @@ def test_score_gates_fail_closed_on_insufficient_or_incomplete_evidence() -> Non
                 "SILENCE": 0.9,
             },
             unmatched_episode_max_hops=1,
+            decision_accuracy_min=0.90,
+            decision_reason_accuracy_min=0.85,
+            attack_recall_min=0.90,
+            origin_accuracy_min=0.80,
+            decision_false_acts_max=0,
         ),
     )
 

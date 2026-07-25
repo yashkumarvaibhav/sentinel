@@ -102,6 +102,16 @@ def nearest_rank(values: tuple[float, ...], *, percentile: float) -> MetricValue
     )
 
 
+def ratio(numerator: int, denominator: int) -> MetricValue:
+    """A share of a countable population, insufficient when there is nothing to count.
+
+    An empty denominator is never a perfect score: a metric with no population
+    has not been measured, and reporting 1.0 would let a capture that exercises
+    nothing look flawless.
+    """
+    return _ratio(numerator, denominator)
+
+
 def _ratio(numerator: int, denominator: int) -> MetricValue:
     if denominator == 0:
         return MetricValue(

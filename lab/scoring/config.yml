@@ -30,3 +30,23 @@ symptom_recall_min:
   SATURATION: 0.90
   DROP: 0.90
   SILENCE: 0.90
+
+# Phase 4 decision-level floors (TESTING_QA.md section 3). These ship with the
+# metrics, as that section requires, and they ratchet upward only - lowering one
+# is an explicit recorded decision, never a convenience.
+#
+# The handling floors are stated over surfacing and acting, never over a policy
+# rung: the ladder in config/policies/action-policy.yml is operator-owned data,
+# and an operator retuning their own ladder must not register as a regression of
+# the platform.
+decision_accuracy_min: 0.90
+decision_reason_accuracy_min: 0.85
+# Graded only where hostility is recognisable from behaviour. A volume-only
+# surge is deliberately NOT labelled hostile (see attack_day), because naming it
+# so would reward guessing from volume alone.
+attack_recall_min: 0.90
+origin_accuracy_min: 0.80
+# The safety number: a count, not a rate, and the only floor that is a hard
+# zero. An autonomous action taken where the answer key says nothing was wrong
+# is a mistake no aggregate may average away.
+decision_false_acts_max: 0

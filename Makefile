@@ -252,6 +252,14 @@ decide-replay: ## Replay captures through the whole decision plane (CAPTURE_ROOT
 		$(if $(TRANSCRIPT_DIR),--transcript-dir "../$(TRANSCRIPT_DIR)") \
 		--report ../docs/reports/phase-4-decision-characterization.md
 
+.PHONY: score-decisions
+score-decisions: ## Score decisions against the scenario answer key (CAPTURE_ROOTS= space-separated)
+	@test -n "$(CAPTURE_ROOTS)" || { echo "CAPTURE_ROOTS is required" >&2; exit 2; }
+	cd platform && PYTHONPATH=.. uv run python -m lab.scoring.decision_gate \
+		--repo-root .. \
+		$(foreach root,$(CAPTURE_ROOTS),--capture "../$(root)") \
+		--report ../$(or $(DECISION_REPORT),docs/reports/phase-4-decision-score.md)
+
 .PHONY: score-negative-control
 score-negative-control: ## Assert no-fault captures emit zero fault-kind episodes (CAPTURE_ROOTS=)
 	@test -n "$(CAPTURE_ROOTS)" || { echo "CAPTURE_ROOTS is required" >&2; exit 2; }

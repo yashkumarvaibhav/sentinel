@@ -38,6 +38,11 @@ class ScoreGateConfig(BaseModel):
     symptom_precision_min: dict[str, Probability]
     symptom_recall_min: dict[str, Probability]
     unmatched_episode_max_hops: int = Field(ge=0)
+    decision_accuracy_min: Probability
+    decision_reason_accuracy_min: Probability
+    attack_recall_min: Probability
+    origin_accuracy_min: Probability
+    decision_false_acts_max: int = Field(ge=0, le=0)
 
     @model_validator(mode="after")
     def complete_symptom_floors(self) -> ScoreGateConfig:
@@ -93,14 +98,14 @@ def evaluate_gates(runs: tuple[RunScore, ...], config: ScoreGateConfig) -> GateR
     overall = binary_metrics(predicted=predicted, expected=expected)
     quiet = binary_metrics(predicted=quiet_predicted, expected=quiet_expected)
     failures: list[GateFailure] = []
-    _minimum(
+    check_minimum(
         failures,
         "residual_precision",
         overall.precision,
         config.residual_precision_min,
         "overall",
     )
-    _minimum(
+    check_minimum(
         failures,
         "residual_recall",
         overall.recall,
@@ -173,7 +178,7 @@ def evaluate_symptom_gates(
     failures: list[GateFailure] = []
     for kind in required_kinds:
         score = next(item for item in by_kind if item.kind is kind)
-        _minimum(
+        check_minimum(
             failures,
             "symptom_recall",
             score.metrics.recall,
@@ -289,7 +294,7 @@ def _aggregate_kind(
     )
 
 
-def _minimum(
+def check_minimum(
     failures: list[GateFailure],
     name: str,
     metric: MetricValue,
