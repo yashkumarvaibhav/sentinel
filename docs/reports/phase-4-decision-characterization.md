@@ -32,7 +32,7 @@ Final verification detail:
 
 - Incident over `frontend`:
   - `temporal_causality`: **PASSED** — frontend was observed misbehaving first, no later than any of the 1 episodes it is credited with
-  - `trace_coverage`: **PASSED** — all 1 affected services were covered by telemetry
+  - `trace_coverage`: **PASSED** — all 1 named services were covered by telemetry
   - `dependency_validity`: **PASSED** — every named service and dependency edge exists in the committed topology
   - `memory_similarity`: **BOOTSTRAP** — incident memory holds 0 of the 20 entries this check needs; passed vacuously as a bootstrap, not as a confirmation
 
@@ -46,14 +46,14 @@ Consecutive ticks whose judgement is identical are folded into one row, so every
 
 | t(s) | ticks | SEC | REL | CHG | BIZ | verdict | conf | incidents | origin | severity | state | verified |
 |---|---:|---:|---:|---:|---:|---|---:|---:|---|---|---|---|
-| 104..110 | 4 | 0.000 | 0.978 | — | 0.000 | OPERATIONAL_FAULT | 0.647 | 1 | checkout | LOW | OPEN | yes |
-| 144 | 1 | 0.000 | 0.000 | — | 0.000 | EXPECTED_EVENT | 0.700 | 1 | checkout | LOW | MONITORING | yes |
+| 104..110 | 4 | 0.000 | 0.978 | — | 0.000 | OPERATIONAL_FAULT | 0.647 | 1 | payment | LOW | OPEN | yes |
+| 144 | 1 | 0.000 | 0.000 | — | 0.000 | EXPECTED_EVENT | 0.700 | 1 | payment | LOW | MONITORING | yes |
 
 Final verification detail:
 
 - Incident over `checkout, frontend`:
-  - `temporal_causality`: **PASSED** — checkout was observed misbehaving first, no later than any of the 2 episodes it is credited with
-  - `trace_coverage`: **PASSED** — all 2 affected services were covered by telemetry
+  - `temporal_causality`: **PASSED** — payment was observed misbehaving first, no later than any of the 2 episodes it is credited with
+  - `trace_coverage`: **PASSED** — all 3 named services were covered by telemetry (including 1 implicated by a degraded edge)
   - `dependency_validity`: **PASSED** — every named service and dependency edge exists in the committed topology
   - `memory_similarity`: **BOOTSTRAP** — incident memory holds 0 of the 20 entries this check needs; passed vacuously as a bootstrap, not as a confirmation
 
@@ -70,7 +70,7 @@ Consecutive ticks whose judgement is identical are folded into one row, so every
 | 148..298 | 76 | 0.600 | 0.000 | — | 0.000 | ATTACK | 0.680 | 1 | frontend | LOW | OPEN | yes |
 | 300..324 | 13 | 0.940 | 0.000 | — | 0.000 | ATTACK | 0.882 | 1 | frontend | LOW | OPEN | yes |
 | 330 | 1 | 0.850 | 0.000 | — | 0.000 | ATTACK | 0.755 | 1 | frontend | LOW | OPEN | yes |
-| 348..478 | 66 | 0.850 | 0.978 | — | 0.000 | COMBINATION | 0.849 | 1 | checkout | LOW | OPEN | no |
+| 348..478 | 66 | 0.850 | 0.978 | — | 0.000 | COMBINATION | 0.849 | 1 | payment | LOW | OPEN | no |
 | 480..514 | 18 | 0.850 | 0.992 | — | 0.000 | COMBINATION | 0.953 | 1 | payment | LOW | OPEN | no |
 | 540 | 1 | 0.000 | 0.650 | — | 0.000 | OPERATIONAL_FAULT | 0.598 | 1 | payment | LOW | OPEN | no |
 | 610 | 1 | 0.000 | 0.879 | — | 0.000 | OPERATIONAL_FAULT | 0.732 | 1 | payment | LOW | OPEN | no |
@@ -106,6 +106,6 @@ Final verification detail:
 
 - Incident over `checkout, email, frontend, payment`:
   - `temporal_causality`: **FAILED** — frontend broke 200s before payment was first observed, beyond the 30s tolerance
-  - `trace_coverage`: **PASSED** — all 4 affected services were covered by telemetry
+  - `trace_coverage`: **PASSED** — all 4 named services were covered by telemetry
   - `dependency_validity`: **PASSED** — every named service and dependency edge exists in the committed topology
   - `memory_similarity`: **BOOTSTRAP** — incident memory holds 0 of the 20 entries this check needs; passed vacuously as a bootstrap, not as a confirmation

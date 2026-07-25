@@ -145,17 +145,26 @@ def _temporal_causality(
 
 def _trace_coverage(incident: Incident, covered_services: frozenset[str]) -> VerificationCheck:
     name = "trace_coverage"
-    uncovered = sorted(set(incident.services) - covered_services)
+    # An implicated service is held to the same standard, and for a stronger
+    # reason: it is usually the origin, and blaming a service we could not see
+    # is exactly the conclusion this check exists to refuse.
+    named = set(incident.services) | set(incident.implicated_services)
+    uncovered = sorted(named - covered_services)
     if uncovered:
         return VerificationCheck(
             name=name,
             outcome=CheckOutcome.FAILED,
             detail=f"no telemetry coverage for {', '.join(uncovered)}",
         )
+    implicated = (
+        ""
+        if not incident.implicated_services
+        else f" (including {len(incident.implicated_services)} implicated by a degraded edge)"
+    )
     return VerificationCheck(
         name=name,
         outcome=CheckOutcome.PASSED,
-        detail=f"all {len(incident.services)} affected services were covered by telemetry",
+        detail=f"all {len(named)} named services were covered by telemetry{implicated}",
     )
 
 
@@ -173,7 +182,7 @@ def _dependency_validity(
         for service in topology.services
         for dependency in service.dependencies
     }
-    unknown = sorted(set(incident.services) - known)
+    unknown = sorted((set(incident.services) | set(incident.implicated_services)) - known)
     if unknown:
         return VerificationCheck(
             name=name,

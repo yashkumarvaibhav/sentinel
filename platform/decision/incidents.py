@@ -197,6 +197,7 @@ class IncidentTracker:
             state=state,
             severity=severity,
             services=services,
+            implicated_services=collapse.implicated,
             kinds=kinds,
             episode_ids=episode_ids,
             business_impact=impact,

@@ -78,11 +78,17 @@ def test_the_service_that_started_first_is_not_automatically_the_origin() -> Non
 
     ranked = {candidate.service: candidate for candidate in collapse.candidates}
     # checkout starts the storm and still loses: its own trouble is explained by
-    # the payment dependency it is waiting on.
+    # the payment dependency it is waiting on. payment ties it on onset - the
+    # accusing edge is the first observation of payment, which is why its own
+    # later log burst does not hold it back - and wins on the other two priors.
     assert ranked["checkout"].onset_score == 1.0
     assert ranked["checkout"].accusation_score == 0.0
-    assert ranked["payment"].onset_score < 1.0
+    assert ranked["payment"].onset_score == 1.0
+    assert ranked["payment"].accusation_score > 0.0
+    assert ranked["payment"].reachability_score > ranked["checkout"].reachability_score
     assert ranked["payment"].score > ranked["checkout"].score
+    # frontend screams loudest, started late and is accused by nothing.
+    assert ranked["frontend"].onset_score < 1.0
 
 
 def test_a_degraded_edge_accuses_the_callee_and_exonerates_the_caller() -> None:
@@ -106,6 +112,91 @@ def test_a_degraded_edge_accuses_the_callee_and_exonerates_the_caller() -> None:
     assert ranked["checkout"].accusation_score == 0.0
     assert collapse.origin is not None
     assert collapse.origin.service == "payment"
+
+
+def _silent_origin_cascade() -> tuple[SymptomEpisode, ...]:
+    """The shape measured on the real development cascade: the origin says nothing.
+
+    Both detectors that fired are edges. payment - the service that actually
+    broke - emitted no episode of its own; the only evidence it exists at all
+    is checkout's degraded call to it.
+    """
+    return (
+        symptom_episode(
+            kind=SymptomKind.EDGE_DEGRADED,
+            service="checkout",
+            signal="dependency.payment",
+            opened_offset_seconds=100.0,
+        ),
+        symptom_episode(
+            kind=SymptomKind.EDGE_DEGRADED,
+            service="frontend",
+            signal="dependency.checkout",
+            opened_offset_seconds=100.0,
+        ),
+    )
+
+
+def test_a_silent_origin_is_still_named_by_the_edges_that_accuse_it() -> None:
+    collapse = _collapse(*_silent_origin_cascade())
+
+    assert collapse.origin is not None
+    assert collapse.origin.service == "payment"
+    assert collapse.implicated == ("payment",)
+
+
+def test_a_symptomatic_service_is_never_reported_as_merely_implicated() -> None:
+    collapse = _collapse(*_payment_cascade())
+
+    assert collapse.origin is not None
+    assert collapse.origin.service == "payment"
+    assert collapse.implicated == ()
+
+
+def test_an_edge_naming_an_unknown_service_cannot_put_it_in_the_ranking() -> None:
+    """A degraded edge to nowhere is a configuration fault, not a new service."""
+    collapse = _collapse(
+        symptom_episode(
+            kind=SymptomKind.EDGE_DEGRADED,
+            service="checkout",
+            signal="dependency.ghost-service",
+            opened_offset_seconds=100.0,
+        ),
+    )
+
+    assert collapse.implicated == ()
+    assert [candidate.service for candidate in collapse.candidates] == ["checkout"]
+
+
+def test_an_edge_that_is_not_a_committed_dependency_cannot_implicate_anyone() -> None:
+    collapse = _collapse(
+        symptom_episode(
+            kind=SymptomKind.EDGE_DEGRADED,
+            service="email",
+            signal="dependency.payment",
+            opened_offset_seconds=100.0,
+        ),
+    )
+
+    assert collapse.implicated == ()
+    assert [candidate.service for candidate in collapse.candidates] == ["email"]
+
+
+def test_the_incident_separates_what_it_saw_from_what_it_was_told() -> None:
+    tracker = IncidentTracker(
+        configuration=load_incidents(CONFIG_ROOT / "incidents.yml"),
+        topology=load_config(CONFIG_ROOT).topology,
+    )
+
+    incidents = tracker.observe(
+        ts=EPOCH + timedelta(seconds=300.0), episodes=_silent_origin_cascade()
+    )
+
+    assert len(incidents) == 1
+    incident = incidents[0]
+    assert incident.services == ("checkout", "frontend")
+    assert incident.implicated_services == ("payment",)
+    assert incident.origin_service == "payment"
 
 
 def test_an_evenly_balanced_storm_names_no_origin_at_all() -> None:

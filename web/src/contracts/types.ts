@@ -101,6 +101,7 @@ export type Services1 = Identifier[];
  * @minItems 1
  */
 export type EpisodeIds = [Identifier, ...Identifier[]];
+export type ImplicatedServices = Identifier[];
 /**
  * @minItems 1
  */
@@ -322,11 +323,19 @@ export interface RejectedAlternative {
  *
  * Identity is anchored to the earliest episode in the cluster, so the incident
  * keeps its id as the storm grows around it.
+ *
+ * ``services`` are the services that carried a symptom. ``implicated_services``
+ * are the ones named only by the evidence - a service whose caller's degraded
+ * dependency edge accuses it while it emits nothing of its own. The two are
+ * kept apart because they are different claims: one was observed misbehaving,
+ * the other was merely blamed, and a real cascade's origin is routinely the
+ * second kind.
  */
 export interface Incident {
   anchor_episode_id: Identifier;
   business_impact?: Probability | null;
   episode_ids: EpisodeIds;
+  implicated_services?: ImplicatedServices;
   incident_id: Identifier;
   kinds: Kinds;
   last_activity_ts: UtcDatetime;

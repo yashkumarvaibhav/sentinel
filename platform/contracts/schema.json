@@ -385,7 +385,7 @@
     },
     "Incident": {
       "additionalProperties": false,
-      "description": "One real-world problem, assembled from the storm of symptoms it caused.\n\nA single fault lights many detectors across many services. An incident is\nthe collapse of that storm into the one thing an on-call person is actually\ndealing with: co-occurring episodes on services that are near each other in\nthe topology become one incident, not twelve alerts.\n\nIdentity is anchored to the earliest episode in the cluster, so the incident\nkeeps its id as the storm grows around it.",
+      "description": "One real-world problem, assembled from the storm of symptoms it caused.\n\nA single fault lights many detectors across many services. An incident is\nthe collapse of that storm into the one thing an on-call person is actually\ndealing with: co-occurring episodes on services that are near each other in\nthe topology become one incident, not twelve alerts.\n\nIdentity is anchored to the earliest episode in the cluster, so the incident\nkeeps its id as the storm grows around it.\n\n``services`` are the services that carried a symptom. ``implicated_services``\nare the ones named only by the evidence - a service whose caller's degraded\ndependency edge accuses it while it emits nothing of its own. The two are\nkept apart because they are different claims: one was observed misbehaving,\nthe other was merely blamed, and a real cascade's origin is routinely the\nsecond kind.",
       "properties": {
         "anchor_episode_id": {
           "$ref": "#/$defs/Identifier"
@@ -407,6 +407,14 @@
           },
           "minItems": 1,
           "title": "Episode Ids",
+          "type": "array"
+        },
+        "implicated_services": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "title": "Implicated Services",
           "type": "array"
         },
         "incident_id": {

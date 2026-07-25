@@ -180,6 +180,52 @@ def test_an_unwatched_service_blocks_confirmation() -> None:
     assert verification.confirmed is False
 
 
+def _silent_origin_cascade() -> tuple[SymptomEpisode, ...]:
+    """Two edges and nothing else: the accused service emits no symptom of its own."""
+    return (
+        symptom_episode(
+            kind=SymptomKind.EDGE_DEGRADED,
+            service="checkout",
+            signal="dependency.payment",
+            opened_offset_seconds=100.0,
+        ),
+        symptom_episode(
+            kind=SymptomKind.EDGE_DEGRADED,
+            service="frontend",
+            signal="dependency.checkout",
+            opened_offset_seconds=100.0,
+        ),
+    )
+
+
+def test_an_implicated_origin_we_could_not_see_blocks_confirmation() -> None:
+    """Blaming a service without telemetry is exactly the conclusion this refuses."""
+    episodes = _silent_origin_cascade()
+    incident = _incident(episodes)
+    assert incident.origin_service == "payment"
+    assert "payment" not in incident.services
+
+    verification = _verify(
+        episodes,
+        incident=incident,
+        covered=frozenset({"frontend", "checkout"}),
+    )
+
+    coverage = next(check for check in verification.checks if check.name == "trace_coverage")
+    assert coverage.outcome is CheckOutcome.FAILED
+    assert "payment" in coverage.detail
+    assert verification.confirmed is False
+
+
+def test_an_implicated_origin_we_did_watch_is_confirmable() -> None:
+    episodes = _silent_origin_cascade()
+
+    verification = _verify(episodes, incident=_incident(episodes))
+
+    assert _outcomes(verification)["trace_coverage"] is CheckOutcome.PASSED
+    assert verification.confirmed is True
+
+
 def test_an_invented_dependency_edge_blocks_confirmation() -> None:
     episodes = (
         *_payment_cascade(),

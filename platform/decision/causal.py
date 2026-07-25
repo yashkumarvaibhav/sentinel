@@ -18,6 +18,16 @@ than asserted:
   *for* the callee and *against* the caller, because the caller's trouble is
   already explained by the dependency it is waiting on.
 
+A candidate does not have to be carrying a symptom of its own. Measured on the
+development cascade capture, the real origin emitted **no episode at all**: the
+only evidence of payment failing was checkout's degraded call to it. Ranking
+only symptomatic services therefore named checkout - the caller its own edge
+exonerates - and the accusation prior could never do the job it exists for. A
+service accused by a degraded edge is ranked as a candidate, provided both the
+service and the edge exist in committed topology, so an origin can be named
+but never invented. This is also what the verifier already assumes: an
+accusing edge *is* an observation of the accused.
+
 When the top two candidates are too close to separate, no origin is named. An
 honestly ambiguous storm is more useful than a confident wrong service.
 """
@@ -48,10 +58,17 @@ class OriginCandidate:
 
 @dataclass(frozen=True, slots=True)
 class CausalCollapse:
-    """The ranked candidates and, when the evidence separates them, the origin."""
+    """The ranked candidates and, when the evidence separates them, the origin.
+
+    ``implicated`` names the candidates that carry no symptom of their own and
+    are in the ranking only because a degraded dependency edge accuses them.
+    They are recorded separately so an incident never claims to have *observed*
+    a service it merely heard about.
+    """
 
     origin: OriginCandidate | None
     candidates: tuple[OriginCandidate, ...]
+    implicated: tuple[str, ...]
     note: str
 
 
@@ -85,10 +102,25 @@ def collapse_to_origin(
 ) -> CausalCollapse:
     """Rank the affected services and name an origin when the evidence separates them."""
     if not episodes:
-        return CausalCollapse(origin=None, candidates=(), note="no episodes to collapse")
-    services = sorted({episode.service for episode in episodes})
+        return CausalCollapse(
+            origin=None, candidates=(), implicated=(), note="no episodes to collapse"
+        )
+    symptomatic = {episode.service for episode in episodes}
+    accusations = _accusation_onsets(
+        episodes,
+        prefix=configuration.dependency_signal_prefix,
+        topology=topology,
+    )
+    implicated = tuple(sorted(set(accusations) - symptomatic))
+    services = sorted(symptomatic | set(accusations))
+    # An accusing edge is the first observation of the accused, so it counts
+    # towards onset exactly as the service's own symptoms do - the same rule the
+    # verifier's temporal check already applies.
     onsets = {
-        service: min(episode.opened_ts for episode in episodes if episode.service == service)
+        service: min(
+            [episode.opened_ts for episode in episodes if episode.service == service]
+            + ([accusations[service]] if service in accusations else [])
+        )
         for service in services
     }
     downstream = dependents(topology)
@@ -134,6 +166,7 @@ def collapse_to_origin(
         return CausalCollapse(
             origin=ranked[0],
             candidates=ranked,
+            implicated=implicated,
             note=f"{ranked[0].service} is the only affected service",
         )
     margin = ranked[0].score - ranked[1].score
@@ -143,6 +176,7 @@ def collapse_to_origin(
         return CausalCollapse(
             origin=None,
             candidates=ranked,
+            implicated=implicated,
             note=(
                 f"{ranked[0].service} and {ranked[1].service} are separated by only "
                 f"{margin:.3f}, under the {configuration.minimum_margin:.3f} margin"
@@ -151,8 +185,43 @@ def collapse_to_origin(
     return CausalCollapse(
         origin=ranked[0],
         candidates=ranked,
+        implicated=implicated,
         note=(f"{ranked[0].service} leads {ranked[1].service} by {margin:.3f}: {ranked[0].note}"),
     )
+
+
+def _accusation_onsets(
+    episodes: Sequence[SymptomEpisode],
+    *,
+    prefix: str,
+    topology: TopologyConfig,
+) -> dict[str, datetime]:
+    """When each accused callee was first observed, through the edges that accuse it.
+
+    Only a committed service reached over a committed dependency edge counts. A
+    degraded edge naming something the topology has never heard of is a
+    configuration fault, not the discovery of a new service, and it must not be
+    able to put a name into an incident's origin.
+    """
+    known = {service.service for service in topology.services}
+    edges = {
+        (service.service, dependency)
+        for service in topology.services
+        for dependency in service.dependencies
+    }
+    onsets: dict[str, datetime] = {}
+    for episode in episodes:
+        if episode.kind is not SymptomKind.EDGE_DEGRADED:
+            continue
+        if not episode.signal.startswith(prefix):
+            continue
+        callee = episode.signal[len(prefix) :]
+        if not callee or callee not in known or (episode.service, callee) not in edges:
+            continue
+        seen = onsets.get(callee)
+        if seen is None or episode.opened_ts < seen:
+            onsets[callee] = episode.opened_ts
+    return onsets
 
 
 def _edge_evidence(

@@ -320,6 +320,13 @@ class Incident(ContractModel):
 
     Identity is anchored to the earliest episode in the cluster, so the incident
     keeps its id as the storm grows around it.
+
+    ``services`` are the services that carried a symptom. ``implicated_services``
+    are the ones named only by the evidence - a service whose caller's degraded
+    dependency edge accuses it while it emits nothing of its own. The two are
+    kept apart because they are different claims: one was observed misbehaving,
+    the other was merely blamed, and a real cascade's origin is routinely the
+    second kind.
     """
 
     incident_id: Identifier
@@ -329,6 +336,7 @@ class Incident(ContractModel):
     state: IncidentState
     severity: IncidentSeverity
     services: tuple[Identifier, ...] = Field(min_length=1)
+    implicated_services: tuple[Identifier, ...] = ()
     kinds: tuple[SymptomKind, ...] = Field(min_length=1)
     episode_ids: tuple[Identifier, ...] = Field(min_length=1)
     business_impact: Probability | None = None
@@ -338,7 +346,7 @@ class Incident(ContractModel):
     revision: int = Field(ge=1)
     note: HumanText
 
-    @field_validator("services", "episode_ids", "merged_incident_ids")
+    @field_validator("services", "implicated_services", "episode_ids", "merged_incident_ids")
     @classmethod
     def unique_members(cls, values: tuple[str, ...]) -> tuple[str, ...]:
         """Every membership list on an incident is an ordered set."""
@@ -360,10 +368,18 @@ class Incident(ContractModel):
             raise ValueError("the anchoring episode must be a member of the incident")
         if self.incident_id in self.merged_incident_ids:
             raise ValueError("an incident cannot record itself as merged away")
+        overlap = sorted(set(self.services) & set(self.implicated_services))
+        if overlap:
+            raise ValueError(
+                f"a service cannot be both symptomatic and merely implicated: {', '.join(overlap)}"
+            )
         if (self.origin_service is None) != (self.origin_confidence is None):
             raise ValueError("an origin and its confidence are recorded together or not at all")
-        if self.origin_service is not None and self.origin_service not in self.services:
-            raise ValueError("the collapsed origin must be a service the incident affects")
+        named = set(self.services) | set(self.implicated_services)
+        if self.origin_service is not None and self.origin_service not in named:
+            raise ValueError(
+                "the collapsed origin must be a service this incident's evidence names"
+            )
         return self
 
 
