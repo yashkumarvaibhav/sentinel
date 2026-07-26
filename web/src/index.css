@@ -114,6 +114,28 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+.sentinel-graph-controls button {
+  background: var(--raised);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  min-height: 2rem;
+  min-width: 2rem;
+  padding: 0.25rem;
+}
+
+.sentinel-graph-controls button + button {
+  border-top: 0;
+}
+
+.sentinel-graph-controls button:hover {
+  background: var(--accent-soft);
+}
+
+.sentinel-causal-flow .react-flow__attribution {
+  background: var(--raised);
+  color: var(--muted);
+}
+
 /* Accessibility is built per-slice, never deferred to a cleanup phase
    (UIUX_SPEC §1.6). */
 :focus-visible {

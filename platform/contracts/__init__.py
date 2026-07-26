@@ -20,6 +20,12 @@ from contracts.audit import (
     audit_entry_hash,
     canonical_body,
 )
+from contracts.causal_graph import (
+    CausalGraph,
+    CausalGraphEdge,
+    CausalGraphNode,
+    CausalGraphResponse,
+)
 from contracts.context import ContextWindow
 from contracts.decision import (
     ACTING_ACTIONS,
@@ -99,6 +105,10 @@ __all__ = [
     "AppliedSuppression",
     "AuditEntry",
     "AuditEventKind",
+    "CausalGraph",
+    "CausalGraphEdge",
+    "CausalGraphNode",
+    "CausalGraphResponse",
     "ChangeEvent",
     "ChangeKind",
     "CheckOutcome",

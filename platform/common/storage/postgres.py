@@ -13,7 +13,7 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from audit.chain import build_entry
-from common.storage.models import AuditRecord, IncidentRecord
+from common.storage.models import AuditRecord, IncidentGraphRecord, IncidentRecord
 from common.storage.pool import PostgresPool
 from contracts import AuditEntry, AuditEventKind, SymptomEpisode
 
@@ -24,6 +24,7 @@ class PostgresRepository:
     def __init__(self, *, pool: PostgresPool, schema: str) -> None:
         self._pool = pool
         self._incidents = sql.Identifier(schema, "incidents")
+        self._incident_graphs = sql.Identifier(schema, "incident_causal_graphs")
         self._audit_entries = sql.Identifier(schema, "audit_entries")
         self._symptom_episodes = sql.Identifier(schema, "symptom_episodes")
 
@@ -54,6 +55,63 @@ class PostgresRepository:
                 ),
             )
             return await cursor.fetchone() is not None
+
+    async def put_incident_bundle(
+        self,
+        record: IncidentRecord,
+        graph: IncidentGraphRecord,
+    ) -> bool:
+        """Atomically advance one incident and its evidence-preserving graph."""
+        if graph.incident_id != record.incident_id or graph.updated_at != record.updated_at:
+            raise ValueError("incident and causal graph storage identities must match")
+        incident_query = sql.SQL(
+            """
+            INSERT INTO {table} (incident_id, state, payload, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (incident_id) DO UPDATE SET
+                state = EXCLUDED.state,
+                payload = EXCLUDED.payload,
+                created_at = EXCLUDED.created_at,
+                updated_at = EXCLUDED.updated_at
+            WHERE {table}.updated_at < EXCLUDED.updated_at
+            RETURNING incident_id
+            """
+        ).format(table=self._incidents)
+        graph_query = sql.SQL(
+            """
+            INSERT INTO {table} (incident_id, updated_at, payload)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (incident_id) DO UPDATE SET
+                updated_at = EXCLUDED.updated_at,
+                payload = EXCLUDED.payload
+            WHERE {table}.updated_at < EXCLUDED.updated_at
+            RETURNING incident_id
+            """
+        ).format(table=self._incident_graphs)
+        async with self._pool.connection() as connection:
+            incident_cursor = await connection.execute(
+                incident_query,
+                (
+                    record.incident_id,
+                    record.state,
+                    Jsonb(record.payload),
+                    record.created_at,
+                    record.updated_at,
+                ),
+            )
+            if await incident_cursor.fetchone() is None:
+                return False
+            graph_cursor = await connection.execute(
+                graph_query,
+                (
+                    graph.incident_id,
+                    graph.updated_at,
+                    Jsonb(graph.payload),
+                ),
+            )
+            if await graph_cursor.fetchone() is None:
+                raise RuntimeError("causal graph could not advance with its incident")
+            return True
 
     async def get_incident(self, incident_id: str) -> IncidentRecord | None:
         """Fetch one incident by its stable id."""
@@ -101,6 +159,29 @@ class PostgresRepository:
                 payload=cast(dict[str, JsonValue], row[4]),
             )
             for row in rows
+        )
+
+    async def latest_incident_graph(self) -> IncidentGraphRecord | None:
+        """Return the newest graph whose owning incident is still unresolved."""
+        query = sql.SQL(
+            """
+            SELECT graph.incident_id, graph.updated_at, graph.payload
+            FROM {graphs} AS graph
+            JOIN {incidents} AS incident USING (incident_id)
+            WHERE incident.state IN ('OPEN', 'MITIGATING', 'MONITORING')
+            ORDER BY graph.updated_at DESC, graph.incident_id ASC
+            LIMIT 1
+            """
+        ).format(graphs=self._incident_graphs, incidents=self._incidents)
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(query)
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return IncidentGraphRecord(
+            incident_id=cast(str, row[0]),
+            updated_at=cast(datetime, row[1]),
+            payload=cast(dict[str, JsonValue], row[2]),
         )
 
     async def put_episode(self, episode: SymptomEpisode) -> bool:

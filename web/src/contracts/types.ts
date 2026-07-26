@@ -24,7 +24,8 @@ export type SentinelContract =
   | SnapshotInvalidation
   | ScoreProof
   | KpiResponse
-  | IncidentFeedResponse;
+  | IncidentFeedResponse
+  | CausalGraphResponse;
 export type TelemetryScalar = string | boolean | number;
 export type Identifier = string;
 export type FlowRefs = Identifier[];
@@ -278,6 +279,21 @@ export type Services3 = [Identifier, ...Identifier[]];
 export type Incidents = IncidentFeedItem[];
 export type Limit = number;
 export type Status1 = "ready" | "degraded";
+export type Active = boolean;
+export type EvidenceEpisodeIds = Identifier[];
+export type Edges = CausalGraphEdge[];
+export type Honesty6 = "REAL" | "SIMULATED";
+/**
+ * @minItems 1
+ */
+export type Nodes = [CausalGraphNode, ...CausalGraphNode[]];
+export type ActiveEpisodeCount = number;
+export type Criticality = "low" | "medium" | "high" | "critical";
+export type Implicated = boolean;
+export type IsOrigin = boolean;
+export type SymptomKinds = SymptomKind[];
+export type Tier = "edge" | "application" | "data" | "infrastructure";
+export type Status2 = "ready" | "empty" | "degraded";
 
 /**
  * One event-time telemetry value, containing evidence but never answer-key data.
@@ -794,4 +810,58 @@ export interface IncidentEvidenceValue {
   feature: SignalName;
   note: HumanText;
   value: FiniteFloat;
+}
+/**
+ * The authoritative current-incident graph or an explicit absence.
+ */
+export interface CausalGraphResponse {
+  detail: HumanText | null;
+  graph: CausalGraph | null;
+  status: Status2;
+}
+/**
+ * One durable graph revision for an incident.
+ *
+ * Resolved revisions remain valid durable state so closing an incident can
+ * advance both records atomically. The repository's current-graph query
+ * filters them out.
+ */
+export interface CausalGraph {
+  edges: Edges;
+  honesty: Honesty6;
+  incident_id: Identifier;
+  incident_state: IncidentState;
+  nodes: Nodes;
+  origin_confidence: Probability | null;
+  origin_service: Identifier | null;
+  updated_at: UtcDatetime;
+}
+/**
+ * One topology edge rendered in possible propagation direction.
+ *
+ * Configuration says ``caller depends on dependency``. This public edge is
+ * deliberately reversed to ``dependency -> caller`` so its arrow answers the
+ * incident-response question: where could an observed effect propagate?
+ */
+export interface CausalGraphEdge {
+  active: Active;
+  evidence_episode_ids: EvidenceEpisodeIds;
+  note: HumanText;
+  source_service: Identifier;
+  target_service: Identifier;
+}
+/**
+ * One committed topology service with evidence-derived incident heat.
+ */
+export interface CausalGraphNode {
+  active_episode_count: ActiveEpisodeCount;
+  criticality: Criticality;
+  implicated: Implicated;
+  is_origin: IsOrigin;
+  note: HumanText;
+  origin_confidence: Probability | null;
+  service: Identifier;
+  symptom_heat: Probability;
+  symptom_kinds: SymptomKinds;
+  tier: Tier;
 }

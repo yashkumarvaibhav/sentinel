@@ -30,7 +30,13 @@ def test_clickhouse_migration_is_versioned_idempotent_and_retained() -> None:
 def test_postgres_migration_separates_runtime_and_dev_label_schemas() -> None:
     migrations = load_migrations("postgres")
 
-    assert [migration.version for migration in migrations] == ["0001", "0002", "0003", "0004"]
+    assert [migration.version for migration in migrations] == [
+        "0001",
+        "0002",
+        "0003",
+        "0004",
+        "0005",
+    ]
     sql = render_migration(
         migrations[0],
         schema="sentinel_test",
@@ -108,3 +114,12 @@ def test_the_audit_ledger_cannot_hold_two_entries_built_on_one_head() -> None:
     assert "sentinel_test.audit_ledger" in sql
     assert "previous_hash text NOT NULL UNIQUE" in sql
     assert "sequence bigint NOT NULL UNIQUE" in sql
+
+
+def test_causal_graph_migration_is_runtime_only_and_owned_by_an_incident() -> None:
+    migrations = {migration.version: migration for migration in load_migrations("postgres")}
+
+    sql = render_migration(migrations["0005"], schema="sentinel_test")
+    assert "sentinel_test.incident_causal_graphs" in sql
+    assert "REFERENCES sentinel_test.incidents (incident_id)" in sql
+    assert "{{dev_schema}}" not in sql

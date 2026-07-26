@@ -50,6 +50,14 @@ class IncidentRecord(StorageRecord):
         return self
 
 
+class IncidentGraphRecord(StorageRecord):
+    """One materialized current-incident graph stored beside its incident."""
+
+    incident_id: RecordId
+    updated_at: UtcDatetime
+    payload: dict[str, JsonValue]
+
+
 class AuditRecord(StorageRecord):
     """One immutable hash-linked runtime audit entry."""
 

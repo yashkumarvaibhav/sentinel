@@ -459,6 +459,232 @@
       "title": "AuditEventKind",
       "type": "string"
     },
+    "CausalGraph": {
+      "additionalProperties": false,
+      "description": "One durable graph revision for an incident.\n\nResolved revisions remain valid durable state so closing an incident can\nadvance both records atomically. The repository's current-graph query\nfilters them out.",
+      "properties": {
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/CausalGraphEdge"
+          },
+          "title": "Edges",
+          "type": "array"
+        },
+        "honesty": {
+          "enum": [
+            "REAL",
+            "SIMULATED"
+          ],
+          "title": "Honesty",
+          "type": "string"
+        },
+        "incident_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "incident_state": {
+          "$ref": "#/$defs/IncidentState"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/CausalGraphNode"
+          },
+          "minItems": 1,
+          "title": "Nodes",
+          "type": "array"
+        },
+        "origin_confidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Probability"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "origin_service": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updated_at": {
+          "$ref": "#/$defs/UtcDatetime"
+        }
+      },
+      "required": [
+        "incident_id",
+        "incident_state",
+        "updated_at",
+        "honesty",
+        "origin_service",
+        "origin_confidence",
+        "nodes",
+        "edges"
+      ],
+      "title": "CausalGraph",
+      "type": "object"
+    },
+    "CausalGraphEdge": {
+      "additionalProperties": false,
+      "description": "One topology edge rendered in possible propagation direction.\n\nConfiguration says ``caller depends on dependency``. This public edge is\ndeliberately reversed to ``dependency -> caller`` so its arrow answers the\nincident-response question: where could an observed effect propagate?",
+      "properties": {
+        "active": {
+          "title": "Active",
+          "type": "boolean"
+        },
+        "evidence_episode_ids": {
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "title": "Evidence Episode Ids",
+          "type": "array"
+        },
+        "note": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "source_service": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "target_service": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "source_service",
+        "target_service",
+        "active",
+        "evidence_episode_ids",
+        "note"
+      ],
+      "title": "CausalGraphEdge",
+      "type": "object"
+    },
+    "CausalGraphNode": {
+      "additionalProperties": false,
+      "description": "One committed topology service with evidence-derived incident heat.",
+      "properties": {
+        "active_episode_count": {
+          "minimum": 0,
+          "title": "Active Episode Count",
+          "type": "integer"
+        },
+        "criticality": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ],
+          "title": "Criticality",
+          "type": "string"
+        },
+        "implicated": {
+          "title": "Implicated",
+          "type": "boolean"
+        },
+        "is_origin": {
+          "title": "Is Origin",
+          "type": "boolean"
+        },
+        "note": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "origin_confidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Probability"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "service": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "symptom_heat": {
+          "$ref": "#/$defs/Probability"
+        },
+        "symptom_kinds": {
+          "items": {
+            "$ref": "#/$defs/SymptomKind"
+          },
+          "title": "Symptom Kinds",
+          "type": "array"
+        },
+        "tier": {
+          "enum": [
+            "edge",
+            "application",
+            "data",
+            "infrastructure"
+          ],
+          "title": "Tier",
+          "type": "string"
+        }
+      },
+      "required": [
+        "service",
+        "tier",
+        "criticality",
+        "symptom_heat",
+        "active_episode_count",
+        "symptom_kinds",
+        "is_origin",
+        "origin_confidence",
+        "implicated",
+        "note"
+      ],
+      "title": "CausalGraphNode",
+      "type": "object"
+    },
+    "CausalGraphResponse": {
+      "additionalProperties": false,
+      "description": "The authoritative current-incident graph or an explicit absence.",
+      "properties": {
+        "detail": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanText"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "graph": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CausalGraph"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "ready",
+            "empty",
+            "degraded"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "graph",
+        "detail"
+      ],
+      "title": "CausalGraphResponse",
+      "type": "object"
+    },
     "ChangeEvent": {
       "additionalProperties": false,
       "description": "One recorded operator change, the raw material of deploy-correlated pressure.\n\nA change is a fact about the system's own history, never a conclusion about\nan incident. It carries its own honesty label because the MVP feed mixes an\noperator-maintained ledger with changes observed from the cluster.",
@@ -2152,6 +2378,9 @@
     },
     {
       "$ref": "#/$defs/IncidentFeedResponse"
+    },
+    {
+      "$ref": "#/$defs/CausalGraphResponse"
     }
   ],
   "title": "SentinelContract"

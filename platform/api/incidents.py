@@ -8,8 +8,10 @@ from typing import Literal, Protocol
 
 from pydantic import ValidationError
 
+from api.causal_graph import build_causal_graph, causal_graph_record
 from api.stream import snapshot_invalidation
-from common.storage import IncidentRecord
+from common.config import TopologyConfig
+from common.storage import IncidentGraphRecord, IncidentRecord
 from contracts import (
     DecisionAction,
     IncidentActionState,
@@ -20,6 +22,7 @@ from contracts import (
     IncidentFeedResponse,
     SnapshotInvalidation,
     SnapshotResource,
+    SymptomEpisode,
     VerdictClass,
 )
 from decision import IncidentOutcome
@@ -37,7 +40,11 @@ class IncidentFeedReader(Protocol):
 class IncidentFeedStore(Protocol):
     """The durable write used by a live decision-output publisher."""
 
-    async def put_incident(self, record: IncidentRecord) -> bool: ...
+    async def put_incident_bundle(
+        self,
+        record: IncidentRecord,
+        graph: IncidentGraphRecord,
+    ) -> bool: ...
 
 
 class InvalidationBroker(Protocol):
@@ -69,6 +76,9 @@ class IncidentFeedPublisher:
         self,
         outcome: IncidentOutcome,
         *,
+        episodes: tuple[SymptomEpisode, ...],
+        topology: TopologyConfig,
+        dependency_signal_prefix: str,
         honesty: Literal["REAL", "SIMULATED"],
         calibrated_confidence: float | None = None,
         calibration_note: str | None = None,
@@ -82,7 +92,17 @@ class IncidentFeedPublisher:
             calibration_note=calibration_note,
             explained_event=explained_event,
         )
-        persisted = await self._store.put_incident(incident_record(item))
+        graph = build_causal_graph(
+            outcome,
+            episodes=episodes,
+            topology=topology,
+            dependency_signal_prefix=dependency_signal_prefix,
+            honesty=honesty,
+        )
+        persisted = await self._store.put_incident_bundle(
+            incident_record(item),
+            causal_graph_record(graph),
+        )
         if persisted:
             self._broker.publish(snapshot_invalidation(SnapshotResource.INCIDENTS))
         return IncidentPublishResult(item=item, persisted=persisted)

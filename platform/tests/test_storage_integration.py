@@ -19,6 +19,7 @@ from common.storage import (
     AuditLedgerRepository,
     AuditRecord,
     ClickHouseRepository,
+    IncidentGraphRecord,
     IncidentMemoryRepository,
     IncidentRecord,
     IncidentSignatureRecord,
@@ -256,8 +257,87 @@ async def _round_trip_postgres(config: Settings, pool: PostgresPool, suffix: str
     assert await repository.get_audit(audit.entry_id) == audit
     assert await labels.get(label.label_id) == label
 
+    await _round_trip_incident_graph_bundle(config, repository, pool, ts, suffix)
     await _round_trip_episode(repository, ts, suffix)
     await _round_trip_pipeline_episode(repository, ts, suffix)
+
+
+async def _round_trip_incident_graph_bundle(
+    config: Settings,
+    repository: PostgresRepository,
+    pool: PostgresPool,
+    ts: datetime,
+    suffix: str,
+) -> None:
+    incident = IncidentRecord(
+        incident_id=f"graph-incident-{suffix}",
+        state="OPEN",
+        created_at=ts,
+        updated_at=ts + timedelta(seconds=10),
+        payload={"incident_id": f"graph-incident-{suffix}", "state": "OPEN"},
+    )
+    graph = IncidentGraphRecord(
+        incident_id=incident.incident_id,
+        updated_at=incident.updated_at,
+        payload={
+            "incident_id": incident.incident_id,
+            "incident_state": "OPEN",
+            "updated_at": incident.updated_at.isoformat(),
+        },
+    )
+    assert await repository.put_incident_bundle(incident, graph) is True
+    assert await repository.put_incident_bundle(incident, graph) is False
+    assert await repository.latest_incident_graph() == graph
+
+    # Make only the graph artificially newer, then prove the bundle refuses to
+    # advance half of the pair and rolls its incident write back.
+    future_graph_time = ts + timedelta(seconds=12)
+    table = sql.Identifier(config.postgres_schema, "incident_causal_graphs")
+    async with pool.connection() as connection:
+        await connection.execute(
+            sql.SQL("UPDATE {} SET updated_at = %s WHERE incident_id = %s").format(table),
+            (future_graph_time, incident.incident_id),
+        )
+    half_advance = incident.model_copy(
+        update={
+            "state": "MONITORING",
+            "updated_at": ts + timedelta(seconds=11),
+            "payload": incident.payload | {"state": "MONITORING"},
+        }
+    )
+    half_graph = graph.model_copy(
+        update={
+            "updated_at": half_advance.updated_at,
+            "payload": graph.payload
+            | {
+                "incident_state": "MONITORING",
+                "updated_at": half_advance.updated_at.isoformat(),
+            },
+        }
+    )
+    with pytest.raises(RuntimeError, match="could not advance"):
+        await repository.put_incident_bundle(half_advance, half_graph)
+    assert await repository.get_incident(incident.incident_id) == incident
+
+    resolved = incident.model_copy(
+        update={
+            "state": "RESOLVED",
+            "updated_at": ts + timedelta(seconds=13),
+            "payload": incident.payload | {"state": "RESOLVED"},
+        }
+    )
+    resolved_graph = graph.model_copy(
+        update={
+            "updated_at": resolved.updated_at,
+            "payload": graph.payload
+            | {
+                "incident_state": "RESOLVED",
+                "updated_at": resolved.updated_at.isoformat(),
+            },
+        }
+    )
+    assert await repository.put_incident_bundle(resolved, resolved_graph) is True
+    assert await repository.latest_incident_graph() is None
 
 
 async def _round_trip_pipeline_episode(

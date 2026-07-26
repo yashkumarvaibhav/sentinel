@@ -18,6 +18,12 @@ from fastapi import FastAPI, Response
 from fastapi.responses import StreamingResponse
 
 from api.audit import AuditLedger
+from api.causal_graph import (
+    CausalGraphDataError,
+    CausalGraphReader,
+    causal_graph_snapshot,
+    unavailable_causal_graph,
+)
 from api.decomposition import (
     MAX_FRAMES,
     DecompositionRangeError,
@@ -53,7 +59,7 @@ from common.storage import (
     PostgresRepository,
     create_postgres_pool,
 )
-from contracts import IncidentFeedResponse, KpiResponse, ScoreProof
+from contracts import CausalGraphResponse, IncidentFeedResponse, KpiResponse, ScoreProof
 
 SERVICE = "sentinel-gateway"
 LOGGER = logging.getLogger(__name__)
@@ -78,6 +84,7 @@ def create_app(
     stream_broker: StreamBroker | None = None,
     score_proof: ScoreProof | None = None,
     incident_reader: IncidentFeedReader | None = None,
+    causal_graph_reader: CausalGraphReader | None = None,
 ) -> FastAPI:
     """Build the gateway application.
 
@@ -94,6 +101,7 @@ def create_app(
         app.state.audit_ledger = ledger
         app.state.stream_broker = stream_broker if stream_broker is not None else StreamBroker()
         app.state.incident_reader = incident_reader
+        app.state.causal_graph_reader = causal_graph_reader
         app.state.incident_publisher = None
         incident_pool = None
         if incident_reader is None and probes is None:
@@ -104,6 +112,7 @@ def create_app(
                 schema=config.postgres_schema,
             )
             app.state.incident_reader = incident_store
+            app.state.causal_graph_reader = incident_store
             app.state.incident_publisher = IncidentFeedPublisher(
                 store=incident_store,
                 broker=app.state.stream_broker,
@@ -303,6 +312,35 @@ def create_app(
             return unavailable_incident_snapshot(
                 limit=bounded,
                 detail="live incident store could not provide a snapshot",
+            )
+
+    @app.get(
+        "/api/causal-graph",
+        tags=["incidents"],
+        response_model=CausalGraphResponse,
+    )
+    async def causal_graph(response: Response) -> CausalGraphResponse:
+        """The evidence-backed topology for the newest unresolved incident."""
+        reader: CausalGraphReader | None = getattr(
+            app.state,
+            "causal_graph_reader",
+            None,
+        )
+        if reader is None:
+            response.status_code = 503
+            return unavailable_causal_graph(
+                detail="no causal graph store is attached to this gateway"
+            )
+        try:
+            return causal_graph_snapshot(await reader.latest_incident_graph())
+        except CausalGraphDataError as exc:
+            response.status_code = 503
+            return unavailable_causal_graph(detail=str(exc))
+        except Exception:
+            LOGGER.exception("causal graph snapshot read failed")
+            response.status_code = 503
+            return unavailable_causal_graph(
+                detail="causal graph store could not provide a snapshot"
             )
 
     return app
