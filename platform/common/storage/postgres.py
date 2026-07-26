@@ -27,8 +27,8 @@ class PostgresRepository:
         self._audit_entries = sql.Identifier(schema, "audit_entries")
         self._symptom_episodes = sql.Identifier(schema, "symptom_episodes")
 
-    async def put_incident(self, record: IncidentRecord) -> None:
-        """Idempotently create or replace the current state for an incident."""
+    async def put_incident(self, record: IncidentRecord) -> bool:
+        """Create or advance an incident; return whether durable state changed."""
         query = sql.SQL(
             """
             INSERT INTO {table} (incident_id, state, payload, created_at, updated_at)
@@ -39,10 +39,11 @@ class PostgresRepository:
                 created_at = EXCLUDED.created_at,
                 updated_at = EXCLUDED.updated_at
             WHERE {table}.updated_at < EXCLUDED.updated_at
+            RETURNING incident_id
             """
         ).format(table=self._incidents)
         async with self._pool.connection() as connection:
-            await connection.execute(
+            cursor = await connection.execute(
                 query,
                 (
                     record.incident_id,
@@ -52,6 +53,7 @@ class PostgresRepository:
                     record.updated_at,
                 ),
             )
+            return await cursor.fetchone() is not None
 
     async def get_incident(self, incident_id: str) -> IncidentRecord | None:
         """Fetch one incident by its stable id."""
@@ -73,6 +75,32 @@ class PostgresRepository:
             created_at=cast(datetime, row[2]),
             updated_at=cast(datetime, row[3]),
             payload=cast(dict[str, JsonValue], row[4]),
+        )
+
+    async def list_incidents(self, *, limit: int) -> tuple[IncidentRecord, ...]:
+        """Return a bounded latest-first snapshot with deterministic tie order."""
+        if not 1 <= limit <= 50:
+            raise ValueError("incident list limit must be within [1, 50]")
+        query = sql.SQL(
+            """
+            SELECT incident_id, state, created_at, updated_at, payload
+            FROM {}
+            ORDER BY updated_at DESC, incident_id ASC
+            LIMIT %s
+            """
+        ).format(self._incidents)
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(query, (limit,))
+            rows = await cursor.fetchall()
+        return tuple(
+            IncidentRecord(
+                incident_id=cast(str, row[0]),
+                state=cast(str, row[1]),
+                created_at=cast(datetime, row[2]),
+                updated_at=cast(datetime, row[3]),
+                payload=cast(dict[str, JsonValue], row[4]),
+            )
+            for row in rows
         )
 
     async def put_episode(self, episode: SymptomEpisode) -> bool:

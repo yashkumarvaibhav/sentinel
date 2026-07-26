@@ -1027,6 +1027,261 @@
       "title": "Incident",
       "type": "object"
     },
+    "IncidentActionState": {
+      "additionalProperties": false,
+      "description": "What was decided, separately from what an actuator proved it did.",
+      "properties": {
+        "decision_action": {
+          "$ref": "#/$defs/DecisionAction"
+        },
+        "detail": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "effect_status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActionStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "decision_action",
+        "effect_status",
+        "detail"
+      ],
+      "title": "IncidentActionState",
+      "type": "object"
+    },
+    "IncidentConfidence": {
+      "additionalProperties": false,
+      "description": "A calibrated confidence or an explicit refusal to display one.",
+      "properties": {
+        "note": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "status": {
+          "$ref": "#/$defs/IncidentConfidenceStatus"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Probability"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "value",
+        "note"
+      ],
+      "title": "IncidentConfidence",
+      "type": "object"
+    },
+    "IncidentConfidenceStatus": {
+      "description": "Whether the displayed confidence has a calibration basis.",
+      "enum": [
+        "calibrated",
+        "insufficient"
+      ],
+      "title": "IncidentConfidenceStatus",
+      "type": "string"
+    },
+    "IncidentEvidenceValue": {
+      "additionalProperties": false,
+      "description": "One measured value compact enough for an incident card.",
+      "properties": {
+        "baseline": {
+          "$ref": "#/$defs/FiniteFloat"
+        },
+        "direction": {
+          "$ref": "#/$defs/EvidenceDirection"
+        },
+        "feature": {
+          "$ref": "#/$defs/SignalName"
+        },
+        "note": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "value": {
+          "$ref": "#/$defs/FiniteFloat"
+        }
+      },
+      "required": [
+        "feature",
+        "value",
+        "baseline",
+        "direction",
+        "note"
+      ],
+      "title": "IncidentEvidenceValue",
+      "type": "object"
+    },
+    "IncidentFeedItem": {
+      "additionalProperties": false,
+      "description": "One evidence-first card in the authoritative incident snapshot.",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/IncidentActionState"
+        },
+        "confidence": {
+          "$ref": "#/$defs/IncidentConfidence"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/IncidentEvidenceValue"
+          },
+          "maxItems": 2,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "explanation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanText"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "honesty": {
+          "enum": [
+            "REAL",
+            "SIMULATED"
+          ],
+          "title": "Honesty",
+          "type": "string"
+        },
+        "incident_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "muted": {
+          "title": "Muted",
+          "type": "boolean"
+        },
+        "opened_at": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "origin_service": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "services": {
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "minItems": 1,
+          "title": "Services",
+          "type": "array"
+        },
+        "severity": {
+          "$ref": "#/$defs/IncidentSeverity"
+        },
+        "state": {
+          "$ref": "#/$defs/IncidentState"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "verdict_class": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VerdictClass"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "incident_id",
+        "opened_at",
+        "updated_at",
+        "state",
+        "severity",
+        "services",
+        "origin_service",
+        "verdict_class",
+        "reason",
+        "evidence",
+        "action",
+        "confidence",
+        "muted",
+        "explanation",
+        "honesty"
+      ],
+      "title": "IncidentFeedItem",
+      "type": "object"
+    },
+    "IncidentFeedResponse": {
+      "additionalProperties": false,
+      "description": "One bounded latest-first REST snapshot.",
+      "properties": {
+        "count": {
+          "minimum": 0,
+          "title": "Count",
+          "type": "integer"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanText"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "incidents": {
+          "items": {
+            "$ref": "#/$defs/IncidentFeedItem"
+          },
+          "title": "Incidents",
+          "type": "array"
+        },
+        "limit": {
+          "maximum": 50,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "ready",
+            "degraded"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "incidents",
+        "count",
+        "limit"
+      ],
+      "title": "IncidentFeedResponse",
+      "type": "object"
+    },
     "IncidentSeverity": {
       "description": "How much this incident matters, in the language a responder pages on.",
       "enum": [
@@ -1894,6 +2149,9 @@
     },
     {
       "$ref": "#/$defs/KpiResponse"
+    },
+    {
+      "$ref": "#/$defs/IncidentFeedResponse"
     }
   ],
   "title": "SentinelContract"

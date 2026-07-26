@@ -24,6 +24,7 @@ from contracts.decision import (
     Verification,
 )
 from contracts.detection import DecompFrame, Symptom, SymptomEpisode
+from contracts.incident_feed import IncidentFeedResponse
 from contracts.kpi import KpiResponse, ScoreProof
 from contracts.stream import SnapshotInvalidation
 from contracts.telemetry import Observation
@@ -49,6 +50,7 @@ PUBLIC_MODELS: tuple[type[BaseModel], ...] = (
     SnapshotInvalidation,
     ScoreProof,
     KpiResponse,
+    IncidentFeedResponse,
 )
 
 

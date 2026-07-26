@@ -1,7 +1,35 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '@/App';
+
+class CountingEventSource {
+  static instances: CountingEventSource[] = [];
+
+  readyState = 0;
+  onopen: ((event: Event) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+
+  constructor(readonly url: string | URL) {
+    CountingEventSource.instances.push(this);
+  }
+
+  addEventListener(): void {}
+  removeEventListener(): void {}
+
+  close(): void {
+    this.readyState = 2;
+  }
+}
+
+beforeEach(() => {
+  // App structure tests do not own any remote snapshot. Keep those reads
+  // pending so a rejected test-network promise cannot update four unrelated
+  // components after the synchronous assertion has already finished.
+  vi.stubGlobal('fetch', () => new Promise<Response>(() => undefined));
+});
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe('App', () => {
   it('names the screen, not the product, in its heading', () => {
@@ -30,5 +58,16 @@ describe('App', () => {
     render(<App />);
 
     expect(screen.getByRole('link', { name: 'Skip to content' })).toBeInTheDocument();
+  });
+
+  it('shares one event stream across health and incident snapshot owners', () => {
+    CountingEventSource.instances = [];
+    vi.stubGlobal('EventSource', CountingEventSource);
+
+    const rendered = render(<App />);
+
+    expect(CountingEventSource.instances).toHaveLength(1);
+    rendered.unmount();
+    expect(CountingEventSource.instances[0]?.readyState).toBe(2);
   });
 });

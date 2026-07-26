@@ -235,14 +235,24 @@ async def _round_trip_postgres(config: Settings, pool: PostgresPool, suffix: str
         created_at=ts,
     )
 
-    await repository.put_incident(incident)
-    await repository.put_incident(incident)
+    assert await repository.put_incident(incident) is True
+    assert await repository.put_incident(incident) is False
+    advanced_incident = incident.model_copy(
+        update={
+            "state": "monitoring",
+            "updated_at": ts + timedelta(seconds=1),
+            "payload": incident.payload | {"confirmed": True},
+        }
+    )
+    assert await repository.put_incident(advanced_incident) is True
+    assert await repository.put_incident(incident) is False
     assert await repository.append_audit(audit) is True
     assert await repository.append_audit(audit) is False
     assert await labels.put(label) is True
     assert await labels.put(label) is False
 
-    assert await repository.get_incident(incident.incident_id) == incident
+    assert await repository.get_incident(incident.incident_id) == advanced_incident
+    assert await repository.list_incidents(limit=20) == (advanced_incident,)
     assert await repository.get_audit(audit.entry_id) == audit
     assert await labels.get(label.label_id) == label
 

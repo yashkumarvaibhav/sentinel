@@ -23,7 +23,8 @@ export type SentinelContract =
   | AuditEntry
   | SnapshotInvalidation
   | ScoreProof
-  | KpiResponse;
+  | KpiResponse
+  | IncidentFeedResponse;
 export type TelemetryScalar = string | boolean | number;
 export type Identifier = string;
 export type FlowRefs = Identifier[];
@@ -259,6 +260,24 @@ export type KpiKey = "detection_latency" | "autonomous_mttr" | "quiet_day_false_
 export type SampleCount1 = number;
 export type Metrics = KpiMetric[];
 export type Status = "ready" | "degraded";
+export type Count = number;
+/**
+ * Whether the displayed confidence has a calibration basis.
+ */
+export type IncidentConfidenceStatus = "calibrated" | "insufficient";
+/**
+ * @maxItems 2
+ */
+export type Evidence2 = [] | [IncidentEvidenceValue] | [IncidentEvidenceValue, IncidentEvidenceValue];
+export type Honesty5 = "REAL" | "SIMULATED";
+export type Muted = boolean;
+/**
+ * @minItems 1
+ */
+export type Services3 = [Identifier, ...Identifier[]];
+export type Incidents = IncidentFeedItem[];
+export type Limit = number;
+export type Status1 = "ready" | "degraded";
 
 /**
  * One event-time telemetry value, containing evidence but never answer-key data.
@@ -719,4 +738,60 @@ export interface KpiWindow {
   description: HumanText;
   end: UtcDatetime | null;
   start: UtcDatetime | null;
+}
+/**
+ * One bounded latest-first REST snapshot.
+ */
+export interface IncidentFeedResponse {
+  count: Count;
+  detail?: HumanText | null;
+  incidents: Incidents;
+  limit: Limit;
+  status: Status1;
+}
+/**
+ * One evidence-first card in the authoritative incident snapshot.
+ */
+export interface IncidentFeedItem {
+  action: IncidentActionState;
+  confidence: IncidentConfidence;
+  evidence: Evidence2;
+  explanation: HumanText | null;
+  honesty: Honesty5;
+  incident_id: Identifier;
+  muted: Muted;
+  opened_at: UtcDatetime;
+  origin_service: Identifier | null;
+  reason: HumanText;
+  services: Services3;
+  severity: IncidentSeverity;
+  state: IncidentState;
+  updated_at: UtcDatetime;
+  verdict_class: VerdictClass | null;
+}
+/**
+ * What was decided, separately from what an actuator proved it did.
+ */
+export interface IncidentActionState {
+  decision_action: DecisionAction;
+  detail: HumanText;
+  effect_status: ActionStatus | null;
+}
+/**
+ * A calibrated confidence or an explicit refusal to display one.
+ */
+export interface IncidentConfidence {
+  note: HumanText;
+  status: IncidentConfidenceStatus;
+  value: Probability | null;
+}
+/**
+ * One measured value compact enough for an incident card.
+ */
+export interface IncidentEvidenceValue {
+  baseline: FiniteFloat;
+  direction: EvidenceDirection;
+  feature: SignalName;
+  note: HumanText;
+  value: FiniteFloat;
 }

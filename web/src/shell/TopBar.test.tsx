@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { HealthReport } from '@/api/platform';
 import { TopBar } from '@/shell/TopBar';
+import { SnapshotStreamProvider } from '@/shell/SnapshotStream';
 
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
@@ -74,6 +75,14 @@ function respond(health: unknown, status = 200) {
 const READY: HealthReport = { status: 'ready', degraded: [], components: [] };
 const DEGRADED: HealthReport = { status: 'degraded', degraded: ['loki'], components: [] };
 
+function renderTopBar() {
+  return render(
+    <SnapshotStreamProvider>
+      <TopBar />
+    </SnapshotStreamProvider>,
+  );
+}
+
 beforeEach(() => {
   FakeEventSource.instances = [];
   vi.stubGlobal('EventSource', FakeEventSource);
@@ -89,7 +98,7 @@ describe('TopBar', () => {
   it('announces the connection state rather than only colouring a dot', async () => {
     vi.stubGlobal('fetch', respond(READY));
 
-    render(<TopBar />);
+    renderTopBar();
     act(() => FakeEventSource.instances[0]?.open());
 
     await waitFor(() => {
@@ -106,7 +115,7 @@ describe('TopBar', () => {
     // is wrong - the opposite of not answering - so it must not read as down.
     vi.stubGlobal('fetch', respond(DEGRADED, 503));
 
-    render(<TopBar />);
+    renderTopBar();
     act(() => FakeEventSource.instances[0]?.open());
 
     await waitFor(() => {
@@ -121,7 +130,7 @@ describe('TopBar', () => {
       vi.fn(() => Promise.reject(new Error('connection refused'))),
     );
 
-    render(<TopBar />);
+    renderTopBar();
     act(() => FakeEventSource.instances[0]?.open());
 
     await waitFor(() => {
@@ -133,7 +142,7 @@ describe('TopBar', () => {
   it('announces automatic recovery when the event stream disconnects', async () => {
     vi.stubGlobal('fetch', respond(READY));
 
-    render(<TopBar />);
+    renderTopBar();
     const source = FakeEventSource.instances[0];
     act(() => source?.open());
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/ready/i));
@@ -169,7 +178,7 @@ describe('TopBar', () => {
       }),
     );
 
-    render(<TopBar />);
+    renderTopBar();
     const source = FakeEventSource.instances[0];
     act(() => source?.open());
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(/ready/i));
@@ -192,7 +201,7 @@ describe('TopBar', () => {
   it('reports a stream that closes permanently as unavailable', async () => {
     vi.stubGlobal('fetch', respond(READY));
 
-    render(<TopBar />);
+    renderTopBar();
     act(() => FakeEventSource.instances[0]?.fail({ terminal: true }));
 
     await waitFor(() =>
@@ -203,7 +212,7 @@ describe('TopBar', () => {
   it('shows the commit that is actually serving', async () => {
     vi.stubGlobal('fetch', respond(READY));
 
-    render(<TopBar />);
+    renderTopBar();
     act(() => FakeEventSource.instances[0]?.open());
 
     await waitFor(() => {
@@ -215,7 +224,7 @@ describe('TopBar', () => {
     vi.stubGlobal('fetch', respond(READY));
     const user = userEvent.setup();
 
-    render(<TopBar />);
+    renderTopBar();
     act(() => FakeEventSource.instances[0]?.open());
     const toggle = screen.getByRole('button', { name: /theme/i });
 
@@ -237,7 +246,7 @@ describe('TopBar', () => {
     vi.stubGlobal('fetch', respond(READY));
     const user = userEvent.setup();
 
-    render(<TopBar />);
+    renderTopBar();
     act(() => FakeEventSource.instances[0]?.open());
     const toggle = screen.getByRole('button', { name: 'Technical' });
     expect(toggle).toHaveAttribute('aria-pressed', 'false');

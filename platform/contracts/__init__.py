@@ -56,6 +56,14 @@ from contracts.detection import (
     SymptomEpisode,
     SymptomKind,
 )
+from contracts.incident_feed import (
+    IncidentActionState,
+    IncidentConfidence,
+    IncidentConfidenceStatus,
+    IncidentEvidenceValue,
+    IncidentFeedItem,
+    IncidentFeedResponse,
+)
 from contracts.kpi import (
     DETECTION_LATENCY_HEADLINE_KEY,
     KpiKey,
@@ -104,6 +112,12 @@ __all__ = [
     "EvidenceItem",
     "FusionStatus",
     "Incident",
+    "IncidentActionState",
+    "IncidentConfidence",
+    "IncidentConfidenceStatus",
+    "IncidentEvidenceValue",
+    "IncidentFeedItem",
+    "IncidentFeedResponse",
     "IncidentSeverity",
     "IncidentState",
     "KpiKey",

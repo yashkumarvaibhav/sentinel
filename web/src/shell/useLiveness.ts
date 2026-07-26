@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { SnapshotInvalidation } from '@/contracts/types';
 import { fetchHealth } from '@/api/platform';
 import type { HealthReport } from '@/api/platform';
-import { useEventStream } from '@/shell/useEventStream';
+import {
+  useSnapshotInvalidation,
+  useSnapshotStream,
+} from '@/shell/useSnapshotStream';
 
 /**
  * What the connection indicator is allowed to claim.
@@ -68,18 +70,8 @@ export function useLiveness(): LivenessState {
     [],
   );
 
-  const receive = useCallback(
-    (event: SnapshotInvalidation) => {
-      if (event.resources.includes('all') || event.resources.includes('health')) {
-        void refetchHealth();
-      }
-    },
-    [refetchHealth],
-  );
-  const stream = useEventStream({
-    refetchSnapshots: refetchHealth,
-    onEvent: receive,
-  });
+  const { stream } = useSnapshotStream();
+  useSnapshotInvalidation(HEALTH_RESOURCES, refetchHealth);
 
   if (stream.status === 'connecting') {
     return {
@@ -130,3 +122,5 @@ export function useLiveness(): LivenessState {
     detail: health.error ?? stream.error,
   };
 }
+
+const HEALTH_RESOURCES = ['health'] as const;

@@ -7,6 +7,7 @@ healthy.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -26,6 +27,15 @@ from api.decomposition import (
 )
 from api.gate import SharedSecretGate
 from api.health import HealthReport, Probe, Readiness, check_health
+from api.incidents import (
+    DEFAULT_INCIDENTS,
+    MAX_INCIDENTS,
+    IncidentFeedDataError,
+    IncidentFeedPublisher,
+    IncidentFeedReader,
+    incident_snapshot,
+    unavailable_incident_snapshot,
+)
 from api.kpis import (
     ScoreProofUnavailableError,
     build_kpi_response,
@@ -38,10 +48,15 @@ from audit import verify_chain
 from common.buildinfo import build_info
 from common.config import load_config
 from common.settings import Settings, settings
-from common.storage import ClickHouseRepository
-from contracts import KpiResponse, ScoreProof
+from common.storage import (
+    ClickHouseRepository,
+    PostgresRepository,
+    create_postgres_pool,
+)
+from contracts import IncidentFeedResponse, KpiResponse, ScoreProof
 
 SERVICE = "sentinel-gateway"
+LOGGER = logging.getLogger(__name__)
 
 # Routes that expose more than the command centre needs and so ride the gate
 # even for reads. The audit ledger is here because it is the record of what the
@@ -62,6 +77,7 @@ def create_app(
     decomposition_reader: DecompositionReader | None = None,
     stream_broker: StreamBroker | None = None,
     score_proof: ScoreProof | None = None,
+    incident_reader: IncidentFeedReader | None = None,
 ) -> FastAPI:
     """Build the gateway application.
 
@@ -77,6 +93,21 @@ def create_app(
         # ledger attached" and "nothing has happened" must not look the same.
         app.state.audit_ledger = ledger
         app.state.stream_broker = stream_broker if stream_broker is not None else StreamBroker()
+        app.state.incident_reader = incident_reader
+        app.state.incident_publisher = None
+        incident_pool = None
+        if incident_reader is None and probes is None:
+            incident_pool = create_postgres_pool(config)
+            await incident_pool.open(wait=True)
+            incident_store = PostgresRepository(
+                pool=incident_pool,
+                schema=config.postgres_schema,
+            )
+            app.state.incident_reader = incident_store
+            app.state.incident_publisher = IncidentFeedPublisher(
+                store=incident_store,
+                broker=app.state.stream_broker,
+            )
         try:
             app.state.score_proof = (
                 score_proof
@@ -90,24 +121,28 @@ def create_app(
         # Same rule as the ledger: unset answers 503 rather than pretending the
         # store is empty. "No store attached" and "nothing happened" must not
         # look the same.
-        async with httpx.AsyncClient(timeout=config.probe_timeout_seconds) as client:
-            app.state.probes = probes if probes is not None else platform_probes(config, client)
-            if decomposition_reader is not None:
-                app.state.decomposition_reader = decomposition_reader
-                yield
-                return
-            # Its own client: the probe client carries a short timeout tuned for
-            # liveness checks, and a full-resolution window is a read, not a ping.
-            auth = (config.clickhouse_user, config.clickhouse_password.get_secret_value())
-            async with httpx.AsyncClient(
-                base_url=config.clickhouse_url,
-                auth=auth,
-                timeout=config.storage_timeout_seconds,
-            ) as store:
-                app.state.decomposition_reader = ClickHouseRepository(
-                    client=store, database=config.clickhouse_database
-                )
-                yield
+        try:
+            async with httpx.AsyncClient(timeout=config.probe_timeout_seconds) as client:
+                app.state.probes = probes if probes is not None else platform_probes(config, client)
+                if decomposition_reader is not None:
+                    app.state.decomposition_reader = decomposition_reader
+                    yield
+                    return
+                # Its own client: the probe client carries a short timeout tuned for
+                # liveness checks, and a full-resolution window is a read, not a ping.
+                auth = (config.clickhouse_user, config.clickhouse_password.get_secret_value())
+                async with httpx.AsyncClient(
+                    base_url=config.clickhouse_url,
+                    auth=auth,
+                    timeout=config.storage_timeout_seconds,
+                ) as store:
+                    app.state.decomposition_reader = ClickHouseRepository(
+                        client=store, database=config.clickhouse_database
+                    )
+                    yield
+        finally:
+            if incident_pool is not None:
+                await incident_pool.close()
 
     app = FastAPI(
         title="Sentinel API",
@@ -241,6 +276,34 @@ def create_app(
                 app.state.score_proof_error or "score proof unavailable"
             )
         return build_kpi_response(proof)
+
+    @app.get("/api/incidents", tags=["incidents"], response_model=IncidentFeedResponse)
+    async def incidents(
+        response: Response,
+        limit: int = DEFAULT_INCIDENTS,
+    ) -> IncidentFeedResponse:
+        """The bounded authoritative live-incident snapshot, latest first."""
+        bounded = max(1, min(limit, MAX_INCIDENTS))
+        reader: IncidentFeedReader | None = getattr(app.state, "incident_reader", None)
+        if reader is None:
+            response.status_code = 503
+            return unavailable_incident_snapshot(
+                limit=bounded,
+                detail="no live incident store is attached to this gateway",
+            )
+        try:
+            records = await reader.list_incidents(limit=bounded)
+            return incident_snapshot(records, limit=bounded)
+        except IncidentFeedDataError as exc:
+            response.status_code = 503
+            return unavailable_incident_snapshot(limit=bounded, detail=str(exc))
+        except Exception:
+            LOGGER.exception("live incident snapshot read failed")
+            response.status_code = 503
+            return unavailable_incident_snapshot(
+                limit=bounded,
+                detail="live incident store could not provide a snapshot",
+            )
 
     return app
 
