@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router';
 
 import { fetchIncidents } from '@/api/incidents';
 import type { IncidentFeedItem, IncidentFeedResponse } from '@/contracts/types';
@@ -86,6 +87,12 @@ function IncidentCard({ item }: { item: IncidentFeedItem }) {
           <p className="text-muted mt-1">{item.confidence.note}</p>
         </div>
       </div>
+      <Link
+        className="text-accent w-fit text-xs font-medium underline decoration-transparent underline-offset-4 hover:decoration-current"
+        to={`/incidents/${encodeURIComponent(item.incident_id)}`}
+      >
+        Open evidence proof
+      </Link>
     </article>
   );
 }

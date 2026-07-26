@@ -1,4 +1,5 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { IncidentFeed } from '@/components/IncidentFeed';
@@ -117,9 +118,11 @@ describe('IncidentFeed', () => {
     vi.stubGlobal('fetch', fetcher);
 
     render(
-      <SnapshotStreamProvider>
-        <IncidentFeed />
-      </SnapshotStreamProvider>,
+      <MemoryRouter>
+        <SnapshotStreamProvider>
+          <IncidentFeed />
+        </SnapshotStreamProvider>
+      </MemoryRouter>,
     );
     act(() => FakeEventSource.instances[0]?.open());
 
@@ -130,6 +133,10 @@ describe('IncidentFeed', () => {
     expect(screen.getByText(/auth\.failure_ratio/i)).toBeInTheDocument();
     expect(screen.getByText(/insufficient confidence/i)).toBeInTheDocument();
     expect(screen.getByText('REAL')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /open evidence proof/i })).toHaveAttribute(
+      'href',
+      '/incidents/incident-live-1',
+    );
     expect(screen.getByRole('feed')).toHaveAttribute('aria-live', 'polite');
 
     const before = fetcher.mock.calls.length;
@@ -158,9 +165,11 @@ describe('IncidentFeed', () => {
     );
 
     render(
-      <SnapshotStreamProvider>
-        <IncidentFeed />
-      </SnapshotStreamProvider>,
+      <MemoryRouter>
+        <SnapshotStreamProvider>
+          <IncidentFeed />
+        </SnapshotStreamProvider>
+      </MemoryRouter>,
     );
     act(() => FakeEventSource.instances[0]?.open());
 

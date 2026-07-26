@@ -1,7 +1,9 @@
 import { render, screen } from '@testing-library/react';
+import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '@/App';
+import { CommandShell } from '@/shell/CommandShell';
 
 class CountingEventSource {
   static instances: CountingEventSource[] = [];
@@ -32,8 +34,20 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('App', () => {
+  function renderApp() {
+    return render(
+      <MemoryRouter initialEntries={['/command']}>
+        <Routes>
+          <Route element={<CommandShell />}>
+            <Route path="/command" element={<App />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
   it('names the screen, not the product, in its heading', () => {
-    render(<App />);
+    renderApp();
 
     // The wordmark moved into the shell header when it became persistent. A
     // page whose <h1> is the product name tells a screen-reader user which
@@ -42,10 +56,16 @@ describe('App', () => {
       screen.getByRole('heading', { level: 1, name: 'Command center' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Sentinel' })).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Primary' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Command' })).toHaveAttribute('href', '/command');
+    expect(screen.getByRole('link', { name: 'Incidents' })).toHaveAttribute(
+      'href',
+      '/command#live-incidents',
+    );
   });
 
   it('labels the decomposition as real, because it now reads the real store', () => {
-    render(<App />);
+    renderApp();
 
     // This asserted `Simulated` until the hero chart replaced the illustrative
     // sketch. The label flipped because the data source did - it is a claim
@@ -55,7 +75,7 @@ describe('App', () => {
   });
 
   it('offers a skip link ahead of the header', () => {
-    render(<App />);
+    renderApp();
 
     expect(screen.getByRole('link', { name: 'Skip to content' })).toBeInTheDocument();
   });
@@ -64,7 +84,7 @@ describe('App', () => {
     CountingEventSource.instances = [];
     vi.stubGlobal('EventSource', CountingEventSource);
 
-    const rendered = render(<App />);
+    const rendered = renderApp();
 
     expect(CountingEventSource.instances).toHaveLength(1);
     rendered.unmount();

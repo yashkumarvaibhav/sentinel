@@ -9,11 +9,14 @@ from typing import Literal, Protocol
 from pydantic import ValidationError
 
 from api.causal_graph import build_causal_graph, causal_graph_record
+from api.incident_detail import build_incident_detail, incident_detail_record
 from api.stream import snapshot_invalidation
 from common.config import TopologyConfig
-from common.storage import IncidentGraphRecord, IncidentRecord
+from common.storage import IncidentDetailRecord, IncidentGraphRecord, IncidentRecord
 from contracts import (
+    AuditEntry,
     DecisionAction,
+    DecompFrame,
     IncidentActionState,
     IncidentConfidence,
     IncidentConfidenceStatus,
@@ -44,6 +47,7 @@ class IncidentFeedStore(Protocol):
         self,
         record: IncidentRecord,
         graph: IncidentGraphRecord,
+        detail: IncidentDetailRecord,
     ) -> bool: ...
 
 
@@ -80,6 +84,13 @@ class IncidentFeedPublisher:
         topology: TopologyConfig,
         dependency_signal_prefix: str,
         honesty: Literal["REAL", "SIMULATED"],
+        stimulus_honesty: Literal["REAL", "SIMULATED"],
+        mode: Literal["LIVE", "REPLAY"] = "LIVE",
+        capture_id: str | None = None,
+        seed: int | None = None,
+        decomp_frames: tuple[DecompFrame, ...] = (),
+        audit_entries: tuple[AuditEntry, ...] = (),
+        decomposition_truncated: bool = False,
         calibrated_confidence: float | None = None,
         calibration_note: str | None = None,
         explained_event: str | None = None,
@@ -99,9 +110,25 @@ class IncidentFeedPublisher:
             dependency_signal_prefix=dependency_signal_prefix,
             honesty=honesty,
         )
+        detail = build_incident_detail(
+            outcome,
+            episodes=episodes,
+            graph=graph,
+            decomp_frames=decomp_frames,
+            audit_entries=audit_entries,
+            telemetry_honesty=honesty,
+            stimulus_honesty=stimulus_honesty,
+            mode=mode,
+            capture_id=capture_id,
+            seed=seed,
+            calibrated_confidence=calibrated_confidence,
+            calibration_note=calibration_note,
+            decomposition_truncated=decomposition_truncated,
+        )
         persisted = await self._store.put_incident_bundle(
             incident_record(item),
             causal_graph_record(graph),
+            incident_detail_record(detail),
         )
         if persisted:
             self._broker.publish(snapshot_invalidation(SnapshotResource.INCIDENTS))

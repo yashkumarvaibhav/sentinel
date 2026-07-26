@@ -210,7 +210,10 @@ function parseEdge(value: unknown): CausalGraphEdge {
   };
 }
 
-function parseGraph(value: unknown): CausalGraph {
+export function parseCausalGraph(
+  value: unknown,
+  { allowResolved = false }: { allowResolved?: boolean } = {},
+): CausalGraph {
   const body = record(value, 'causal graph');
   exact(
     body,
@@ -269,7 +272,7 @@ function parseGraph(value: unknown): CausalGraph {
     throw new Error('causal graph origin disagrees with its node');
   }
   const incidentState = member(body.incident_state, STATES, 'causal graph incident state');
-  if (incidentState === 'RESOLVED') {
+  if (incidentState === 'RESOLVED' && !allowResolved) {
     throw new Error('a current causal graph cannot describe a resolved incident');
   }
   if (body.honesty !== 'REAL' && body.honesty !== 'SIMULATED') {
@@ -293,7 +296,7 @@ export function parseCausalGraphResponse(value: unknown): CausalGraphResponse {
   if (body.status !== 'ready' && body.status !== 'empty' && body.status !== 'degraded') {
     throw new Error('causal graph status is unknown');
   }
-  const graph = body.graph === null ? null : parseGraph(body.graph);
+  const graph = body.graph === null ? null : parseCausalGraph(body.graph);
   const detail = optionalText(body.detail, 'causal graph detail');
   if (
     (body.status === 'ready' && (graph === null || detail !== null)) ||

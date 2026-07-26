@@ -1253,6 +1253,32 @@
       "title": "Incident",
       "type": "object"
     },
+    "IncidentActionLog": {
+      "additionalProperties": false,
+      "description": "The decision plus every attached immutable action/audit record.",
+      "properties": {
+        "decision": {
+          "$ref": "#/$defs/Decision"
+        },
+        "detail": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/AuditEntry"
+          },
+          "title": "Entries",
+          "type": "array"
+        }
+      },
+      "required": [
+        "decision",
+        "entries",
+        "detail"
+      ],
+      "title": "IncidentActionLog",
+      "type": "object"
+    },
     "IncidentActionState": {
       "additionalProperties": false,
       "description": "What was decided, separately from what an actuator proved it did.",
@@ -1319,6 +1345,288 @@
       ],
       "title": "IncidentConfidenceStatus",
       "type": "string"
+    },
+    "IncidentDecomposition": {
+      "additionalProperties": false,
+      "description": "The primary full-resolution incident series, or explicit insufficiency.",
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "end": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "frames": {
+          "items": {
+            "$ref": "#/$defs/DecompFrame"
+          },
+          "maxItems": 500,
+          "title": "Frames",
+          "type": "array"
+        },
+        "service": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "signal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SignalName"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "start": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "status": {
+          "enum": [
+            "available",
+            "insufficient"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "truncated": {
+          "title": "Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "status",
+        "service",
+        "signal",
+        "start",
+        "end",
+        "frames",
+        "truncated",
+        "detail"
+      ],
+      "title": "IncidentDecomposition",
+      "type": "object"
+    },
+    "IncidentDetail": {
+      "additionalProperties": false,
+      "description": "One evidence-complete incident revision for the proof screen.",
+      "properties": {
+        "action_log": {
+          "$ref": "#/$defs/IncidentActionLog"
+        },
+        "causal_graph": {
+          "$ref": "#/$defs/CausalGraph"
+        },
+        "decomposition": {
+          "$ref": "#/$defs/IncidentDecomposition"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/IncidentEvidenceProof"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "incident_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "opened_at": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "origin_confidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Probability"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "origin_service": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provenance": {
+          "$ref": "#/$defs/IncidentProvenance"
+        },
+        "reason": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "rejected_alternatives": {
+          "items": {
+            "$ref": "#/$defs/RejectedAlternative"
+          },
+          "title": "Rejected Alternatives",
+          "type": "array"
+        },
+        "services": {
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "minItems": 1,
+          "title": "Services",
+          "type": "array"
+        },
+        "severity": {
+          "$ref": "#/$defs/IncidentSeverity"
+        },
+        "state": {
+          "$ref": "#/$defs/IncidentState"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "verdict": {
+          "$ref": "#/$defs/IncidentVerdictProof"
+        },
+        "verification": {
+          "$ref": "#/$defs/Verification"
+        }
+      },
+      "required": [
+        "incident_id",
+        "opened_at",
+        "updated_at",
+        "state",
+        "severity",
+        "services",
+        "origin_service",
+        "origin_confidence",
+        "verdict",
+        "reason",
+        "rejected_alternatives",
+        "decomposition",
+        "evidence",
+        "causal_graph",
+        "verification",
+        "action_log",
+        "provenance"
+      ],
+      "title": "IncidentDetail",
+      "type": "object"
+    },
+    "IncidentDetailResponse": {
+      "additionalProperties": false,
+      "description": "Ready/not-found/degraded response for one stable incident id.",
+      "properties": {
+        "detail": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IncidentDetail"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanText"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "ready",
+            "not_found",
+            "degraded"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "detail",
+        "message"
+      ],
+      "title": "IncidentDetailResponse",
+      "type": "object"
+    },
+    "IncidentEvidenceProof": {
+      "additionalProperties": false,
+      "description": "One typed, independently scored evidence item behind the verdict.",
+      "properties": {
+        "assessment_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "axis": {
+          "$ref": "#/$defs/EvidenceAxis"
+        },
+        "baseline": {
+          "title": "Baseline",
+          "type": "number"
+        },
+        "contribution": {
+          "$ref": "#/$defs/Probability"
+        },
+        "direction": {
+          "$ref": "#/$defs/EvidenceDirection"
+        },
+        "evidence_refs": {
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "feature": {
+          "$ref": "#/$defs/SignalName"
+        },
+        "note": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "services": {
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "title": "Services",
+          "type": "array"
+        },
+        "symptom_kinds": {
+          "items": {
+            "$ref": "#/$defs/SymptomKind"
+          },
+          "title": "Symptom Kinds",
+          "type": "array"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        }
+      },
+      "required": [
+        "assessment_id",
+        "axis",
+        "symptom_kinds",
+        "services",
+        "feature",
+        "value",
+        "baseline",
+        "direction",
+        "contribution",
+        "note",
+        "evidence_refs"
+      ],
+      "title": "IncidentEvidenceProof",
+      "type": "object"
     },
     "IncidentEvidenceValue": {
       "additionalProperties": false,
@@ -1508,6 +1816,67 @@
       "title": "IncidentFeedResponse",
       "type": "object"
     },
+    "IncidentProvenance": {
+      "additionalProperties": false,
+      "description": "What was measured and how the stimulus reached the platform.",
+      "properties": {
+        "capture_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "mode": {
+          "enum": [
+            "LIVE",
+            "REPLAY"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seed"
+        },
+        "stimulus": {
+          "enum": [
+            "REAL",
+            "SIMULATED"
+          ],
+          "title": "Stimulus",
+          "type": "string"
+        },
+        "telemetry": {
+          "enum": [
+            "REAL",
+            "SIMULATED"
+          ],
+          "title": "Telemetry",
+          "type": "string"
+        }
+      },
+      "required": [
+        "telemetry",
+        "stimulus",
+        "mode"
+      ],
+      "title": "IncidentProvenance",
+      "type": "object"
+    },
     "IncidentSeverity": {
       "description": "How much this incident matters, in the language a responder pages on.",
       "enum": [
@@ -1529,6 +1898,59 @@
       ],
       "title": "IncidentState",
       "type": "string"
+    },
+    "IncidentVerdictProof": {
+      "additionalProperties": false,
+      "description": "The winning class and complete support distribution, with honest calibration.",
+      "properties": {
+        "calibration": {
+          "$ref": "#/$defs/IncidentConfidence"
+        },
+        "distribution": {
+          "items": {
+            "$ref": "#/$defs/VerdictProbability"
+          },
+          "title": "Distribution",
+          "type": "array"
+        },
+        "reason_subtype": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReasonSubtype"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "decided",
+            "insufficient"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "verdict_class": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VerdictClass"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "verdict_class",
+        "reason_subtype",
+        "distribution",
+        "calibration"
+      ],
+      "title": "IncidentVerdictProof",
+      "type": "object"
     },
     "KpiKey": {
       "description": "The four reliability questions on the command centre.",
@@ -2262,6 +2684,24 @@
       "title": "VerdictClass",
       "type": "string"
     },
+    "VerdictProbability": {
+      "additionalProperties": false,
+      "description": "One member of the complete deterministic verdict distribution.",
+      "properties": {
+        "probability": {
+          "$ref": "#/$defs/Probability"
+        },
+        "verdict_class": {
+          "$ref": "#/$defs/VerdictClass"
+        }
+      },
+      "required": [
+        "verdict_class",
+        "probability"
+      ],
+      "title": "VerdictProbability",
+      "type": "object"
+    },
     "Verification": {
       "additionalProperties": false,
       "description": "The four deterministic checks a hypothesis must survive before it is acted on.\n\nNothing here proposes anything. Each check is arithmetic over telemetry and\ncommitted topology, and all four must hold: a hypothesis that is merely\nplausible is left unconfirmed, which downstream means pending review rather\nthan action.\n\n``BOOTSTRAP`` is a vacuous pass, recorded as such and never as a\nconfirmation. It exists only so that an empty incident memory cannot make\nconfirmation impossible forever.",
@@ -2381,6 +2821,9 @@
     },
     {
       "$ref": "#/$defs/CausalGraphResponse"
+    },
+    {
+      "$ref": "#/$defs/IncidentDetailResponse"
     }
   ],
   "title": "SentinelContract"

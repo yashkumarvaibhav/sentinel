@@ -36,6 +36,7 @@ def test_postgres_migration_separates_runtime_and_dev_label_schemas() -> None:
         "0003",
         "0004",
         "0005",
+        "0006",
     ]
     sql = render_migration(
         migrations[0],
@@ -70,6 +71,15 @@ def test_incident_signature_migration_declares_a_fixed_width_vector() -> None:
 
     with pytest.raises(ValueError, match="template mismatch"):
         render_migration(migrations["0003"], schema="sentinel_test", dev_schema="unused")
+
+
+def test_incident_detail_migration_is_incident_owned_runtime_state() -> None:
+    migrations = {migration.version: migration for migration in load_migrations("postgres")}
+
+    sql = render_migration(migrations["0006"], schema="sentinel_test")
+    assert "sentinel_test.incident_details" in sql
+    assert "REFERENCES sentinel_test.incidents (incident_id)" in sql
+    assert "{{dev_schema}}" not in sql
 
 
 def test_migration_versions_are_sorted_and_unique() -> None:

@@ -118,8 +118,8 @@ body {
   background: var(--raised);
   border: 1px solid var(--line);
   color: var(--ink);
-  min-height: 2rem;
-  min-width: 2rem;
+  min-height: 2.75rem;
+  min-width: 2.75rem;
   padding: 0.25rem;
 }
 

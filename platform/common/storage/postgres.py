@@ -13,7 +13,12 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from audit.chain import build_entry
-from common.storage.models import AuditRecord, IncidentGraphRecord, IncidentRecord
+from common.storage.models import (
+    AuditRecord,
+    IncidentDetailRecord,
+    IncidentGraphRecord,
+    IncidentRecord,
+)
 from common.storage.pool import PostgresPool
 from contracts import AuditEntry, AuditEventKind, SymptomEpisode
 
@@ -25,6 +30,7 @@ class PostgresRepository:
         self._pool = pool
         self._incidents = sql.Identifier(schema, "incidents")
         self._incident_graphs = sql.Identifier(schema, "incident_causal_graphs")
+        self._incident_details = sql.Identifier(schema, "incident_details")
         self._audit_entries = sql.Identifier(schema, "audit_entries")
         self._symptom_episodes = sql.Identifier(schema, "symptom_episodes")
 
@@ -60,10 +66,16 @@ class PostgresRepository:
         self,
         record: IncidentRecord,
         graph: IncidentGraphRecord,
+        detail: IncidentDetailRecord,
     ) -> bool:
-        """Atomically advance one incident and its evidence-preserving graph."""
-        if graph.incident_id != record.incident_id or graph.updated_at != record.updated_at:
-            raise ValueError("incident and causal graph storage identities must match")
+        """Atomically advance one incident, its graph and its complete proof."""
+        if (
+            graph.incident_id != record.incident_id
+            or detail.incident_id != record.incident_id
+            or graph.updated_at != record.updated_at
+            or detail.updated_at != record.updated_at
+        ):
+            raise ValueError("incident, causal graph and detail storage identities must match")
         incident_query = sql.SQL(
             """
             INSERT INTO {table} (incident_id, state, payload, created_at, updated_at)
@@ -88,6 +100,17 @@ class PostgresRepository:
             RETURNING incident_id
             """
         ).format(table=self._incident_graphs)
+        detail_query = sql.SQL(
+            """
+            INSERT INTO {table} (incident_id, updated_at, payload)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (incident_id) DO UPDATE SET
+                updated_at = EXCLUDED.updated_at,
+                payload = EXCLUDED.payload
+            WHERE {table}.updated_at < EXCLUDED.updated_at
+            RETURNING incident_id
+            """
+        ).format(table=self._incident_details)
         async with self._pool.connection() as connection:
             incident_cursor = await connection.execute(
                 incident_query,
@@ -111,6 +134,16 @@ class PostgresRepository:
             )
             if await graph_cursor.fetchone() is None:
                 raise RuntimeError("causal graph could not advance with its incident")
+            detail_cursor = await connection.execute(
+                detail_query,
+                (
+                    detail.incident_id,
+                    detail.updated_at,
+                    Jsonb(detail.payload),
+                ),
+            )
+            if await detail_cursor.fetchone() is None:
+                raise RuntimeError("incident detail could not advance with its incident")
             return True
 
     async def get_incident(self, incident_id: str) -> IncidentRecord | None:
@@ -179,6 +212,26 @@ class PostgresRepository:
         if row is None:
             return None
         return IncidentGraphRecord(
+            incident_id=cast(str, row[0]),
+            updated_at=cast(datetime, row[1]),
+            payload=cast(dict[str, JsonValue], row[2]),
+        )
+
+    async def get_incident_detail(self, incident_id: str) -> IncidentDetailRecord | None:
+        """Fetch one evidence-complete proof snapshot by stable incident id."""
+        query = sql.SQL(
+            """
+            SELECT incident_id, updated_at, payload
+            FROM {}
+            WHERE incident_id = %s
+            """
+        ).format(self._incident_details)
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(query, (incident_id,))
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return IncidentDetailRecord(
             incident_id=cast(str, row[0]),
             updated_at=cast(datetime, row[1]),
             payload=cast(dict[str, JsonValue], row[2]),

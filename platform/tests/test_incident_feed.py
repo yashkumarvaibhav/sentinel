@@ -12,7 +12,7 @@ import pytest
 from api.causal_graph import build_causal_graph
 from api.incidents import IncidentFeedPublisher, build_incident_feed_item
 from common.config import TopologyConfig, TopologyService
-from common.storage import IncidentGraphRecord, IncidentRecord
+from common.storage import IncidentDetailRecord, IncidentGraphRecord, IncidentRecord
 from contracts import (
     CheckOutcome,
     Decision,
@@ -309,14 +309,17 @@ class _Store:
         self.changed = changed
         self.records: list[IncidentRecord] = []
         self.graphs: list[IncidentGraphRecord] = []
+        self.details: list[IncidentDetailRecord] = []
 
     async def put_incident_bundle(
         self,
         record: IncidentRecord,
         graph: IncidentGraphRecord,
+        detail: IncidentDetailRecord,
     ) -> bool:
         self.records.append(record)
         self.graphs.append(graph)
+        self.details.append(detail)
         return self.changed
 
 
@@ -325,8 +328,9 @@ class _BrokenStore:
         self,
         record: IncidentRecord,
         graph: IncidentGraphRecord,
+        detail: IncidentDetailRecord,
     ) -> NoReturn:
-        del record, graph
+        del record, graph, detail
         raise RuntimeError("database unavailable")
 
 
@@ -368,13 +372,16 @@ def test_invalidation_happens_only_after_a_durable_new_revision() -> None:
             topology=_topology(),
             dependency_signal_prefix="dependency.",
             honesty="REAL",
+            stimulus_honesty="SIMULATED",
         )
 
         assert result.persisted is True
         assert len(store.records) == 1
         assert len(store.graphs) == 1
+        assert len(store.details) == 1
         assert store.records[0].payload["incident_id"] == "incident-live-1"
         assert store.graphs[0].payload["incident_id"] == "incident-live-1"
+        assert store.details[0].payload["incident_id"] == "incident-live-1"
         assert len(broker.events) == 1
         assert broker.events[0].resources == (SnapshotResource.INCIDENTS,)
 
@@ -386,6 +393,7 @@ def test_invalidation_happens_only_after_a_durable_new_revision() -> None:
             topology=_topology(),
             dependency_signal_prefix="dependency.",
             honesty="REAL",
+            stimulus_honesty="SIMULATED",
         )
         assert stale_result.persisted is False
         assert stale_broker.events == []
@@ -399,6 +407,7 @@ def test_invalidation_happens_only_after_a_durable_new_revision() -> None:
                 topology=_topology(),
                 dependency_signal_prefix="dependency.",
                 honesty="REAL",
+                stimulus_honesty="SIMULATED",
             )
         assert broken_broker.events == []
 

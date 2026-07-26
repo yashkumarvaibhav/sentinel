@@ -80,7 +80,7 @@ export function TopBar() {
   return (
     <header className="border-line bg-raised sticky top-0 z-10 border-b">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 sm:px-6">
-        <a href="/" className="text-base font-semibold tracking-tight">
+        <a href="/command" className="text-base font-semibold tracking-tight">
           Sentinel
         </a>
 

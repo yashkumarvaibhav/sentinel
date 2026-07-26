@@ -11,7 +11,7 @@ import logging
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Protocol
 
 import httpx
 from fastapi import FastAPI, Response
@@ -33,6 +33,11 @@ from api.decomposition import (
 )
 from api.gate import SharedSecretGate
 from api.health import HealthReport, Probe, Readiness, check_health
+from api.incident_detail import (
+    IncidentDetailDataError,
+    incident_detail_snapshot,
+    unavailable_incident_detail,
+)
 from api.incidents import (
     DEFAULT_INCIDENTS,
     MAX_INCIDENTS,
@@ -56,24 +61,37 @@ from common.config import load_config
 from common.settings import Settings, settings
 from common.storage import (
     ClickHouseRepository,
+    IncidentDetailRecord,
     PostgresRepository,
     create_postgres_pool,
 )
-from contracts import CausalGraphResponse, IncidentFeedResponse, KpiResponse, ScoreProof
+from contracts import (
+    CausalGraphResponse,
+    IncidentDetailResponse,
+    IncidentFeedResponse,
+    KpiResponse,
+    ScoreProof,
+)
 
 SERVICE = "sentinel-gateway"
 LOGGER = logging.getLogger(__name__)
 
-# Routes that expose more than the command centre needs and so ride the gate
-# even for reads. The audit ledger is here because it is the record of what the
-# platform did and why - the one read where "who is asking" matters as much as
-# for a write (build decision #12 names it).
-_SENSITIVE_PREFIXES = ("/api/lab", "/api/audit")
+# Routes that expose more than the public command shell needs and so ride the
+# gate even for reads. The audit ledger records what the platform did and why;
+# the per-incident proof joins the full evidence and action history. Both need
+# the interim identity check named by the architecture until OIDC replaces it.
+_SENSITIVE_PREFIXES = ("/api/lab", "/api/audit", "/api/incidents/")
 
 # How much of the chain one request may ask for. A ledger read is a scan in
 # sequence order, so an unbounded one is a way to make the gateway do arbitrary
 # work on behalf of anybody who can reach it.
 MAX_AUDIT_ENTRIES = 500
+
+
+class IncidentDetailReader(Protocol):
+    """Structural marker documented by the injected get-by-id method."""
+
+    async def get_incident_detail(self, incident_id: str) -> IncidentDetailRecord | None: ...
 
 
 def create_app(
@@ -85,6 +103,7 @@ def create_app(
     score_proof: ScoreProof | None = None,
     incident_reader: IncidentFeedReader | None = None,
     causal_graph_reader: CausalGraphReader | None = None,
+    incident_detail_reader: IncidentDetailReader | None = None,
 ) -> FastAPI:
     """Build the gateway application.
 
@@ -102,6 +121,7 @@ def create_app(
         app.state.stream_broker = stream_broker if stream_broker is not None else StreamBroker()
         app.state.incident_reader = incident_reader
         app.state.causal_graph_reader = causal_graph_reader
+        app.state.incident_detail_reader = incident_detail_reader
         app.state.incident_publisher = None
         incident_pool = None
         if incident_reader is None and probes is None:
@@ -113,6 +133,7 @@ def create_app(
             )
             app.state.incident_reader = incident_store
             app.state.causal_graph_reader = incident_store
+            app.state.incident_detail_reader = incident_store
             app.state.incident_publisher = IncidentFeedPublisher(
                 store=incident_store,
                 broker=app.state.stream_broker,
@@ -312,6 +333,47 @@ def create_app(
             return unavailable_incident_snapshot(
                 limit=bounded,
                 detail="live incident store could not provide a snapshot",
+            )
+
+    @app.get(
+        "/api/incidents/{incident_id}",
+        tags=["incidents"],
+        response_model=IncidentDetailResponse,
+    )
+    async def incident_detail(
+        incident_id: str,
+        response: Response,
+    ) -> IncidentDetailResponse:
+        """The evidence-complete durable proof for one stable incident id."""
+        reader: IncidentDetailReader | None = getattr(
+            app.state,
+            "incident_detail_reader",
+            None,
+        )
+        if reader is None:
+            response.status_code = 503
+            return unavailable_incident_detail(
+                status="degraded",
+                message="no incident detail store is attached to this gateway",
+            )
+        try:
+            record = await reader.get_incident_detail(incident_id)
+            if record is None:
+                response.status_code = 404
+                return unavailable_incident_detail(
+                    status="not_found",
+                    message=f"no durable proof exists for incident {incident_id}",
+                )
+            return incident_detail_snapshot(record)
+        except IncidentDetailDataError as exc:
+            response.status_code = 503
+            return unavailable_incident_detail(status="degraded", message=str(exc))
+        except Exception:
+            LOGGER.exception("incident detail read failed")
+            response.status_code = 503
+            return unavailable_incident_detail(
+                status="degraded",
+                message="incident detail store could not provide a proof snapshot",
             )
 
     @app.get(

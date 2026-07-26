@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { NavLink, Outlet } from 'react-router';
 
 import { TopBar } from '@/shell/TopBar';
 import { SnapshotStreamProvider } from '@/shell/SnapshotStream';
@@ -6,14 +6,11 @@ import { SnapshotStreamProvider } from '@/shell/SnapshotStream';
 /**
  * The frame every screen is rendered inside.
  *
- * There is no router yet and that is deliberate: `/command` is currently the
- * only screen, and a router installed before a second route would be a
- * dependency chosen for a page that does not exist. It lands with the incident
- * detail screen, which is the first thing that genuinely needs a URL of its
- * own — and adding it then is a recorded decision, per the no-new-runtime-
- * dependency rule.
+ * The router landed with the incident proof screen, the first second URL.
+ * Navigation is intentionally limited to screens that exist now; future
+ * information-architecture labels do not become misleading dead links.
  */
-export function CommandShell({ children }: { children: ReactNode }) {
+export function CommandShell() {
   return (
     <SnapshotStreamProvider>
       <div className="flex min-h-screen flex-col">
@@ -28,8 +25,30 @@ export function CommandShell({ children }: { children: ReactNode }) {
 
         <TopBar />
 
+        <nav aria-label="Primary" className="border-line bg-sidebar border-b">
+          <div className="mx-auto flex max-w-6xl gap-1 px-4 py-2 sm:px-6">
+            <NavLink
+              className={({ isActive }) =>
+                `min-h-11 rounded-md px-3 py-3 text-xs font-medium sm:min-h-0 sm:py-2 ${
+                  isActive ? 'bg-accent-soft text-accent' : 'text-muted hover:text-ink'
+                }`
+              }
+              end
+              to="/command"
+            >
+              Command
+            </NavLink>
+            <NavLink
+              className="text-muted hover:text-ink min-h-11 rounded-md px-3 py-3 text-xs font-medium sm:min-h-0 sm:py-2"
+              to="/command#live-incidents"
+            >
+              Incidents
+            </NavLink>
+          </div>
+        </nav>
+
         <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6">
-          {children}
+          <Outlet />
         </main>
       </div>
     </SnapshotStreamProvider>

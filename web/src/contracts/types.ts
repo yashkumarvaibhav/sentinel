@@ -25,7 +25,8 @@ export type SentinelContract =
   | ScoreProof
   | KpiResponse
   | IncidentFeedResponse
-  | CausalGraphResponse;
+  | CausalGraphResponse
+  | IncidentDetailResponse;
 export type TelemetryScalar = string | boolean | number;
 export type Identifier = string;
 export type FlowRefs = Identifier[];
@@ -294,6 +295,31 @@ export type IsOrigin = boolean;
 export type SymptomKinds = SymptomKind[];
 export type Tier = "edge" | "application" | "data" | "infrastructure";
 export type Status2 = "ready" | "empty" | "degraded";
+export type Entries = AuditEntry[];
+/**
+ * @maxItems 500
+ */
+export type Frames = DecompFrame[];
+export type Status3 = "available" | "insufficient";
+export type Truncated = boolean;
+export type Baseline = number;
+export type EvidenceRefs4 = Identifier[];
+export type Services4 = Identifier[];
+export type SymptomKinds1 = SymptomKind[];
+export type Value = number;
+export type Evidence3 = IncidentEvidenceProof[];
+export type Mode = "LIVE" | "REPLAY";
+export type Seed = number | null;
+export type Stimulus = "REAL" | "SIMULATED";
+export type Telemetry = "REAL" | "SIMULATED";
+export type RejectedAlternatives1 = RejectedAlternative[];
+/**
+ * @minItems 1
+ */
+export type Services5 = [Identifier, ...Identifier[]];
+export type Distribution1 = VerdictProbability[];
+export type Status4 = "decided" | "insufficient";
+export type Status5 = "ready" | "not_found" | "degraded";
 
 /**
  * One event-time telemetry value, containing evidence but never answer-key data.
@@ -864,4 +890,98 @@ export interface CausalGraphNode {
   symptom_heat: Probability;
   symptom_kinds: SymptomKinds;
   tier: Tier;
+}
+/**
+ * Ready/not-found/degraded response for one stable incident id.
+ */
+export interface IncidentDetailResponse {
+  detail: IncidentDetail | null;
+  message: HumanText | null;
+  status: Status5;
+}
+/**
+ * One evidence-complete incident revision for the proof screen.
+ */
+export interface IncidentDetail {
+  action_log: IncidentActionLog;
+  causal_graph: CausalGraph;
+  decomposition: IncidentDecomposition;
+  evidence: Evidence3;
+  incident_id: Identifier;
+  opened_at: UtcDatetime;
+  origin_confidence: Probability | null;
+  origin_service: Identifier | null;
+  provenance: IncidentProvenance;
+  reason: HumanText;
+  rejected_alternatives: RejectedAlternatives1;
+  services: Services5;
+  severity: IncidentSeverity;
+  state: IncidentState;
+  updated_at: UtcDatetime;
+  verdict: IncidentVerdictProof;
+  verification: Verification;
+}
+/**
+ * The decision plus every attached immutable action/audit record.
+ */
+export interface IncidentActionLog {
+  decision: Decision;
+  detail: HumanText;
+  entries: Entries;
+}
+/**
+ * The primary full-resolution incident series, or explicit insufficiency.
+ */
+export interface IncidentDecomposition {
+  detail: HumanText;
+  end: UtcDatetime;
+  frames: Frames;
+  service: Identifier | null;
+  signal: SignalName | null;
+  start: UtcDatetime;
+  status: Status3;
+  truncated: Truncated;
+}
+/**
+ * One typed, independently scored evidence item behind the verdict.
+ */
+export interface IncidentEvidenceProof {
+  assessment_id: Identifier;
+  axis: EvidenceAxis;
+  baseline: Baseline;
+  contribution: Probability;
+  direction: EvidenceDirection;
+  evidence_refs: EvidenceRefs4;
+  feature: SignalName;
+  note: HumanText;
+  services: Services4;
+  symptom_kinds: SymptomKinds1;
+  value: Value;
+}
+/**
+ * What was measured and how the stimulus reached the platform.
+ */
+export interface IncidentProvenance {
+  capture_id?: Identifier | null;
+  mode: Mode;
+  seed?: Seed;
+  stimulus: Stimulus;
+  telemetry: Telemetry;
+}
+/**
+ * The winning class and complete support distribution, with honest calibration.
+ */
+export interface IncidentVerdictProof {
+  calibration: IncidentConfidence;
+  distribution: Distribution1;
+  reason_subtype: ReasonSubtype | null;
+  status: Status4;
+  verdict_class: VerdictClass | null;
+}
+/**
+ * One member of the complete deterministic verdict distribution.
+ */
+export interface VerdictProbability {
+  probability: Probability;
+  verdict_class: VerdictClass;
 }

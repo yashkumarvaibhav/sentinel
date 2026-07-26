@@ -144,8 +144,9 @@ def test_a_gateway_with_no_ledger_says_so_rather_than_reporting_an_empty_one() -
     assert response.json()["intact"] is False
 
 
-def test_the_audit_route_rides_the_gate_even_for_reads() -> None:
-    """The record of what the platform did is a sensitive read, not a public one."""
+def test_sensitive_proof_routes_ride_the_gate_even_for_reads() -> None:
+    """Action history and an incident proof are sensitive, unlike the public feed."""
     from api.app import _SENSITIVE_PREFIXES
 
     assert "/api/audit" in _SENSITIVE_PREFIXES
+    assert "/api/incidents/" in _SENSITIVE_PREFIXES

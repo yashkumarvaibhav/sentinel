@@ -58,6 +58,14 @@ class IncidentGraphRecord(StorageRecord):
     payload: dict[str, JsonValue]
 
 
+class IncidentDetailRecord(StorageRecord):
+    """One evidence-complete proof snapshot stored beside its incident."""
+
+    incident_id: RecordId
+    updated_at: UtcDatetime
+    payload: dict[str, JsonValue]
+
+
 class AuditRecord(StorageRecord):
     """One immutable hash-linked runtime audit entry."""
 

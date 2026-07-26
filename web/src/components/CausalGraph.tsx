@@ -38,9 +38,13 @@ function percent(value: number): string {
 
 function useMediaQuery(query: string): boolean {
   const [matches, setMatches] = useState(
-    () => typeof window !== 'undefined' && window.matchMedia(query).matches,
+    () =>
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia(query).matches,
   );
   useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
     const media = window.matchMedia(query);
     const update = (event: MediaQueryListEvent) => setMatches(event.matches);
     setMatches(media.matches);
@@ -302,7 +306,7 @@ function flowElements(
   };
 }
 
-function ReadyGraph({ graph }: { graph: CausalGraph }) {
+export function CausalGraphView({ graph }: { graph: CausalGraph }) {
   const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   const compact = useMediaQuery('(max-width: 639px)');
   const elements = useMemo(
@@ -452,7 +456,7 @@ export function CausalGraphPanel() {
             </p>
           </div>
         ) : (
-          <ReadyGraph graph={load.response.graph} />
+          <CausalGraphView graph={load.response.graph} />
         ))}
     </section>
   );

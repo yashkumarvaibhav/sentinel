@@ -19,6 +19,7 @@ from common.storage import (
     AuditLedgerRepository,
     AuditRecord,
     ClickHouseRepository,
+    IncidentDetailRecord,
     IncidentGraphRecord,
     IncidentMemoryRepository,
     IncidentRecord,
@@ -285,9 +286,19 @@ async def _round_trip_incident_graph_bundle(
             "updated_at": incident.updated_at.isoformat(),
         },
     )
-    assert await repository.put_incident_bundle(incident, graph) is True
-    assert await repository.put_incident_bundle(incident, graph) is False
+    detail = IncidentDetailRecord(
+        incident_id=incident.incident_id,
+        updated_at=incident.updated_at,
+        payload={
+            "incident_id": incident.incident_id,
+            "updated_at": incident.updated_at.isoformat(),
+            "proof": "complete",
+        },
+    )
+    assert await repository.put_incident_bundle(incident, graph, detail) is True
+    assert await repository.put_incident_bundle(incident, graph, detail) is False
     assert await repository.latest_incident_graph() == graph
+    assert await repository.get_incident_detail(incident.incident_id) == detail
 
     # Make only the graph artificially newer, then prove the bundle refuses to
     # advance half of the pair and rolls its incident write back.
@@ -315,9 +326,16 @@ async def _round_trip_incident_graph_bundle(
             },
         }
     )
+    half_detail = detail.model_copy(
+        update={
+            "updated_at": half_advance.updated_at,
+            "payload": detail.payload | {"updated_at": half_advance.updated_at.isoformat()},
+        }
+    )
     with pytest.raises(RuntimeError, match="could not advance"):
-        await repository.put_incident_bundle(half_advance, half_graph)
+        await repository.put_incident_bundle(half_advance, half_graph, half_detail)
     assert await repository.get_incident(incident.incident_id) == incident
+    assert await repository.get_incident_detail(incident.incident_id) == detail
 
     resolved = incident.model_copy(
         update={
@@ -336,7 +354,53 @@ async def _round_trip_incident_graph_bundle(
             },
         }
     )
-    assert await repository.put_incident_bundle(resolved, resolved_graph) is True
+    resolved_detail = detail.model_copy(
+        update={
+            "updated_at": resolved.updated_at,
+            "payload": detail.payload | {"updated_at": resolved.updated_at.isoformat()},
+        }
+    )
+    assert await repository.put_incident_bundle(resolved, resolved_graph, resolved_detail) is True
+    assert await repository.latest_incident_graph() is None
+    assert await repository.get_incident_detail(incident.incident_id) == resolved_detail
+
+    # Make only the proof artificially newer. The card and graph writes would
+    # both succeed, but the proof must refuse; its exception must roll both
+    # earlier writes back rather than exposing a mixed revision.
+    future_detail_time = ts + timedelta(seconds=15)
+    detail_table = sql.Identifier(config.postgres_schema, "incident_details")
+    async with pool.connection() as connection:
+        await connection.execute(
+            sql.SQL("UPDATE {} SET updated_at = %s WHERE incident_id = %s").format(detail_table),
+            (future_detail_time, incident.incident_id),
+        )
+    blocked_incident = resolved.model_copy(
+        update={
+            "state": "MONITORING",
+            "updated_at": ts + timedelta(seconds=14),
+            "payload": resolved.payload | {"state": "MONITORING"},
+        }
+    )
+    blocked_graph = resolved_graph.model_copy(
+        update={
+            "updated_at": blocked_incident.updated_at,
+            "payload": resolved_graph.payload
+            | {
+                "incident_state": "MONITORING",
+                "updated_at": blocked_incident.updated_at.isoformat(),
+            },
+        }
+    )
+    blocked_detail = resolved_detail.model_copy(
+        update={
+            "updated_at": blocked_incident.updated_at,
+            "payload": resolved_detail.payload
+            | {"updated_at": blocked_incident.updated_at.isoformat()},
+        }
+    )
+    with pytest.raises(RuntimeError, match="incident detail could not advance"):
+        await repository.put_incident_bundle(blocked_incident, blocked_graph, blocked_detail)
+    assert await repository.get_incident(incident.incident_id) == resolved
     assert await repository.latest_incident_graph() is None
 
 
