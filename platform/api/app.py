@@ -9,12 +9,20 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 from fastapi import FastAPI, Response
 
 from api.audit import AuditLedger
+from api.decomposition import (
+    MAX_FRAMES,
+    DecompositionRangeError,
+    DecompositionReader,
+    resolve_window,
+    serialize_window,
+)
 from api.gate import SharedSecretGate
 from api.health import HealthReport, Probe, Readiness, check_health
 from api.probes import platform_probes
@@ -41,6 +49,7 @@ def create_app(
     config: Settings | None = None,
     probes: Mapping[str, Probe] | None = None,
     ledger: AuditLedger | None = None,
+    decomposition_reader: DecompositionReader | None = None,
 ) -> FastAPI:
     """Build the gateway application.
 
@@ -55,6 +64,10 @@ def create_app(
         # endpoint answers 503 rather than pretending the ledger is empty: "no
         # ledger attached" and "nothing has happened" must not look the same.
         app.state.audit_ledger = ledger
+        # Same rule as the ledger: unset answers 503 rather than pretending the
+        # store is empty. "No store attached" and "nothing happened" must not
+        # look the same.
+        app.state.decomposition_reader = decomposition_reader
         async with httpx.AsyncClient(timeout=config.probe_timeout_seconds) as client:
             app.state.probes = probes if probes is not None else platform_probes(config, client)
             yield
@@ -130,6 +143,51 @@ def create_app(
             "broken_at": verification.broken_at,
             "detail": verification.detail,
         }
+
+    @app.get("/api/decomposition", tags=["decomposition"])
+    async def decomposition(
+        response: Response,
+        service: str,
+        signal: str,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        limit: int = 1_000,
+    ) -> dict[str, Any]:
+        """The surge split into what is explained and what is not, over a window.
+
+        An empty window answers 200 with zero frames. "Nothing was recorded for
+        this service here" is a true and useful answer; a 404 would claim the
+        route does not exist and send a reader hunting for a typo.
+        """
+        reader = getattr(app.state, "decomposition_reader", None)
+        if reader is None:
+            response.status_code = 503
+            return {
+                "detail": "no decomposition store is attached to this gateway",
+                "frames": [],
+                "count": 0,
+            }
+        try:
+            window_start, window_end = resolve_window(start, end, now=datetime.now(UTC))
+        except DecompositionRangeError as refusal:
+            response.status_code = 400
+            return {"detail": str(refusal), "frames": [], "count": 0}
+        bounded = max(1, min(limit, MAX_FRAMES))
+        frames = await reader.list_decomp_frames(
+            service=service,
+            signal=signal,
+            start=window_start,
+            end=window_end,
+            limit=bounded,
+        )
+        return serialize_window(
+            frames,
+            service=service,
+            signal=signal,
+            start=window_start,
+            end=window_end,
+            limit=bounded,
+        )
 
     return app
 

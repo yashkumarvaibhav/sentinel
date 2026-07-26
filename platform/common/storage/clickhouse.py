@@ -259,6 +259,69 @@ class ClickHouseRepository:
         )
         return tuple(_observation(row) for row in result)
 
+    async def list_decomp_frames(
+        self,
+        *,
+        service: str,
+        signal: str,
+        start: datetime,
+        end: datetime,
+        limit: int = 1_000,
+    ) -> tuple[DecompFrame, ...]:
+        """Read a bounded window of decomposition frames in event-time order.
+
+        The read behind the command centre's hero chart. It is bounded the same
+        way ``list_observations`` is, and for the same reason: a full-resolution
+        window is exactly the shape of request that lets anybody who can reach
+        the gateway make it do arbitrary work.
+
+        ``FINAL`` matters more here than for observations. A frame is rewritten
+        when a later context window changes what the world explains about a tick
+        already recorded, and a chart drawn from both versions would show one
+        moment twice with two different residuals - the one number this product
+        exists to be trusted about.
+        """
+        if start.utcoffset() is None or end.utcoffset() is None:
+            raise ValueError("decomposition range must use timezone-aware timestamps")
+        if end < start:
+            raise ValueError("end must be greater than or equal to start")
+        if not 1 <= limit <= 10_000:
+            raise ValueError("limit must be between 1 and 10000")
+        result = await rows(
+            self._client,
+            f"""
+            SELECT
+                frame_id,
+                observation_id,
+                toUnixTimestamp64Micro(ts) AS ts_us,
+                service,
+                signal,
+                observed,
+                explained_base,
+                explained_event,
+                residual,
+                band_low,
+                band_high,
+                residual_score,
+                context_ids
+            FROM {self._database}.decomp_frames FINAL
+            WHERE service = {{service:String}}
+              AND signal = {{signal:String}}
+              AND toUnixTimestamp64Micro(ts) >= {{start_us:Int64}}
+              AND toUnixTimestamp64Micro(ts) <= {{end_us:Int64}}
+            ORDER BY ts, frame_id
+            LIMIT {limit}
+            FORMAT JSONEachRow
+            """,
+            parameters={
+                "service": service,
+                "signal": signal,
+                "start_us": _timestamp_microseconds(start),
+                "end_us": _timestamp_microseconds(end),
+            },
+        )
+        return tuple(_decomp_frame(row) for row in result)
+
     async def _insert(
         self,
         table: str,
