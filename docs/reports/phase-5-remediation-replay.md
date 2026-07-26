@@ -16,13 +16,18 @@ There is no production `SloReader` until Phase 8, so every collateral probe repo
 ## `phase2-combo-503-dev-v11` — combo_night, seed 503 (development)
 
 - Acting decisions considered: **98**
-- Passes that acted: **0**; that took no action: **98**
-- Actions undone by the collateral probe: **0**
+- Passes that acted: **3**; that took no action: **95**
+- Actions undone by the collateral probe: **3**
 - Restraints given back on expiry: **0**
-- Ledger entries written: **294** (head `0dad1a546e34…`)
+- Ledger entries written: **114** (head `1859c86e8e54…`)
 - Ladders `19d2b7bccf88…` · detectors `23d957af85fe…` · decisions `768c3460dcb2-078392fb04bb-82371c5b25c7-1d0c321a8781`
+
+| offset | incident | rung | effects | gates | outcome |
+|---|---|---|---|---|---|
+| +300s | `0b71563ee3f7` | `hold-the-cohort-to-its-ceiling` | 2 | 2 | undone |
+| +302s | `0b71563ee3f7` | `hold-the-cohort-to-its-ceiling` | 2 | 2 | undone |
+| +304s | `0b71563ee3f7` | `hold-the-cohort-to-its-ceiling` | 2 | 2 | undone |
 
 Why passes declined, by reason:
 
-- 98x hold-the-cohort-to-its-ceiling: RATE_LIMIT on simulated/frontend needs 1 approver(s)
-- 98x add-headroom-for-the-surge: SCALE on simulated/frontend needs 1 approver(s)
+- 95x 6 autonomous actions in the last 900s reached the limit of 5
