@@ -603,7 +603,7 @@
     },
     "Decision": {
       "additionalProperties": false,
-      "description": "What the platform decided to do about one incident, and what it may not do.\n\nThe decision is taken on the incident's strongest evidence rather than on\nwhatever the latest tick happened to read - a storm that has gone quiet for\na moment is still the storm - and ``evidence_ts`` records the tick that\nevidence was measured at, so a decision never quietly presents old evidence\nas current.\n\nThree safety properties are enforced here rather than left to the gate,\nbecause the contract is the last thing between a hypothesis and production:\nan acting decision must be confirmed, must carry a verdict, and must name a\n``target_service`` that was computed from evidence. ``requires_human_approval``\nis derived from ``approval_reasons`` so a decision can never claim to be\napproved-free while listing the reasons it is not.",
+      "description": "What the platform decided to do about one incident, and what it may not do.\n\nThe decision is taken on the incident's strongest evidence rather than on\nwhatever the latest tick happened to read - a storm that has gone quiet for\na moment is still the storm - and ``evidence_ts`` records the tick that\nevidence was measured at, so a decision never quietly presents old evidence\nas current.\n\nThree safety properties are enforced here rather than left to the gate,\nbecause the contract is the last thing between a hypothesis and production:\nan acting decision must be confirmed, must carry a verdict, and must name a\n``target_service`` that was computed from evidence. ``requires_human_approval``\nis derived from ``approval_reasons`` so a decision can never claim to be\napproved-free while listing the reasons it is not.\n\n**``approval_reasons`` and ``escalation_reasons`` are different facts and are\ndeliberately separate fields.** ``approval_reasons`` is *why a person must\nsign before this happens*; ``escalation_reasons`` is *why a person is being\nbrought in*. They were one field until 2026-07-25, and the consequence was\nfound by running the remediation loop over a recorded capture: every\n``AUTO_CONTAIN_THEN_ESCALATE`` decision - the platform's designed answer to a\nverified attack, whose whole point is to contain the harm *and then* fetch\nsomebody - was refused by the executor for want of a signature, because\n\"a person is being told\" had been recorded in the field the action plane\nreads as \"a person must consent\". 98 out of 98 on `combo_night`. Containing\nan attack and asking permission to contain it are not the same decision, and\na system that cannot say which one it means will always pick the wrong one.",
       "properties": {
         "action": {
           "$ref": "#/$defs/DecisionAction"
@@ -633,6 +633,14 @@
         },
         "decision_id": {
           "$ref": "#/$defs/Identifier"
+        },
+        "escalation_reasons": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/HumanText"
+          },
+          "title": "Escalation Reasons",
+          "type": "array"
         },
         "evidence_ts": {
           "$ref": "#/$defs/UtcDatetime"

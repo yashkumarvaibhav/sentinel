@@ -7,11 +7,6 @@ What the decision plane concluded, graded against each scenario's committed answ
 - Decision config fingerprint (agents-rules-incidents-policy): `768c3460dcb2-078392fb04bb-82371c5b25c7-1d0c321a8781`.
 - Required handling is stated over *surfacing* and *acting*, never over a policy rung: the ladder is operator-owned data, and retuning it must not read as a regression of the platform.
 - Telemetry is **REAL**; the injected context/fault/attack stimuli are **SIMULATED**.
-- **Development captures only.** These are the numbers the metric definitions and floors are
-  frozen on, before any held-out seed is spent. This report gates nothing on its own.
-- ⚠️ **`phase2-combo-503-dev-v11` predates the 6d-3 anchored DROP label** (`14383d1`), so its
-  `frontend-measured-rate-drop` label covers 713..724s instead of the 2-rps phase the primary
-  schedule actually ran over 664..724s.
 
 ## Gate
 

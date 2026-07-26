@@ -146,6 +146,7 @@ export type Confirmed = boolean;
 export type DecisionAction = "SUPPRESS" | "ALERT" | "ACT" | "ESCALATE_TO_HUMAN" | "AUTO_CONTAIN_THEN_ESCALATE";
 export type ApprovalReasons = HumanText[];
 export type Confirmed1 = boolean;
+export type EscalationReasons = HumanText[];
 export type FloorsApplied = Identifier[];
 export type GuardsApplied = Identifier[];
 export type RequiresHumanApproval = boolean;
@@ -478,6 +479,19 @@ export interface VerificationCheck {
  * ``target_service`` that was computed from evidence. ``requires_human_approval``
  * is derived from ``approval_reasons`` so a decision can never claim to be
  * approved-free while listing the reasons it is not.
+ *
+ * **``approval_reasons`` and ``escalation_reasons`` are different facts and are
+ * deliberately separate fields.** ``approval_reasons`` is *why a person must
+ * sign before this happens*; ``escalation_reasons`` is *why a person is being
+ * brought in*. They were one field until 2026-07-25, and the consequence was
+ * found by running the remediation loop over a recorded capture: every
+ * ``AUTO_CONTAIN_THEN_ESCALATE`` decision - the platform's designed answer to a
+ * verified attack, whose whole point is to contain the harm *and then* fetch
+ * somebody - was refused by the executor for want of a signature, because
+ * "a person is being told" had been recorded in the field the action plane
+ * reads as "a person must consent". 98 out of 98 on `combo_night`. Containing
+ * an attack and asking permission to contain it are not the same decision, and
+ * a system that cannot say which one it means will always pick the wrong one.
  */
 export interface Decision {
   action: DecisionAction;
@@ -485,6 +499,7 @@ export interface Decision {
   confidence?: Probability | null;
   confirmed: Confirmed1;
   decision_id: Identifier;
+  escalation_reasons?: EscalationReasons;
   evidence_ts: UtcDatetime;
   floors_applied?: FloorsApplied;
   guards_applied?: GuardsApplied;

@@ -214,6 +214,7 @@ class PolicyGate:
             guard_reasons=guard_reasons,
             window=window,
         )
+        escalations = self._escalation_reasons(action, rule=rule)
         target = incident.origin_service if action in ACTING_ACTIONS else None
         peak_verdict = evidence.verdict
         stated = _reason(
@@ -240,6 +241,7 @@ class PolicyGate:
             confidence=None if peak_verdict is None else peak_verdict.confidence,
             target_service=target,
             approval_reasons=approvals,
+            escalation_reasons=escalations,
             guards_applied=guards,
             floors_applied=floors,
             suppression=window,
@@ -435,19 +437,23 @@ class PolicyGate:
         guard_reasons: Sequence[str],
         window: AppliedSuppression | None,
     ) -> tuple[str, ...]:
-        """Compute, from evidence alone, why a person has to be in the loop.
+        """Compute, from evidence alone, why a person must SIGN before this happens.
 
         Only the rungs where there is something to approve carry reasons.
         Suppressing is the absence of a response and alerting IS telling a
         person, so neither is an approvable event; claiming approval for them
         would make the field mean two different things.
+
+        **Routing to a person is not one of these reasons.** That fact lives in
+        ``_escalation_reasons``, because the action plane reads this field as a
+        consent gate: while "the ladder routes this to a person" was recorded
+        here, ``AUTO_CONTAIN_THEN_ESCALATE`` could never contain anything - it
+        waited for a signature that the whole point of the rung was to not need.
         """
         if action in (DecisionAction.SUPPRESS, DecisionAction.ALERT):
             return ()
         approval = self._configuration.approval
         reasons: list[str] = []
-        if action in ESCALATING_ACTIONS:
-            reasons.append(f"the ladder routes this to a person: {rule.reason}")
         reasons.extend(guard_reasons)
         if window is not None and window.kind is SuppressionKind.CHANGE_FREEZE:
             reasons.append(
@@ -476,6 +482,20 @@ class PolicyGate:
             # defensive: the guards already block this and the contract refuses it
             reasons.append("the hypothesis behind this action is not confirmed")
         return tuple(dict.fromkeys(reasons))
+
+    def _escalation_reasons(
+        self, action: DecisionAction, *, rule: ActionRuleConfig
+    ) -> tuple[str, ...]:
+        """Why a person is being brought in - which is not why one must consent.
+
+        Kept apart from ``_approval_reasons`` on purpose. Both are true things to
+        say about a decision and only one of them is a gate: telling somebody
+        what the platform is doing must never stop the platform doing it, and
+        that is precisely what happened while these shared a field.
+        """
+        if action not in ESCALATING_ACTIONS:
+            return ()
+        return (f"the ladder routes this to a person: {rule.reason}",)
 
 
 def _rule_matches(

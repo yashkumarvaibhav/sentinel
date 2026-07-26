@@ -47,9 +47,11 @@ def _decision(
     *,
     approval: bool = False,
 ) -> Decision:
-    # An escalating rung must state why a person is being brought in, so the
-    # decision contract requires approval reasons there whatever the caller asks.
-    needs_approval = approval or action in ESCALATING_ACTIONS
+    # Approval is now the caller's alone. An escalating rung states why a person
+    # is being brought in, which is a separate field and NOT a consent gate -
+    # conflating the two is what stopped `AUTO_CONTAIN_THEN_ESCALATE` ever
+    # containing anything.
+    needs_approval = approval
     fields: dict[str, Any] = {
         "decision_id": "decision-1",
         "ts": TICK,
@@ -63,6 +65,11 @@ def _decision(
         "verification_id": "verification-1",
         "requires_human_approval": needs_approval,
         "approval_reasons": ("measured critical severity",) if needs_approval else (),
+        # Stated exactly when the action brings a person in. Being told and
+        # being asked to consent are different facts and different fields.
+        "escalation_reasons": (
+            ("the ladder routes this to a person",) if action in ESCALATING_ACTIONS else ()
+        ),
         "verdict_class": VerdictClass.OPERATIONAL_FAULT,
         "verdict_id": "verdict-1",
         "confidence": 0.9,

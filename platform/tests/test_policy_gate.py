@@ -9,9 +9,11 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from action.actuators import SimulatedActuator
 from common.config import load_config
 from contracts import (
     REQUIRED_CHECKS,
+    ActionKind,
     CheckOutcome,
     Decision,
     DecisionAction,
@@ -181,8 +183,42 @@ def test_a_verified_attack_is_contained_and_a_person_is_brought_in() -> None:
     assert decision.rule_id == "contain-a-verified-attack"
     # The target is the collapsed origin and nothing else.
     assert decision.target_service == "payment"
-    assert decision.requires_human_approval
-    assert decision.approval_reasons
+    # A person is brought in - and the containment does NOT wait for them.
+    # These were one field until 2026-07-25, and while they were, this rung
+    # could never contain anything: the executor read "somebody is being told"
+    # as "somebody must consent" and refused every contain on record.
+    assert decision.escalation_reasons
+    assert not decision.requires_human_approval
+    assert decision.approval_reasons == ()
+
+
+def test_a_contained_attack_reaches_an_actuator_without_a_signature() -> None:
+    """The end-to-end version of the bug, pinned where it actually bit.
+
+    The gate's own fields are only half the story: what broke was that the
+    action plane read one of them as consent. This drives a real contain
+    decision through the real plan builder and asserts the thing that was
+    false for the whole of Phase 5 - that it can be applied by a platform
+    with nobody standing over it.
+    """
+    gate = _gate()
+    decision = _decide(
+        gate,
+        _incident(severity=IncidentSeverity.HIGH),
+        verdict=_verdict(VerdictClass.ATTACK, 0.90),
+    )
+
+    plan = SimulatedActuator(blast_fraction=0.1).plan(
+        decision, action_kind=ActionKind.RATE_LIMIT, parameters={"limit": 100}, ts=TICK
+    )
+
+    assert not plan.requires_human_approval
+    # And the widenings still stand: this is about not inventing a gate, not
+    # about removing the ones that were always there.
+    destructive = SimulatedActuator(blast_fraction=0.1).plan(
+        decision, action_kind=ActionKind.ISOLATE, parameters={}, ts=TICK
+    )
+    assert destructive.requires_human_approval, "a destructive rung always needs a human"
 
 
 def test_an_unconfirmed_attack_is_never_contained_autonomously() -> None:

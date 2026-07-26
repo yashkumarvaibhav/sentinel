@@ -537,6 +537,19 @@ class Decision(ContractModel):
     ``target_service`` that was computed from evidence. ``requires_human_approval``
     is derived from ``approval_reasons`` so a decision can never claim to be
     approved-free while listing the reasons it is not.
+
+    **``approval_reasons`` and ``escalation_reasons`` are different facts and are
+    deliberately separate fields.** ``approval_reasons`` is *why a person must
+    sign before this happens*; ``escalation_reasons`` is *why a person is being
+    brought in*. They were one field until 2026-07-25, and the consequence was
+    found by running the remediation loop over a recorded capture: every
+    ``AUTO_CONTAIN_THEN_ESCALATE`` decision - the platform's designed answer to a
+    verified attack, whose whole point is to contain the harm *and then* fetch
+    somebody - was refused by the executor for want of a signature, because
+    "a person is being told" had been recorded in the field the action plane
+    reads as "a person must consent". 98 out of 98 on `combo_night`. Containing
+    an attack and asking permission to contain it are not the same decision, and
+    a system that cannot say which one it means will always pick the wrong one.
     """
 
     decision_id: Identifier
@@ -555,6 +568,7 @@ class Decision(ContractModel):
     confidence: Probability | None = None
     target_service: Identifier | None = None
     approval_reasons: tuple[HumanText, ...] = ()
+    escalation_reasons: tuple[HumanText, ...] = ()
     guards_applied: tuple[Identifier, ...] = ()
     floors_applied: tuple[Identifier, ...] = ()
     suppression: AppliedSuppression | None = None
@@ -577,8 +591,15 @@ class Decision(ContractModel):
             raise ValueError(
                 "requires_human_approval must be true exactly when approval reasons are recorded"
             )
-        if self.action in ESCALATING_ACTIONS and not self.requires_human_approval:
-            raise ValueError(f"{self.action.value} must state why a human is being brought in")
+        # Biconditional, exactly like the approval pair above: a person is being
+        # brought in precisely when the action says so. Stated both ways because
+        # a reason with no escalation is a claim nobody acts on, and an
+        # escalation with no reason is the page whose recipient asks "why me?".
+        if bool(self.escalation_reasons) != (self.action in ESCALATING_ACTIONS):
+            raise ValueError(
+                f"{self.action.value} states escalation reasons exactly when it brings in a "
+                "person; being told and being asked to consent are different facts"
+            )
         if self.action not in ACTING_ACTIONS:
             return self
         if not self.confirmed:
