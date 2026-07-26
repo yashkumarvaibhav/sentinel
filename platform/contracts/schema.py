@@ -24,6 +24,7 @@ from contracts.decision import (
     Verification,
 )
 from contracts.detection import DecompFrame, Symptom, SymptomEpisode
+from contracts.stream import SnapshotInvalidation
 from contracts.telemetry import Observation
 
 JSON_SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
@@ -44,6 +45,7 @@ PUBLIC_MODELS: tuple[type[BaseModel], ...] = (
     ActionPlan,
     ActionOutcome,
     AuditEntry,
+    SnapshotInvalidation,
 )
 
 

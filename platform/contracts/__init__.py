@@ -56,6 +56,7 @@ from contracts.detection import (
     SymptomEpisode,
     SymptomKind,
 )
+from contracts.stream import SnapshotInvalidation, SnapshotResource, StreamEventKind
 from contracts.telemetry import Observation
 
 __all__ = [
@@ -97,6 +98,9 @@ __all__ = [
     "Observation",
     "ReasonSubtype",
     "RejectedAlternative",
+    "SnapshotInvalidation",
+    "SnapshotResource",
+    "StreamEventKind",
     "SuppressionKind",
     "Symptom",
     "SymptomEpisode",

@@ -20,7 +20,8 @@ export type SentinelContract =
   | Decision
   | ActionPlan
   | ActionOutcome
-  | AuditEntry;
+  | AuditEntry
+  | SnapshotInvalidation;
 export type TelemetryScalar = string | boolean | number;
 export type Identifier = string;
 export type FlowRefs = Identifier[];
@@ -217,6 +218,18 @@ export type AuditEventKind =
   | "BREAKER_OPENED"
   | "APPROVAL";
 export type Sequence = number;
+/**
+ * Named SSE events understood by the product surface.
+ */
+export type StreamEventKind = "snapshot.invalidate";
+/**
+ * @minItems 1
+ */
+export type Resources = [SnapshotResource, ...SnapshotResource[]];
+/**
+ * Authoritative snapshots an invalidation may ask the browser to refetch.
+ */
+export type SnapshotResource = "all" | "health" | "decomposition" | "incidents" | "actions" | "audit";
 
 /**
  * One event-time telemetry value, containing evidence but never answer-key data.
@@ -609,4 +622,13 @@ export interface AuditEntry {
 }
 export interface Body {
   [k: string]: unknown;
+}
+/**
+ * One typed signal that one or more REST snapshots are stale.
+ */
+export interface SnapshotInvalidation {
+  event_id: Identifier;
+  kind?: StreamEventKind;
+  resources: Resources;
+  ts: UtcDatetime;
 }

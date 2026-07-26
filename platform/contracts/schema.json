@@ -1153,6 +1153,58 @@
       "minLength": 1,
       "type": "string"
     },
+    "SnapshotInvalidation": {
+      "additionalProperties": false,
+      "description": "One typed signal that one or more REST snapshots are stale.",
+      "properties": {
+        "event_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "kind": {
+          "$ref": "#/$defs/StreamEventKind",
+          "default": "snapshot.invalidate"
+        },
+        "resources": {
+          "items": {
+            "$ref": "#/$defs/SnapshotResource"
+          },
+          "minItems": 1,
+          "title": "Resources",
+          "type": "array"
+        },
+        "ts": {
+          "$ref": "#/$defs/UtcDatetime"
+        }
+      },
+      "required": [
+        "event_id",
+        "ts",
+        "resources"
+      ],
+      "title": "SnapshotInvalidation",
+      "type": "object"
+    },
+    "SnapshotResource": {
+      "description": "Authoritative snapshots an invalidation may ask the browser to refetch.",
+      "enum": [
+        "all",
+        "health",
+        "decomposition",
+        "incidents",
+        "actions",
+        "audit"
+      ],
+      "title": "SnapshotResource",
+      "type": "string"
+    },
+    "StreamEventKind": {
+      "description": "Named SSE events understood by the product surface.",
+      "enum": [
+        "snapshot.invalidate"
+      ],
+      "title": "StreamEventKind",
+      "type": "string"
+    },
     "SuppressionKind": {
       "description": "Why an operator asked the platform to hold back.\n\n``CHANGE_FREEZE`` forbids autonomous action without quieting anything: the\nproblem is still reported, we simply do not touch production during the\nfreeze. ``MAINTENANCE`` is the stronger claim that expected disruption on\nnamed services is not worth reporting.",
       "enum": [
@@ -1547,6 +1599,9 @@
     },
     {
       "$ref": "#/$defs/AuditEntry"
+    },
+    {
+      "$ref": "#/$defs/SnapshotInvalidation"
     }
   ],
   "title": "SentinelContract"

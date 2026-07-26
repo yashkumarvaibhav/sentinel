@@ -14,6 +14,7 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, Response
+from fastapi.responses import StreamingResponse
 
 from api.audit import AuditLedger
 from api.decomposition import (
@@ -26,6 +27,7 @@ from api.decomposition import (
 from api.gate import SharedSecretGate
 from api.health import HealthReport, Probe, Readiness, check_health
 from api.probes import platform_probes
+from api.stream import StreamBroker, stream_response
 from audit import verify_chain
 from common.buildinfo import build_info
 from common.config import load_config
@@ -51,6 +53,7 @@ def create_app(
     probes: Mapping[str, Probe] | None = None,
     ledger: AuditLedger | None = None,
     decomposition_reader: DecompositionReader | None = None,
+    stream_broker: StreamBroker | None = None,
 ) -> FastAPI:
     """Build the gateway application.
 
@@ -65,6 +68,7 @@ def create_app(
         # endpoint answers 503 rather than pretending the ledger is empty: "no
         # ledger attached" and "nothing has happened" must not look the same.
         app.state.audit_ledger = ledger
+        app.state.stream_broker = stream_broker if stream_broker is not None else StreamBroker()
         # Same rule as the ledger: unset answers 503 rather than pretending the
         # store is empty. "No store attached" and "nothing happened" must not
         # look the same.
@@ -203,6 +207,11 @@ def create_app(
             end=window_end,
             limit=bounded,
         )
+
+    @app.get("/stream/events", tags=["stream"], response_class=StreamingResponse)
+    async def stream() -> StreamingResponse:
+        """Typed live invalidations; authoritative state remains on REST."""
+        return stream_response(app.state.stream_broker)
 
     return app
 

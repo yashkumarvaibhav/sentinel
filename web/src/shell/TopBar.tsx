@@ -9,21 +9,31 @@ import { useTheme } from '@/shell/useTheme';
 
 const DOT: Record<Liveness, { className: string; label: string }> = {
   connecting: { className: 'bg-muted', label: 'Connecting to the platform' },
-  live: { className: 'bg-ok', label: 'Platform answering, every component ready' },
-  degraded: { className: 'bg-warn', label: 'Platform answering, some component degraded' },
-  down: { className: 'bg-bad', label: 'Platform not answering' },
+  live: { className: 'bg-ok', label: 'Live stream open, every component ready' },
+  degraded: { className: 'bg-warn', label: 'Live stream open, some component degraded' },
+  reconnecting: {
+    className: 'bg-warn',
+    label: 'Live stream disconnected; reconnecting automatically',
+  },
+  down: { className: 'bg-bad', label: 'Live stream unavailable' },
 };
 
 function ConnectionDot({ liveness }: { liveness: LivenessState }) {
   const dot = DOT[liveness.status];
   const degraded = liveness.report?.degraded ?? [];
-  const detail =
-    liveness.status === 'degraded' && degraded.length > 0
-      ? `${dot.label}: ${degraded.join(', ')}`
-      : dot.label;
+  const healthDetail =
+    liveness.status === 'degraded' && liveness.detail !== null && degraded.length === 0
+      ? 'Live stream open, component health snapshot unavailable'
+      : liveness.status === 'degraded' && degraded.length > 0
+        ? `${dot.label}: ${degraded.join(', ')}`
+        : dot.label;
+  const detail = liveness.detail ? `${healthDetail}: ${liveness.detail}` : healthDetail;
 
   return (
-    <span className="flex items-center gap-2" title={`${detail} — polled every 10s`}>
+    <span
+      className="flex items-center gap-2"
+      title={`${detail} — SSE live; snapshots refetch after reconnect`}
+    >
       <span className={`inline-block size-2 rounded-full ${dot.className}`} aria-hidden="true" />
       {/* The status is announced, not merely coloured: a dot is invisible to a
           screen reader and indistinguishable to a good share of sighted users. */}

@@ -1,80 +1,132 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
+import type { SnapshotInvalidation } from '@/contracts/types';
 import { fetchHealth } from '@/api/platform';
 import type { HealthReport } from '@/api/platform';
+import { useEventStream } from '@/shell/useEventStream';
 
 /**
  * What the connection indicator is allowed to claim.
  *
- * `degraded` is a distinct state from `down` on purpose: the gateway answering
- * 503 with a full component list is the platform successfully telling us
- * something is wrong, which is the opposite of not answering. Collapsing the
- * two would make a healthy monitoring system look identical to an absent one.
+ * `degraded` is distinct from `down`: a 503 with a component report is the
+ * platform successfully explaining its own failure. `reconnecting` is also
+ * distinct because native EventSource is actively recovering the stream.
  */
-export type Liveness = 'connecting' | 'live' | 'degraded' | 'down';
+export type Liveness = 'connecting' | 'live' | 'degraded' | 'reconnecting' | 'down';
 
 export interface LivenessState {
   status: Liveness;
   report: HealthReport | null;
-  /** When the gateway last answered at all, successfully or not. */
+  /** When the SSE transport last opened or delivered a valid event. */
   lastContact: Date | null;
-  /** How this is being measured, so the UI never implies a stream it lacks. */
-  transport: 'poll';
+  /** How this is being measured, so the UI never implies a poll it no longer uses. */
+  transport: 'sse';
+  detail: string | null;
 }
 
-export const POLL_INTERVAL_MS = 10_000;
+interface HealthSnapshot {
+  report: HealthReport | null;
+  error: string | null;
+}
 
-/**
- * Whether the platform is answering, measured by polling `/api/health`.
- *
- * **Deliberately polling, and deliberately labelled as such.** `ARCHITECTURE.md`
- * §2 puts every live stream on SSE, but no `/stream` endpoint exists yet — that
- * is a gateway slice, not a shell one. A dot that implied a live subscription
- * while a timer ticked behind it would be the UI telling its first lie, in the
- * component whose entire job is to say whether the platform is talking to us.
- * `transport` is on the returned state so the tooltip can say "polled every
- * 10s" rather than "live".
- */
-export function useLiveness(intervalMs: number = POLL_INTERVAL_MS): LivenessState {
-  const [state, setState] = useState<LivenessState>({
-    status: 'connecting',
-    report: null,
-    lastContact: null,
-    transport: 'poll',
+function reason(error: unknown): string {
+  return error instanceof Error ? error.message : 'health snapshot failed';
+}
+
+/** Live gateway connection plus an authoritative component-health snapshot. */
+export function useLiveness(): LivenessState {
+  const [health, setHealth] = useState<HealthSnapshot>({ report: null, error: null });
+  const inFlight = useRef<Promise<void> | null>(null);
+  const controller = useRef<AbortController | null>(null);
+
+  const refetchHealth = useCallback((): Promise<void> => {
+    if (inFlight.current !== null) return inFlight.current;
+
+    const requestController = new AbortController();
+    controller.current = requestController;
+    const request = fetchHealth(requestController.signal)
+      .then((report) => {
+        if (!requestController.signal.aborted) setHealth({ report, error: null });
+      })
+      .catch((error: unknown) => {
+        if (!requestController.signal.aborted) {
+          setHealth((previous) => ({ ...previous, error: reason(error) }));
+        }
+      })
+      .finally(() => {
+        inFlight.current = null;
+        controller.current = null;
+      });
+    inFlight.current = request;
+    return request;
+  }, []);
+
+  useEffect(
+    () => () => {
+      controller.current?.abort();
+    },
+    [],
+  );
+
+  const receive = useCallback(
+    (event: SnapshotInvalidation) => {
+      if (event.resources.includes('all') || event.resources.includes('health')) {
+        void refetchHealth();
+      }
+    },
+    [refetchHealth],
+  );
+  const stream = useEventStream({
+    refetchSnapshots: refetchHealth,
+    onEvent: receive,
   });
 
-  useEffect(() => {
-    let cancelled = false;
-    const controller = new AbortController();
-
-    const check = async () => {
-      try {
-        const report = await fetchHealth(controller.signal);
-        if (cancelled) return;
-        setState({
-          status: report.status === 'ready' ? 'live' : 'degraded',
-          report,
-          lastContact: new Date(),
-          transport: 'poll',
-        });
-      } catch {
-        if (cancelled) return;
-        // Keep the last report: "it was healthy 40 seconds ago and is now
-        // unreachable" is more useful than an empty panel, and the status
-        // field already says the platform is not answering.
-        setState((previous) => ({ ...previous, status: 'down' }));
-      }
+  if (stream.status === 'connecting') {
+    return {
+      status: 'connecting',
+      report: health.report,
+      lastContact: stream.lastContact,
+      transport: 'sse',
+      detail: stream.error,
     };
-
-    void check();
-    const timer = window.setInterval(() => void check(), intervalMs);
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-      window.clearInterval(timer);
+  }
+  if (stream.status === 'reconnecting') {
+    return {
+      status: 'reconnecting',
+      report: health.report,
+      lastContact: stream.lastContact,
+      transport: 'sse',
+      detail: stream.error,
     };
-  }, [intervalMs]);
-
-  return state;
+  }
+  if (stream.status === 'down') {
+    return {
+      status: 'down',
+      report: health.report,
+      lastContact: stream.lastContact,
+      transport: 'sse',
+      detail: stream.error,
+    };
+  }
+  if (health.report === null) {
+    return {
+      status: health.error === null ? 'connecting' : 'degraded',
+      report: null,
+      lastContact: stream.lastContact,
+      transport: 'sse',
+      detail: health.error,
+    };
+  }
+  return {
+    status:
+      health.error !== null
+        ? 'degraded'
+        : health.report.status === 'ready'
+          ? 'live'
+          : 'degraded',
+    report: health.report,
+    lastContact: stream.lastContact,
+    transport: 'sse',
+    detail: health.error ?? stream.error,
+  };
 }
