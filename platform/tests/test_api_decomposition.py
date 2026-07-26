@@ -176,9 +176,19 @@ def test_an_impossible_window_is_refused_with_its_reason(reader: RecordedReader)
     assert reader.calls == [], "a refused window must never reach the store"
 
 
-def test_no_store_attached_answers_503_rather_than_an_empty_chart() -> None:
-    """ "No store" and "nothing happened" must not look the same."""
-    client = next(_client(None))
+def test_no_store_attached_answers_503_rather_than_an_empty_chart(
+    reader: RecordedReader,
+) -> None:
+    """ "No store" and "nothing happened" must not look the same.
+
+    The state is cleared after startup rather than by passing ``None`` to the
+    factory, because the factory no longer has that meaning: a gateway with no
+    reader injected builds its own ClickHouse one. What this guards is the
+    genuinely degraded case - the attribute absent because the store could not
+    be reached - and setting it directly is the only honest way to reach it.
+    """
+    client = next(_client(reader))
+    client.app.state.decomposition_reader = None  # type: ignore[attr-defined]
 
     response = client.get(
         "/api/decomposition", params={"service": "frontend", "signal": "ingress.requests"}
@@ -186,6 +196,7 @@ def test_no_store_attached_answers_503_rather_than_an_empty_chart() -> None:
 
     assert response.status_code == 503
     assert response.json()["frames"] == []
+    assert reader.calls == []
 
 
 def test_the_read_is_bounded_before_it_reaches_the_store(reader: RecordedReader) -> None:

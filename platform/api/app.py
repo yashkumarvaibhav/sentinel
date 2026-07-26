@@ -30,6 +30,7 @@ from audit import verify_chain
 from common.buildinfo import build_info
 from common.config import load_config
 from common.settings import Settings, settings
+from common.storage import ClickHouseRepository
 
 SERVICE = "sentinel-gateway"
 
@@ -67,10 +68,24 @@ def create_app(
         # Same rule as the ledger: unset answers 503 rather than pretending the
         # store is empty. "No store attached" and "nothing happened" must not
         # look the same.
-        app.state.decomposition_reader = decomposition_reader
         async with httpx.AsyncClient(timeout=config.probe_timeout_seconds) as client:
             app.state.probes = probes if probes is not None else platform_probes(config, client)
-            yield
+            if decomposition_reader is not None:
+                app.state.decomposition_reader = decomposition_reader
+                yield
+                return
+            # Its own client: the probe client carries a short timeout tuned for
+            # liveness checks, and a full-resolution window is a read, not a ping.
+            auth = (config.clickhouse_user, config.clickhouse_password.get_secret_value())
+            async with httpx.AsyncClient(
+                base_url=config.clickhouse_url,
+                auth=auth,
+                timeout=config.storage_timeout_seconds,
+            ) as store:
+                app.state.decomposition_reader = ClickHouseRepository(
+                    client=store, database=config.clickhouse_database
+                )
+                yield
 
     app = FastAPI(
         title="Sentinel API",
