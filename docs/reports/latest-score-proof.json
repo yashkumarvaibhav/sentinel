@@ -1,0 +1,44 @@
+{
+  "capture_ids": [
+    "phase2-cascade-9403-v1",
+    "phase2-cascade-9421-v1",
+    "phase2-combo-9439-v1",
+    "phase2-combo-9457-v1"
+  ],
+  "config_fingerprint": "23d957af85fe1fa0cea7d8f4221c53ea571d1ffaa49a13de475de65f241d7030",
+  "evidence_end": "2026-07-24T00:29:31.450749Z",
+  "evidence_start": "2026-07-23T23:21:57.468153Z",
+  "gate_status": "pass",
+  "headline_metrics": [
+    {
+      "key": "minimum_symptom_recall",
+      "label": "Minimum symptom recall",
+      "sample_count": 7,
+      "status": "ok",
+      "unit": "ratio",
+      "value": 1.0
+    },
+    {
+      "key": "detection_latency_p95_seconds",
+      "label": "Detection latency p95",
+      "sample_count": 20,
+      "status": "ok",
+      "unit": "seconds",
+      "value": 179.643874
+    },
+    {
+      "key": "matched_symptom_episodes",
+      "label": "Matched symptom episodes",
+      "sample_count": 20,
+      "status": "ok",
+      "unit": "episodes",
+      "value": 20.0
+    }
+  ],
+  "proof_id": "phase-2-held-out-symptoms",
+  "report_path": "docs/reports/phase-2-held-out-score.md",
+  "seed_purpose": "held_out",
+  "stimulus_honesty": "SIMULATED",
+  "telemetry_honesty": "REAL",
+  "version": 1
+}

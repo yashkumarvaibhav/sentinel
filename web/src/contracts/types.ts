@@ -21,7 +21,9 @@ export type SentinelContract =
   | ActionPlan
   | ActionOutcome
   | AuditEntry
-  | SnapshotInvalidation;
+  | SnapshotInvalidation
+  | ScoreProof
+  | KpiResponse;
 export type TelemetryScalar = string | boolean | number;
 export type Identifier = string;
 export type FlowRefs = Identifier[];
@@ -230,6 +232,33 @@ export type Resources = [SnapshotResource, ...SnapshotResource[]];
  * Authoritative snapshots an invalidation may ask the browser to refetch.
  */
 export type SnapshotResource = "all" | "health" | "decomposition" | "incidents" | "actions" | "audit";
+/**
+ * @minItems 1
+ */
+export type CaptureIds = [Identifier, ...Identifier[]];
+export type ConfigFingerprint = string;
+export type GateStatus = "pass" | "fail";
+/**
+ * @minItems 1
+ */
+export type HeadlineMetrics = [ScoreHeadline, ...ScoreHeadline[]];
+export type SampleCount = number;
+/**
+ * Whether a number was actually measured.
+ */
+export type KpiStatus = "ok" | "insufficient";
+export type UnitName = string;
+export type SeedPurpose = "held_out";
+export type StimulusHonesty = "SIMULATED";
+export type TelemetryHonesty = "REAL";
+export type Version = 1;
+/**
+ * The four reliability questions on the command centre.
+ */
+export type KpiKey = "detection_latency" | "autonomous_mttr" | "quiet_day_false_acts" | "protected_cohort_integrity";
+export type SampleCount1 = number;
+export type Metrics = KpiMetric[];
+export type Status = "ready" | "degraded";
 
 /**
  * One event-time telemetry value, containing evidence but never answer-key data.
@@ -631,4 +660,63 @@ export interface SnapshotInvalidation {
   kind?: StreamEventKind;
   resources: Resources;
   ts: UtcDatetime;
+}
+/**
+ * Immutable output of one held-out scoring invocation.
+ */
+export interface ScoreProof {
+  capture_ids: CaptureIds;
+  config_fingerprint: ConfigFingerprint;
+  evidence_end: UtcDatetime;
+  evidence_start: UtcDatetime;
+  gate_status: GateStatus;
+  headline_metrics: HeadlineMetrics;
+  proof_id: Identifier;
+  report_path: Identifier;
+  seed_purpose: SeedPurpose;
+  stimulus_honesty: StimulusHonesty;
+  telemetry_honesty: TelemetryHonesty;
+  version: Version;
+}
+/**
+ * One compact metric from a score-proof artifact.
+ */
+export interface ScoreHeadline {
+  key: Identifier;
+  label: HumanText;
+  sample_count: SampleCount;
+  status: KpiStatus;
+  unit: UnitName;
+  value: FiniteFloat | null;
+}
+/**
+ * The command centre's one typed reliability snapshot.
+ */
+export interface KpiResponse {
+  detail?: HumanText | null;
+  latest_score_proof: ScoreProof | null;
+  metrics: Metrics;
+  status: Status;
+}
+/**
+ * One reliability KPI with enough provenance to interpret it.
+ */
+export interface KpiMetric {
+  definition: HumanText;
+  key: KpiKey;
+  label: HumanText;
+  provenance: HumanText;
+  sample_count: SampleCount1;
+  status: KpiStatus;
+  unit: UnitName;
+  value: FiniteFloat | null;
+  window: KpiWindow;
+}
+/**
+ * The evidence interval behind a KPI, or why no interval exists.
+ */
+export interface KpiWindow {
+  description: HumanText;
+  end: UtcDatetime | null;
+  start: UtcDatetime | null;
 }

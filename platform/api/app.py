@@ -26,6 +26,12 @@ from api.decomposition import (
 )
 from api.gate import SharedSecretGate
 from api.health import HealthReport, Probe, Readiness, check_health
+from api.kpis import (
+    ScoreProofUnavailableError,
+    build_kpi_response,
+    load_score_proof,
+    unavailable_kpi_response,
+)
 from api.probes import platform_probes
 from api.stream import StreamBroker, stream_response
 from audit import verify_chain
@@ -33,6 +39,7 @@ from common.buildinfo import build_info
 from common.config import load_config
 from common.settings import Settings, settings
 from common.storage import ClickHouseRepository
+from contracts import KpiResponse, ScoreProof
 
 SERVICE = "sentinel-gateway"
 
@@ -54,6 +61,7 @@ def create_app(
     ledger: AuditLedger | None = None,
     decomposition_reader: DecompositionReader | None = None,
     stream_broker: StreamBroker | None = None,
+    score_proof: ScoreProof | None = None,
 ) -> FastAPI:
     """Build the gateway application.
 
@@ -69,6 +77,16 @@ def create_app(
         # ledger attached" and "nothing has happened" must not look the same.
         app.state.audit_ledger = ledger
         app.state.stream_broker = stream_broker if stream_broker is not None else StreamBroker()
+        try:
+            app.state.score_proof = (
+                score_proof
+                if score_proof is not None
+                else load_score_proof(config.score_proof_path)
+            )
+            app.state.score_proof_error = None
+        except ScoreProofUnavailableError as exc:
+            app.state.score_proof = None
+            app.state.score_proof_error = str(exc)
         # Same rule as the ledger: unset answers 503 rather than pretending the
         # store is empty. "No store attached" and "nothing happened" must not
         # look the same.
@@ -212,6 +230,17 @@ def create_app(
     async def stream() -> StreamingResponse:
         """Typed live invalidations; authoritative state remains on REST."""
         return stream_response(app.state.stream_broker)
+
+    @app.get("/api/kpis", tags=["reliability"], response_model=KpiResponse)
+    async def kpis(response: Response) -> KpiResponse:
+        """Four reliability questions, preserving every insufficient state."""
+        proof: ScoreProof | None = app.state.score_proof
+        if proof is None:
+            response.status_code = 503
+            return unavailable_kpi_response(
+                app.state.score_proof_error or "score proof unavailable"
+            )
+        return build_kpi_response(proof)
 
     return app
 

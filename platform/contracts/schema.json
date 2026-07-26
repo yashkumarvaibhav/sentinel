@@ -1049,6 +1049,166 @@
       "title": "IncidentState",
       "type": "string"
     },
+    "KpiKey": {
+      "description": "The four reliability questions on the command centre.",
+      "enum": [
+        "detection_latency",
+        "autonomous_mttr",
+        "quiet_day_false_acts",
+        "protected_cohort_integrity"
+      ],
+      "title": "KpiKey",
+      "type": "string"
+    },
+    "KpiMetric": {
+      "additionalProperties": false,
+      "description": "One reliability KPI with enough provenance to interpret it.",
+      "properties": {
+        "definition": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "key": {
+          "$ref": "#/$defs/KpiKey"
+        },
+        "label": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "provenance": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "sample_count": {
+          "minimum": 0,
+          "title": "Sample Count",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/KpiStatus"
+        },
+        "unit": {
+          "$ref": "#/$defs/UnitName"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FiniteFloat"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "window": {
+          "$ref": "#/$defs/KpiWindow"
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "definition",
+        "status",
+        "value",
+        "unit",
+        "window",
+        "sample_count",
+        "provenance"
+      ],
+      "title": "KpiMetric",
+      "type": "object"
+    },
+    "KpiResponse": {
+      "additionalProperties": false,
+      "description": "The command centre's one typed reliability snapshot.",
+      "properties": {
+        "detail": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanText"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "latest_score_proof": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScoreProof"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "metrics": {
+          "items": {
+            "$ref": "#/$defs/KpiMetric"
+          },
+          "title": "Metrics",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "ready",
+            "degraded"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "metrics",
+        "latest_score_proof"
+      ],
+      "title": "KpiResponse",
+      "type": "object"
+    },
+    "KpiStatus": {
+      "description": "Whether a number was actually measured.",
+      "enum": [
+        "ok",
+        "insufficient"
+      ],
+      "title": "KpiStatus",
+      "type": "string"
+    },
+    "KpiWindow": {
+      "additionalProperties": false,
+      "description": "The evidence interval behind a KPI, or why no interval exists.",
+      "properties": {
+        "description": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "end": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcDatetime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "start": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcDatetime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "description"
+      ],
+      "title": "KpiWindow",
+      "type": "object"
+    },
     "Observation": {
       "additionalProperties": false,
       "description": "One event-time telemetry value, containing evidence but never answer-key data.",
@@ -1146,6 +1306,132 @@
         "reason"
       ],
       "title": "RejectedAlternative",
+      "type": "object"
+    },
+    "ScoreHeadline": {
+      "additionalProperties": false,
+      "description": "One compact metric from a score-proof artifact.",
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "label": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "sample_count": {
+          "minimum": 0,
+          "title": "Sample Count",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/KpiStatus"
+        },
+        "unit": {
+          "$ref": "#/$defs/UnitName"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FiniteFloat"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "status",
+        "value",
+        "unit",
+        "sample_count"
+      ],
+      "title": "ScoreHeadline",
+      "type": "object"
+    },
+    "ScoreProof": {
+      "additionalProperties": false,
+      "description": "Immutable output of one held-out scoring invocation.",
+      "properties": {
+        "capture_ids": {
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "minItems": 1,
+          "title": "Capture Ids",
+          "type": "array"
+        },
+        "config_fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Config Fingerprint",
+          "type": "string"
+        },
+        "evidence_end": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "evidence_start": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "gate_status": {
+          "enum": [
+            "pass",
+            "fail"
+          ],
+          "title": "Gate Status",
+          "type": "string"
+        },
+        "headline_metrics": {
+          "items": {
+            "$ref": "#/$defs/ScoreHeadline"
+          },
+          "minItems": 1,
+          "title": "Headline Metrics",
+          "type": "array"
+        },
+        "proof_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "report_path": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "seed_purpose": {
+          "const": "held_out",
+          "title": "Seed Purpose",
+          "type": "string"
+        },
+        "stimulus_honesty": {
+          "const": "SIMULATED",
+          "title": "Stimulus Honesty",
+          "type": "string"
+        },
+        "telemetry_honesty": {
+          "const": "REAL",
+          "title": "Telemetry Honesty",
+          "type": "string"
+        },
+        "version": {
+          "const": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "proof_id",
+        "gate_status",
+        "evidence_start",
+        "evidence_end",
+        "telemetry_honesty",
+        "stimulus_honesty",
+        "seed_purpose",
+        "capture_ids",
+        "config_fingerprint",
+        "report_path",
+        "headline_metrics"
+      ],
+      "title": "ScoreProof",
       "type": "object"
     },
     "SignalName": {
@@ -1602,6 +1888,12 @@
     },
     {
       "$ref": "#/$defs/SnapshotInvalidation"
+    },
+    {
+      "$ref": "#/$defs/ScoreProof"
+    },
+    {
+      "$ref": "#/$defs/KpiResponse"
     }
   ],
   "title": "SentinelContract"

@@ -1,4 +1,5 @@
 import { DecompositionPanel } from '@/components/DecompositionPanel';
+import { KpiStrip } from '@/components/KpiStrip';
 import { PlatformStatus } from '@/components/PlatformStatus';
 import { CommandShell } from '@/shell/CommandShell';
 
@@ -16,11 +17,13 @@ export function App() {
 
         <DecompositionPanel />
 
+        <KpiStrip />
+
         <PlatformStatus />
 
         <footer className="text-muted text-xs">
-          The decomposition hero reads the platform's own store. The KPI strip, incident feed and
-          causal graph land across the rest of Phase 6.
+          The decomposition hero and reliability proof read the platform's own evidence. The
+          incident feed and causal graph land across the rest of Phase 6.
         </footer>
       </div>
     </CommandShell>

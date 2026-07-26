@@ -1,8 +1,27 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 
 export type Audience = 'exec' | 'technical';
 
 const STORAGE_KEY = 'sentinel.audience';
+const CHANGE_EVENT = 'sentinel:audience-change';
+let volatileAudience: Audience = 'technical';
+
+function readAudience(): Audience {
+  try {
+    return window.localStorage.getItem(STORAGE_KEY) === 'exec' ? 'exec' : 'technical';
+  } catch {
+    return volatileAudience;
+  }
+}
+
+function subscribe(listener: () => void): () => void {
+  window.addEventListener('storage', listener);
+  window.addEventListener(CHANGE_EVENT, listener);
+  return () => {
+    window.removeEventListener('storage', listener);
+    window.removeEventListener(CHANGE_EVENT, listener);
+  };
+}
 
 /**
  * Which audience the shell is speaking to.
@@ -22,21 +41,20 @@ export function useAudience(): {
   setAudience: (next: Audience) => void;
   toggle: () => void;
 } {
-  const [audience, setAudienceState] = useState<Audience>(() => {
-    try {
-      return window.localStorage.getItem(STORAGE_KEY) === 'exec' ? 'exec' : 'technical';
-    } catch {
-      return 'technical';
-    }
-  });
+  const audience = useSyncExternalStore<Audience>(
+    subscribe,
+    readAudience,
+    (): Audience => 'technical',
+  );
 
   const setAudience = useCallback((next: Audience) => {
-    setAudienceState(next);
+    volatileAudience = next;
     try {
       window.localStorage.setItem(STORAGE_KEY, next);
     } catch {
       // A forgetful toggle beats a broken page.
     }
+    window.dispatchEvent(new Event(CHANGE_EVENT));
   }, []);
 
   const toggle = useCallback(() => {

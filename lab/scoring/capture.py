@@ -30,6 +30,7 @@ from lab.scenarios.models import LabModel, ResidualLabelInterval, SymptomLabelIn
 from lab.scoring.evaluator import EpisodeRunScore, RunScore, score_symptom_episodes
 from lab.scoring.gates import evaluate_gates, evaluate_symptom_gates, load_gate_config
 from lab.scoring.metrics import binary_metrics
+from lab.scoring.proof import build_symptom_score_proof, write_score_proof
 from lab.scoring.report import render_report, render_symptom_report
 
 
@@ -380,6 +381,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--development-edge-capture", type=Path)
     parser.add_argument("--development-combo-capture", type=Path)
     parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument(
+        "--proof",
+        type=Path,
+        help="machine-readable proof output; valid only for held-out symptom scoring",
+    )
     args = parser.parse_args(argv)
     repo_root = args.repo_root.resolve()
     development_paths = (
@@ -398,7 +404,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             repo_root=repo_root,
             captures_root=args.held_out_symptom_captures_root.resolve(),
             report_path=args.report.resolve(),
+            proof_path=None if args.proof is None else args.proof.resolve(),
         )
+    if args.proof is not None:
+        parser.error("--proof is valid only with --held-out-symptom-captures-root")
     if development_requested:
         if (
             not all(path is not None for path in development_paths)
@@ -548,6 +557,7 @@ def _held_out_symptom_main(
     repo_root: Path,
     captures_root: Path,
     report_path: Path,
+    proof_path: Path | None,
 ) -> int:
     """Score every sealed held-out cascade/combo capture through the combined scorer once."""
     config = load_config(repo_root / "config")
@@ -583,6 +593,20 @@ def _held_out_symptom_main(
     )
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(report, encoding="utf-8")
+    if proof_path is not None:
+        try:
+            source_report = report_path.relative_to(repo_root).as_posix()
+        except ValueError:
+            source_report = report_path.as_posix()
+        write_score_proof(
+            proof_path,
+            build_symptom_score_proof(
+                runs=runs,
+                gate=gate,
+                config_fingerprint=config.fingerprint,
+                report_path=source_report,
+            ),
+        )
     print(report, flush=True)
     return 0 if gate.passed else 1
 

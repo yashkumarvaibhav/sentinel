@@ -258,7 +258,8 @@ score-held-out-symptoms: ## Close Phase 2: score the sealed held-out cascade/com
 	@test -n "$(CAPTURE_ROOT)" || { echo "CAPTURE_ROOT is required" >&2; exit 2; }
 	cd platform && PYTHONPATH=.. uv run python -m lab.scoring.capture \
 		--repo-root .. --held-out-symptom-captures-root "../$(CAPTURE_ROOT)" \
-		--report ../docs/reports/phase-2-held-out-score.md
+		--report ../docs/reports/phase-2-held-out-score.md \
+		--proof ../docs/reports/latest-score-proof.json
 
 .PHONY: diagnose-episodes
 diagnose-episodes: ## Dump the label-free episode stream for captures (CAPTURE_ROOTS= space-separated)

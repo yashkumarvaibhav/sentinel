@@ -79,6 +79,7 @@ services:
     environment:
       SENTINEL_ENV: ${SENTINEL_ENV:-dev}
       SENTINEL_CONFIG_DIR: /app/config
+      SENTINEL_SCORE_PROOF_PATH: /app/reports/latest-score-proof.json
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-sentinel}

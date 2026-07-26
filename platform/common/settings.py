@@ -17,6 +17,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 type DatabaseIdentifier = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
 
 _DEFAULT_CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
+_DEFAULT_SCORE_PROOF_PATH = (
+    Path(__file__).resolve().parents[2] / "docs" / "reports" / "latest-score-proof.json"
+)
 
 
 class Settings(BaseSettings):
@@ -27,6 +30,10 @@ class Settings(BaseSettings):
     env: Literal["dev", "scoring", "lab", "prod"] = Field(default="dev", alias="SENTINEL_ENV")
     log_level: str = Field(default="info", alias="SENTINEL_LOG_LEVEL")
     config_dir: Path = Field(default=_DEFAULT_CONFIG_DIR, alias="SENTINEL_CONFIG_DIR")
+    score_proof_path: Path = Field(
+        default=_DEFAULT_SCORE_PROOF_PATH,
+        alias="SENTINEL_SCORE_PROOF_PATH",
+    )
 
     postgres_host: str = Field(default="postgres", alias="POSTGRES_HOST")
     postgres_port: int = Field(default=5432, alias="POSTGRES_PORT")

@@ -56,6 +56,16 @@ from contracts.detection import (
     SymptomEpisode,
     SymptomKind,
 )
+from contracts.kpi import (
+    DETECTION_LATENCY_HEADLINE_KEY,
+    KpiKey,
+    KpiMetric,
+    KpiResponse,
+    KpiStatus,
+    KpiWindow,
+    ScoreHeadline,
+    ScoreProof,
+)
 from contracts.stream import SnapshotInvalidation, SnapshotResource, StreamEventKind
 from contracts.telemetry import Observation
 
@@ -63,6 +73,7 @@ __all__ = [
     "ACTING_ACTIONS",
     "DEDUPLICABLE_STATUSES",
     "DESTRUCTIVE_ACTIONS",
+    "DETECTION_LATENCY_HEADLINE_KEY",
     "EFFECTIVE_STATUSES",
     "ESCALATING_ACTIONS",
     "GENESIS_HASH",
@@ -95,9 +106,16 @@ __all__ = [
     "Incident",
     "IncidentSeverity",
     "IncidentState",
+    "KpiKey",
+    "KpiMetric",
+    "KpiResponse",
+    "KpiStatus",
+    "KpiWindow",
     "Observation",
     "ReasonSubtype",
     "RejectedAlternative",
+    "ScoreHeadline",
+    "ScoreProof",
     "SnapshotInvalidation",
     "SnapshotResource",
     "StreamEventKind",
