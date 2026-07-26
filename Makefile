@@ -109,7 +109,7 @@ verify-ingest: ## Run the real raw bus to normalized bus/ClickHouse round trip
 # --- stack ------------------------------------------------------------------
 
 .PHONY: up
-up: ## Bring the local stack up and wait for it to be healthy
+up: migrate ## Apply migrations, then bring the local stack up and wait for health
 	$(COMPOSE) up -d --build --wait
 
 .PHONY: down
