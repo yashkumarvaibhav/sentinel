@@ -1,21 +1,132 @@
 @import 'tailwindcss';
 
-/* Domain tokens. The three colours below are the product's core vocabulary:
-   what the baseline explains, what the event explains, and what nothing
-   explains. They stay stable wherever a decomposition is drawn. */
+/* Colour, type and spacing borrowed from `design-system/globals.css`; the
+   components are this product's own (BUILD_STATE decision #5). An observability
+   console is dense tables, timelines and decomposition bands, so that library's
+   components do not fit — but its palette is WCAG-hardened on both surfaces,
+   and re-deriving one would only make Sentinel look like a stranger beside the
+   owner's other apps.
+
+   Two families of token live here and they are not the same kind of thing:
+
+   - **Identity tokens** (`--accent`, `--page`, `--ink`, …) are borrowed, and
+     they flip with the theme.
+   - **Domain tokens** (`--color-base`, `--color-event`, `--color-residual`,
+     and the state colours) are the product's own vocabulary, and are
+     deliberately NOT theme-dependent: "this part of the surge is unexplained"
+     must be the same red in a dark room and a lit one, or a screenshot of an
+     incident stops meaning one fixed thing. */
 @theme {
+  /* --- domain: the decomposition, which is the thesis ------------------- */
   --color-base: oklch(0.72 0.04 240);
   --color-event: oklch(0.78 0.13 85);
   --color-residual: oklch(0.65 0.21 25);
 
-  --color-surface: oklch(0.21 0.015 260);
-  --color-surface-raised: oklch(0.26 0.018 260);
-  --color-ink: oklch(0.96 0.005 260);
-  --color-ink-muted: oklch(0.72 0.012 260);
+  /* --- domain: state, used by chips and the connection dot -------------- */
+  --color-ok: #2f8f63;
+  --color-warn: #8a5a14;
+  --color-bad: #a33a3a;
+
+  /* --- identity: bound to the variables below so the theme can flip ----- */
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-contrast: var(--accent-contrast);
+  --color-page: var(--page);
+  --color-raised: var(--raised);
+  --color-sidebar: var(--sidebar);
+  --color-ink: var(--ink);
+  --color-body: var(--body);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, monospace;
+}
+
+/* Light is the default; dark follows the OS unless the toggle pins a choice
+   onto the root element. Both directions are explicit so the toggle wins over
+   the media query rather than fighting it. */
+:root {
+  color-scheme: light;
+
+  --accent: #277a75;
+  --accent-soft: rgba(39, 122, 117, 0.12);
+  --accent-contrast: #ffffff;
+  --ink: #333333;
+  --body: #4d4d4d;
+  --muted: #666666;
+  --page: #ffffff;
+  --raised: #ffffff;
+  --sidebar: #f5f6f6;
+  --line: rgba(0, 0, 0, 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --accent: #7ce4de;
+    --accent-soft: rgba(124, 228, 222, 0.14);
+    --accent-contrast: #0c1416;
+    --ink: #f5f8f8;
+    --body: rgba(245, 248, 248, 0.84);
+    --muted: #a7b2b3;
+    --page: #10191b;
+    --raised: #152325;
+    --sidebar: #0d1517;
+    --line: rgba(255, 255, 255, 0.12);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --accent: #7ce4de;
+  --accent-soft: rgba(124, 228, 222, 0.14);
+  --accent-contrast: #0c1416;
+  --ink: #f5f8f8;
+  --body: rgba(245, 248, 248, 0.84);
+  --muted: #a7b2b3;
+  --page: #10191b;
+  --raised: #152325;
+  --sidebar: #0d1517;
+  --line: rgba(255, 255, 255, 0.12);
+}
+
+/* The state colours are tuned for light surfaces; dark needs the lighter end
+   of each hue to clear 4.5:1 the other way. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --color-ok: #46c98b;
+    --color-warn: #e0a35a;
+    --color-bad: #e06b6b;
+  }
+}
+
+:root[data-theme='dark'] {
+  --color-ok: #46c98b;
+  --color-warn: #e0a35a;
+  --color-bad: #e06b6b;
 }
 
 body {
-  background-color: var(--color-surface);
-  color: var(--color-ink);
+  background-color: var(--page);
+  color: var(--ink);
   -webkit-font-smoothing: antialiased;
+}
+
+/* Accessibility is built per-slice, never deferred to a cleanup phase
+   (UIUX_SPEC §1.6). */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
