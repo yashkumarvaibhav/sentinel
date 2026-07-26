@@ -16,10 +16,14 @@ describe('App', () => {
     expect(screen.getByRole('link', { name: 'Sentinel' })).toBeInTheDocument();
   });
 
-  it('labels illustrative content as simulated', () => {
+  it('labels the decomposition as real, because it now reads the real store', () => {
     render(<App />);
 
-    expect(screen.getByText('Simulated')).toBeInTheDocument();
+    // This asserted `Simulated` until the hero chart replaced the illustrative
+    // sketch. The label flipped because the data source did - it is a claim
+    // about where the numbers come from, and it must never move ahead of them.
+    expect(screen.getAllByText('Real').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Simulated')).not.toBeInTheDocument();
   });
 
   it('offers a skip link ahead of the header', () => {
