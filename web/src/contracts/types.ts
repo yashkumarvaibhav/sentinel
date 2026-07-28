@@ -237,7 +237,7 @@ export type ActionControlState =
   | "ROLLED_BACK"
   | "REFUSED"
   | "SIMULATED";
-export type Status = string;
+export type Status = "ready" | "not_found" | "degraded";
 export type Honesty4 = "REAL" | "SIMULATED";
 /**
  * What kind of thing the ledger is recording.
@@ -790,7 +790,8 @@ export interface Parameters1 {
  * Typed API response for the latest authoritative plan revision.
  */
 export interface ActionControlResponse {
-  control: ActionControlSnapshot;
+  control: ActionControlSnapshot | null;
+  message: HumanText | null;
   status: Status;
 }
 /**

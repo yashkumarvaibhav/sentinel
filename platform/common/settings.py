@@ -94,6 +94,13 @@ class Settings(BaseSettings):
     # Interim access gate. Empty = inert (local/dev). Set before public exposure
     # so mutating and sensitive routes require the secret until OIDC replaces it.
     shared_secret: str = Field(default="", alias="SENTINEL_SHARED_SECRET")
+    interim_operator_id: str = Field(
+        default="interim-operator",
+        alias="SENTINEL_INTERIM_OPERATOR_ID",
+        min_length=1,
+        max_length=255,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:@/-]*$",
+    )
 
     @property
     def first_broker(self) -> tuple[str, int]:

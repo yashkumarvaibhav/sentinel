@@ -17,6 +17,12 @@ import httpx
 from fastapi import FastAPI, Response
 from fastapi.responses import StreamingResponse
 
+from action.control import ActionControlNotFoundError, ActionControlTransitionError
+from api.action_control import (
+    ActionControlStore,
+    action_control_response,
+    unavailable_action_control,
+)
 from api.audit import AuditLedger
 from api.causal_graph import (
     CausalGraphDataError,
@@ -54,7 +60,7 @@ from api.kpis import (
     unavailable_kpi_response,
 )
 from api.probes import platform_probes
-from api.stream import StreamBroker, stream_response
+from api.stream import StreamBroker, snapshot_invalidation, stream_response
 from audit import verify_chain
 from common.buildinfo import build_info
 from common.config import load_config
@@ -66,11 +72,14 @@ from common.storage import (
     create_postgres_pool,
 )
 from contracts import (
+    ActionControlRequest,
+    ActionControlResponse,
     CausalGraphResponse,
     IncidentDetailResponse,
     IncidentFeedResponse,
     KpiResponse,
     ScoreProof,
+    SnapshotResource,
 )
 
 SERVICE = "sentinel-gateway"
@@ -104,6 +113,7 @@ def create_app(
     incident_reader: IncidentFeedReader | None = None,
     causal_graph_reader: CausalGraphReader | None = None,
     incident_detail_reader: IncidentDetailReader | None = None,
+    action_control_store: ActionControlStore | None = None,
 ) -> FastAPI:
     """Build the gateway application.
 
@@ -122,6 +132,7 @@ def create_app(
         app.state.incident_reader = incident_reader
         app.state.causal_graph_reader = causal_graph_reader
         app.state.incident_detail_reader = incident_detail_reader
+        app.state.action_control_store = action_control_store
         app.state.incident_publisher = None
         incident_pool = None
         if incident_reader is None and probes is None:
@@ -134,6 +145,8 @@ def create_app(
             app.state.incident_reader = incident_store
             app.state.causal_graph_reader = incident_store
             app.state.incident_detail_reader = incident_store
+            if action_control_store is None:
+                app.state.action_control_store = incident_store
             app.state.incident_publisher = IncidentFeedPublisher(
                 store=incident_store,
                 broker=app.state.stream_broker,
@@ -333,6 +346,106 @@ def create_app(
             return unavailable_incident_snapshot(
                 limit=bounded,
                 detail="live incident store could not provide a snapshot",
+            )
+
+    @app.get(
+        "/api/incidents/{incident_id}/action",
+        tags=["actions"],
+        response_model=ActionControlResponse,
+    )
+    async def action_control(
+        incident_id: str,
+        response: Response,
+    ) -> ActionControlResponse:
+        """The latest immutable server-held plan revision for one incident."""
+        store: ActionControlStore | None = getattr(
+            app.state,
+            "action_control_store",
+            None,
+        )
+        if store is None:
+            response.status_code = 503
+            return unavailable_action_control(
+                status="degraded",
+                message="no action-control store is attached to this gateway",
+            )
+        try:
+            control = await store.get_action_control(incident_id)
+            if control is None:
+                response.status_code = 404
+                return unavailable_action_control(
+                    status="not_found",
+                    message=f"no action plan exists for incident {incident_id}",
+                )
+            return action_control_response(control)
+        except Exception:
+            LOGGER.exception("action-control read failed")
+            response.status_code = 503
+            return unavailable_action_control(
+                status="degraded",
+                message="the action-control store could not provide a snapshot",
+            )
+
+    @app.post(
+        "/api/incidents/{incident_id}/action",
+        tags=["actions"],
+        response_model=ActionControlResponse,
+    )
+    async def mutate_action_control(
+        incident_id: str,
+        request: ActionControlRequest,
+        response: Response,
+    ) -> ActionControlResponse:
+        """Record intent only; the exact action remains the server-held plan."""
+        if request.incident_id != incident_id:
+            response.status_code = 400
+            return unavailable_action_control(
+                status="degraded",
+                message="the request incident must match the route incident",
+            )
+        store: ActionControlStore | None = getattr(
+            app.state,
+            "action_control_store",
+            None,
+        )
+        if store is None:
+            response.status_code = 503
+            return unavailable_action_control(
+                status="degraded",
+                message="no action-control store is attached to this gateway",
+            )
+        try:
+            changed, control = await store.transition_action_control(
+                request,
+                actor=config.interim_operator_id,
+                ts=datetime.now(UTC),
+            )
+            if changed:
+                app.state.stream_broker.publish(
+                    snapshot_invalidation(
+                        SnapshotResource.INCIDENTS,
+                        SnapshotResource.ACTIONS,
+                    )
+                )
+            return action_control_response(control)
+        except ActionControlNotFoundError:
+            response.status_code = 404
+            return unavailable_action_control(
+                status="not_found",
+                message=(
+                    f"no action plan exists for incident {incident_id} "
+                    f"at revision {request.plan_revision}"
+                ),
+            )
+        except ActionControlTransitionError as exc:
+            response.status_code = 409
+            return unavailable_action_control(status="degraded", message=str(exc))
+        except Exception:
+            LOGGER.exception("action-control transition failed")
+            response.status_code = 503
+            return unavailable_action_control(
+                status="degraded",
+                message="the action-control store could not commit the requested intent",
             )
 
     @app.get(

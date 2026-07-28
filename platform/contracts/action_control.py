@@ -10,9 +10,9 @@ then carried forward unchanged through this contract.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Self
+from typing import Literal, Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from contracts._base import ContractModel, HumanText, Identifier, Probability, UtcDatetime
 from contracts.action import (
@@ -62,6 +62,17 @@ class ActionControlRequest(ContractModel):
     incident_id: Identifier
     plan_revision: int = Field(ge=1)
     intent: ActionControlIntent
+
+    @field_validator("intent", mode="before")
+    @classmethod
+    def parse_wire_intent(cls, value: object) -> object:
+        """FastAPI decodes JSON before strict Pydantic validation."""
+        if isinstance(value, str):
+            try:
+                return ActionControlIntent(value)
+            except ValueError:
+                return value
+        return value
 
 
 class ActionRungSnapshot(ContractModel):
@@ -192,5 +203,13 @@ class ActionControlSnapshot(ContractModel):
 class ActionControlResponse(ContractModel):
     """Typed API response for the latest authoritative plan revision."""
 
-    status: str
-    control: ActionControlSnapshot
+    status: Literal["ready", "not_found", "degraded"]
+    control: ActionControlSnapshot | None
+    message: HumanText | None
+
+    @model_validator(mode="after")
+    def validate_status(self) -> Self:
+        ready = self.status == "ready"
+        if ready != (self.control is not None and self.message is None):
+            raise ValueError("ready requires a control; unavailable states require a message")
+        return self

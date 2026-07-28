@@ -80,6 +80,8 @@ services:
       SENTINEL_ENV: ${SENTINEL_ENV:-dev}
       SENTINEL_CONFIG_DIR: /app/config
       SENTINEL_SCORE_PROOF_PATH: /app/reports/latest-score-proof.json
+      SENTINEL_SHARED_SECRET: ${SENTINEL_SHARED_SECRET:-}
+      SENTINEL_INTERIM_OPERATOR_ID: ${SENTINEL_INTERIM_OPERATOR_ID:-interim-operator}
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-sentinel}
