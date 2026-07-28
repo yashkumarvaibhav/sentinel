@@ -1,9 +1,10 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { IncidentDetailPage } from '@/components/IncidentDetailPage';
 import { SnapshotStreamProvider } from '@/shell/SnapshotStream';
+import { OperatorCredentialProvider } from '@/shell/OperatorCredential';
 
 vi.mock('@xyflow/react', () => ({
   Background: () => null,
@@ -196,11 +197,13 @@ afterEach(() => {
 function renderDetail() {
   return render(
     <MemoryRouter initialEntries={['/incidents/incident-proof-1']}>
-      <SnapshotStreamProvider>
-        <Routes>
-          <Route path="/incidents/:incidentId" element={<IncidentDetailPage />} />
-        </Routes>
-      </SnapshotStreamProvider>
+      <OperatorCredentialProvider>
+        <SnapshotStreamProvider>
+          <Routes>
+            <Route path="/incidents/:incidentId" element={<IncidentDetailPage />} />
+          </Routes>
+        </SnapshotStreamProvider>
+      </OperatorCredentialProvider>
     </MemoryRouter>,
   );
 }
@@ -264,4 +267,48 @@ it('does not turn a missing proof into a quiet-system claim', async () => {
     expect(screen.getByRole('heading', { name: /incident proof not found/i })).toBeVisible(),
   );
   expect(screen.getByText(/not evidence that the system was quiet/i)).toBeVisible();
+});
+
+it('unlocks a protected direct link with a credential that stays in request memory', async () => {
+  const requestUrl = (input: RequestInfo | URL): string =>
+    typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+  const fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = requestUrl(input);
+    if (url.endsWith('/action')) {
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            status: 'not_found',
+            control: null,
+            message: 'No action plan exists for this incident.',
+          }),
+          { status: 404 },
+        ),
+      );
+    }
+    const headers = init?.headers as Record<string, string> | undefined;
+    return Promise.resolve(
+      headers?.['x-sentinel-secret'] === 'proof-secret'
+        ? new Response(JSON.stringify(DETAIL), { status: 200 })
+        : new Response(JSON.stringify({ detail: 'secret required' }), {
+            status: 401,
+          }),
+    );
+  });
+  vi.stubGlobal('fetch', fetch);
+
+  renderDetail();
+  await waitFor(() => expect(screen.getByLabelText(/operator credential/i)).toBeVisible());
+  fireEvent.change(screen.getByLabelText(/operator credential/i), {
+    target: { value: 'proof-secret' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: /unlock action controls/i }));
+
+  await waitFor(() => expect(screen.getByRole('heading', { name: /attack incident/i })).toBeVisible());
+  const protectedCall = fetch.mock.calls.find(
+    ([input, init]) => !requestUrl(input).endsWith('/action') && init?.headers !== undefined,
+  );
+  expect(protectedCall?.[1]?.headers).toEqual({
+    'x-sentinel-secret': 'proof-secret',
+  });
 });

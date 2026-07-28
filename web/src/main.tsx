@@ -4,6 +4,7 @@ import { RouterProvider } from 'react-router/dom';
 
 import '@/index.css';
 import { router } from '@/router';
+import { OperatorCredentialProvider } from '@/shell/OperatorCredential';
 
 const container = document.getElementById('root');
 if (!container) {
@@ -12,6 +13,8 @@ if (!container) {
 
 createRoot(container).render(
   <StrictMode>
-    <RouterProvider router={router} />
+    <OperatorCredentialProvider>
+      <RouterProvider router={router} />
+    </OperatorCredentialProvider>
   </StrictMode>,
 );

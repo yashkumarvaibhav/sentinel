@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router';
 
 import { fetchIncidentDetail } from '@/api/incidentDetail';
+import { CredentialRequiredError } from '@/api/actionControl';
+import { ActionControlPanel } from '@/components/ActionControlPanel';
 import { CausalGraphView } from '@/components/CausalGraph';
 import type {
   DecompFrame,
@@ -10,10 +12,13 @@ import type {
   VerdictClass,
 } from '@/contracts/types';
 import { useAudience } from '@/shell/useAudience';
+import { OperatorCredentialPrompt } from '@/shell/OperatorCredential';
+import { useOperatorCredential } from '@/shell/useOperatorCredential';
 import { useSnapshotInvalidation } from '@/shell/useSnapshotStream';
 
 type Load =
   | { state: 'loading' }
+  | { state: 'locked'; detail?: string }
   | { state: 'ready'; response: IncidentDetailResponse }
   | { state: 'error'; detail: string };
 
@@ -418,11 +423,12 @@ function Proof({ detail }: { detail: IncidentDetail }) {
                 ))}
               </ol>
             )}
+            <ActionControlPanel incidentId={detail.incident_id} />
             <aside className="border-line bg-sidebar rounded-lg border p-4 text-xs">
-              <strong>Controls are intentionally absent.</strong>
+              <strong>Code localization is not inferred.</strong>
               <p className="text-muted mt-1">
-                Approve, reject, and rollback mutations land behind the shared-secret gate in
-                Phase 6.7. Code localization remains a Phase 7 evidence product.
+                Service-to-file evidence remains a Phase 7 product and is unavailable here until
+                the real trace, change-ledger, and git verification paths produce it.
               </p>
             </aside>
           </Section>
@@ -434,6 +440,7 @@ function Proof({ detail }: { detail: IncidentDetail }) {
 
 export function IncidentDetailPage() {
   const { incidentId } = useParams();
+  const { credential, clearCredential } = useOperatorCredential();
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   const inFlight = useRef<Promise<void> | null>(null);
   const controller = useRef<AbortController | null>(null);
@@ -450,12 +457,15 @@ export function IncidentDetailPage() {
     }
     const requestController = new AbortController();
     controller.current = requestController;
-    const request = fetchIncidentDetail(incidentId, requestController.signal)
+    const request = fetchIncidentDetail(incidentId, credential, requestController.signal)
       .then((response) => {
         if (!requestController.signal.aborted) setLoad({ state: 'ready', response });
       })
       .catch((error: unknown) => {
-        if (!requestController.signal.aborted) {
+        if (!requestController.signal.aborted && error instanceof CredentialRequiredError) {
+          clearCredential();
+          setLoad({ state: 'locked' });
+        } else if (!requestController.signal.aborted) {
           setLoad({
             state: 'error',
             detail: error instanceof Error ? error.message : String(error),
@@ -472,7 +482,7 @@ export function IncidentDetailPage() {
       });
     inFlight.current = request;
     return request;
-  }, [incidentId]);
+  }, [clearCredential, credential, incidentId]);
 
   useSnapshotInvalidation(INCIDENT_RESOURCES, refetch);
   useEffect(() => {
@@ -487,6 +497,9 @@ export function IncidentDetailPage() {
         Reading the incident proof…
       </p>
     );
+  }
+  if (load.state === 'locked') {
+    return <OperatorCredentialPrompt detail={load.detail} />;
   }
   if (load.state === 'error') {
     return (

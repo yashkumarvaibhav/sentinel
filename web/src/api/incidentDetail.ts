@@ -1,4 +1,5 @@
 import { parseCausalGraph } from '@/api/causalGraph';
+import { CredentialRequiredError } from '@/api/actionControl';
 import type {
   AuditEventKind,
   CheckOutcome,
@@ -524,12 +525,14 @@ export function parseIncidentDetailResponse(value: unknown): IncidentDetailRespo
 
 export async function fetchIncidentDetail(
   incidentId: string,
+  credential: string | null = null,
   signal?: AbortSignal,
 ): Promise<IncidentDetailResponse> {
-  const response = await fetch(
-    `/api/incidents/${encodeURIComponent(incidentId)}`,
-    signal ? { signal } : {},
-  );
+  const response = await fetch(`/api/incidents/${encodeURIComponent(incidentId)}`, {
+    ...(credential === null ? {} : { headers: { 'x-sentinel-secret': credential } }),
+    ...(signal ? { signal } : {}),
+  });
+  if (response.status === 401) throw new CredentialRequiredError();
   if (response.status !== 200 && response.status !== 404 && response.status !== 503) {
     throw new Error(`incident detail request failed: ${response.status}`);
   }
