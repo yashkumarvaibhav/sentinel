@@ -37,6 +37,7 @@ def test_postgres_migration_separates_runtime_and_dev_label_schemas() -> None:
         "0004",
         "0005",
         "0006",
+        "0007",
     ]
     sql = render_migration(
         migrations[0],
@@ -79,6 +80,19 @@ def test_incident_detail_migration_is_incident_owned_runtime_state() -> None:
     sql = render_migration(migrations["0006"], schema="sentinel_test")
     assert "sentinel_test.incident_details" in sql
     assert "REFERENCES sentinel_test.incidents (incident_id)" in sql
+    assert "{{dev_schema}}" not in sql
+
+
+def test_action_control_migration_binds_payload_to_plan_revision_and_incident() -> None:
+    migrations = {migration.version: migration for migration in load_migrations("postgres")}
+
+    sql = render_migration(migrations["0007"], schema="sentinel_test")
+    assert "sentinel_test.incident_action_controls" in sql
+    assert "PRIMARY KEY (incident_id, plan_revision)" in sql
+    assert "REFERENCES sentinel_test.incidents (incident_id)" in sql
+    assert "payload ->> 'incident_id'" in sql
+    assert "payload ->> 'plan_revision'" in sql
+    assert "payload ->> 'state'" in sql
     assert "{{dev_schema}}" not in sql
 
 

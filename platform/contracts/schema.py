@@ -13,6 +13,11 @@ from pydantic import BaseModel
 from pydantic.json_schema import JsonSchemaValue, models_json_schema
 
 from contracts.action import ActionOutcome, ActionPlan
+from contracts.action_control import (
+    ActionControlRequest,
+    ActionControlResponse,
+    ActionControlSnapshot,
+)
 from contracts.audit import AuditEntry
 from contracts.causal_graph import CausalGraphResponse
 from contracts.context import ContextWindow
@@ -48,6 +53,9 @@ PUBLIC_MODELS: tuple[type[BaseModel], ...] = (
     Decision,
     ActionPlan,
     ActionOutcome,
+    ActionControlRequest,
+    ActionControlSnapshot,
+    ActionControlResponse,
     AuditEntry,
     SnapshotInvalidation,
     ScoreProof,

@@ -20,6 +20,9 @@ export type SentinelContract =
   | Decision
   | ActionPlan
   | ActionOutcome
+  | ActionControlRequest
+  | ActionControlSnapshot
+  | ActionControlResponse
   | AuditEntry
   | SnapshotInvalidation
   | ScoreProof
@@ -204,6 +207,37 @@ export type Observed = HumanText[];
  * not assert whether the world changed - only a ``verify`` can settle that.
  */
 export type ActionStatus = "SIMULATED" | "APPLIED" | "VERIFIED" | "REVERTED" | "FAILED";
+/**
+ * The complete mutation vocabulary exposed to a client.
+ */
+export type ActionControlIntent = "APPROVE" | "REJECT" | "ROLLBACK";
+export type PlanRevision = number;
+export type Approvals1 = ActionApproval[];
+/**
+ * Whether one deterministic safety gate admitted the exact plan.
+ */
+export type ActionGateStatus = "PASSED" | "REFUSED";
+export type GuardResults = ActionGateResult[];
+export type PlanRevision1 = number;
+export type CanaryShares = number[];
+export type RequiredApprovalCount = number;
+export type RequiresHumanApproval2 = boolean;
+export type TtlSeconds = number;
+/**
+ * Durable progress of one immutable plan revision.
+ */
+export type ActionControlState =
+  | "AWAITING_APPROVAL"
+  | "APPLY_REQUESTED"
+  | "REJECTED"
+  | "APPLIED"
+  | "VERIFIED"
+  | "FAILED"
+  | "ROLLBACK_REQUESTED"
+  | "ROLLED_BACK"
+  | "REFUSED"
+  | "SIMULATED";
+export type Status = string;
 export type Honesty4 = "REAL" | "SIMULATED";
 /**
  * What kind of thing the ledger is recording.
@@ -261,7 +295,7 @@ export type Version = 1;
 export type KpiKey = "detection_latency" | "autonomous_mttr" | "quiet_day_false_acts" | "protected_cohort_integrity";
 export type SampleCount1 = number;
 export type Metrics = KpiMetric[];
-export type Status = "ready" | "degraded";
+export type Status1 = "ready" | "degraded";
 export type Count = number;
 /**
  * Whether the displayed confidence has a calibration basis.
@@ -279,7 +313,7 @@ export type Muted = boolean;
 export type Services3 = [Identifier, ...Identifier[]];
 export type Incidents = IncidentFeedItem[];
 export type Limit = number;
-export type Status1 = "ready" | "degraded";
+export type Status2 = "ready" | "degraded";
 export type Active = boolean;
 export type EvidenceEpisodeIds = Identifier[];
 export type Edges = CausalGraphEdge[];
@@ -294,13 +328,13 @@ export type Implicated = boolean;
 export type IsOrigin = boolean;
 export type SymptomKinds = SymptomKind[];
 export type Tier = "edge" | "application" | "data" | "infrastructure";
-export type Status2 = "ready" | "empty" | "degraded";
+export type Status3 = "ready" | "empty" | "degraded";
 export type Entries = AuditEntry[];
 /**
  * @maxItems 500
  */
 export type Frames = DecompFrame[];
-export type Status3 = "available" | "insufficient";
+export type Status4 = "available" | "insufficient";
 export type Truncated = boolean;
 export type Baseline = number;
 export type EvidenceRefs4 = Identifier[];
@@ -318,8 +352,8 @@ export type RejectedAlternatives1 = RejectedAlternative[];
  */
 export type Services5 = [Identifier, ...Identifier[]];
 export type Distribution1 = VerdictProbability[];
-export type Status4 = "decided" | "insufficient";
-export type Status5 = "ready" | "not_found" | "degraded";
+export type Status5 = "decided" | "insufficient";
+export type Status6 = "ready" | "not_found" | "degraded";
 
 /**
  * One event-time telemetry value, containing evidence but never answer-key data.
@@ -693,6 +727,73 @@ export interface ActionOutcome {
   ts: UtcDatetime;
 }
 /**
+ * An operator's intent against one stable, server-held plan revision.
+ */
+export interface ActionControlRequest {
+  incident_id: Identifier;
+  intent: ActionControlIntent;
+  plan_revision: PlanRevision;
+}
+/**
+ * Authoritative durable control state returned after every mutation.
+ */
+export interface ActionControlSnapshot {
+  approvals?: Approvals1;
+  created_at: UtcDatetime;
+  guard_results: GuardResults;
+  incident_id: Identifier;
+  latest_outcome: ActionOutcome | null;
+  plan: ActionPlan;
+  plan_revision: PlanRevision1;
+  rejected_at?: UtcDatetime | null;
+  rejected_by?: Identifier | null;
+  rung: ActionRungSnapshot;
+  state: ActionControlState;
+  updated_at: UtcDatetime;
+}
+/**
+ * One server-authenticated identity approving one plan revision once.
+ */
+export interface ActionApproval {
+  actor: Identifier;
+  approved_at: UtcDatetime;
+}
+/**
+ * One measured deterministic guard result for the exact plan.
+ */
+export interface ActionGateResult {
+  detail: HumanText;
+  gate_id: Identifier;
+  status: ActionGateStatus;
+}
+/**
+ * The exact committed ladder choice from which the plan was built.
+ */
+export interface ActionRungSnapshot {
+  action_kind: ActionKind;
+  actuator: ActuatorKind;
+  canary_parameter?: Identifier | null;
+  canary_shares?: CanaryShares;
+  ladder_id: Identifier;
+  maximum_blast_fraction: Probability;
+  parameters?: Parameters1;
+  reason: HumanText;
+  required_approval_count: RequiredApprovalCount;
+  requires_human_approval: RequiresHumanApproval2;
+  rung_id: Identifier;
+  ttl_seconds: TtlSeconds;
+}
+export interface Parameters1 {
+  [k: string]: ActionParameterValue;
+}
+/**
+ * Typed API response for the latest authoritative plan revision.
+ */
+export interface ActionControlResponse {
+  control: ActionControlSnapshot;
+  status: Status;
+}
+/**
  * One immutable record, bound to the entry before it by its own hash.
  */
 export interface AuditEntry {
@@ -757,7 +858,7 @@ export interface KpiResponse {
   detail?: HumanText | null;
   latest_score_proof: ScoreProof | null;
   metrics: Metrics;
-  status: Status;
+  status: Status1;
 }
 /**
  * One reliability KPI with enough provenance to interpret it.
@@ -789,7 +890,7 @@ export interface IncidentFeedResponse {
   detail?: HumanText | null;
   incidents: Incidents;
   limit: Limit;
-  status: Status1;
+  status: Status2;
 }
 /**
  * One evidence-first card in the authoritative incident snapshot.
@@ -843,7 +944,7 @@ export interface IncidentEvidenceValue {
 export interface CausalGraphResponse {
   detail: HumanText | null;
   graph: CausalGraph | null;
-  status: Status2;
+  status: Status3;
 }
 /**
  * One durable graph revision for an incident.
@@ -897,7 +998,7 @@ export interface CausalGraphNode {
 export interface IncidentDetailResponse {
   detail: IncidentDetail | null;
   message: HumanText | null;
-  status: Status5;
+  status: Status6;
 }
 /**
  * One evidence-complete incident revision for the proof screen.
@@ -939,7 +1040,7 @@ export interface IncidentDecomposition {
   service: Identifier | null;
   signal: SignalName | null;
   start: UtcDatetime;
-  status: Status3;
+  status: Status4;
   truncated: Truncated;
 }
 /**
@@ -975,7 +1076,7 @@ export interface IncidentVerdictProof {
   calibration: IncidentConfidence;
   distribution: Distribution1;
   reason_subtype: ReasonSubtype | null;
-  status: Status4;
+  status: Status5;
   verdict_class: VerdictClass | null;
 }
 /**

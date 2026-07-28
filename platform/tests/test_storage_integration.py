@@ -12,6 +12,7 @@ import httpx
 import pytest
 from psycopg import sql
 
+from action.control import ActionControlTransitionError
 from audit import verify_chain
 from common.config import DetectorConfig
 from common.settings import Settings
@@ -32,6 +33,16 @@ from common.storage._clickhouse import execute as clickhouse_execute
 from common.storage.dev_labels import DevLabelRecord, DevLabelRepository
 from common.storage.migrations import migrate_storage
 from contracts import (
+    ActionControlIntent,
+    ActionControlRequest,
+    ActionControlSnapshot,
+    ActionControlState,
+    ActionGateResult,
+    ActionGateStatus,
+    ActionKind,
+    ActionPlan,
+    ActionRungSnapshot,
+    ActuatorKind,
     AuditEventKind,
     ContextWindow,
     DecompFrame,
@@ -40,6 +51,7 @@ from contracts import (
     Symptom,
     SymptomEpisode,
     SymptomKind,
+    action_idempotency_key,
 )
 from decision.memory import similarity_from_distance
 from detection.decompose import DecompositionEngine, DecompositionWorker
@@ -257,10 +269,114 @@ async def _round_trip_postgres(config: Settings, pool: PostgresPool, suffix: str
     assert await repository.list_incidents(limit=20) == (advanced_incident,)
     assert await repository.get_audit(audit.entry_id) == audit
     assert await labels.get(label.label_id) == label
+    await _round_trip_action_control(repository, advanced_incident, ts)
 
     await _round_trip_incident_graph_bundle(config, repository, pool, ts, suffix)
     await _round_trip_episode(repository, ts, suffix)
     await _round_trip_pipeline_episode(repository, ts, suffix)
+
+
+async def _round_trip_action_control(
+    repository: PostgresRepository,
+    incident: IncidentRecord,
+    ts: datetime,
+) -> None:
+    parameters: dict[str, str | bool | int | float] = {
+        "cohort": "invalid-credentials",
+        "requests_per_second": 5,
+    }
+    plan = ActionPlan(
+        plan_id=f"{incident.incident_id}-plan",
+        ts=ts + timedelta(seconds=2),
+        decision_id=f"{incident.incident_id}-decision",
+        incident_id=incident.incident_id,
+        actuator=ActuatorKind.MESH,
+        action_kind=ActionKind.RATE_LIMIT,
+        target_service="frontend",
+        target_ref="route/login",
+        parameters=parameters,
+        reason="The verified credential residual earned the committed rate-limit rung.",
+        expected_effect="Invalid-credential traffic remains under five requests per second.",
+        reversible=True,
+        requires_human_approval=True,
+        estimated_blast_fraction=0.1,
+        idempotency_key=action_idempotency_key(
+            actuator=ActuatorKind.MESH,
+            action_kind=ActionKind.RATE_LIMIT,
+            target_ref="route/login",
+            parameters=parameters,
+        ),
+        honesty="REAL",
+    )
+    control = ActionControlSnapshot(
+        incident_id=incident.incident_id,
+        plan_revision=1,
+        state=ActionControlState.AWAITING_APPROVAL,
+        rung=ActionRungSnapshot(
+            rung_id="rate-limit-invalid-credentials",
+            ladder_id="attack",
+            actuator=plan.actuator,
+            action_kind=plan.action_kind,
+            parameters=plan.parameters,
+            ttl_seconds=300,
+            requires_human_approval=True,
+            required_approval_count=1,
+            maximum_blast_fraction=0.2,
+            reason=plan.reason,
+        ),
+        plan=plan,
+        guard_results=(
+            ActionGateResult(
+                gate_id="protected-cohort-unharmed",
+                status=ActionGateStatus.PASSED,
+                detail="The committed protected-cohort allowance was respected.",
+            ),
+        ),
+        latest_outcome=None,
+        created_at=plan.ts,
+        updated_at=plan.ts,
+    )
+    assert await repository.put_action_control(control) is True
+    assert await repository.put_action_control(control) is False
+    assert await repository.get_action_control(control.incident_id) == control
+
+    request = ActionControlRequest(
+        incident_id=control.incident_id,
+        plan_revision=control.plan_revision,
+        intent=ActionControlIntent.REJECT,
+    )
+    changed, rejected = await repository.transition_action_control(
+        request,
+        actor="interim-operator",
+        ts=ts + timedelta(seconds=3),
+    )
+    assert changed is True
+    assert rejected.state is ActionControlState.REJECTED
+
+    replay_changed, replay = await repository.transition_action_control(
+        request,
+        actor="interim-operator",
+        ts=ts + timedelta(seconds=4),
+    )
+    assert replay_changed is False
+    assert replay == rejected
+    assert await repository.get_action_control(control.incident_id, plan_revision=1) == rejected
+
+    with pytest.raises(ActionControlTransitionError, match="terminal"):
+        await repository.transition_action_control(
+            request.model_copy(update={"intent": ActionControlIntent.APPROVE}),
+            actor="interim-operator",
+            ts=ts + timedelta(seconds=5),
+        )
+
+    stale = control.model_copy(
+        update={
+            "plan_revision": 3,
+            "plan": plan.model_copy(update={"plan_id": f"{plan.plan_id}-stale"}),
+        }
+    )
+    with pytest.raises(ValueError, match="next revision"):
+        await repository.put_action_control(stale)
 
 
 async def _round_trip_incident_graph_bundle(

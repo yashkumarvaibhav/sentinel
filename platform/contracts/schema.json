@@ -1,5 +1,213 @@
 {
   "$defs": {
+    "ActionApproval": {
+      "additionalProperties": false,
+      "description": "One server-authenticated identity approving one plan revision once.",
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "approved_at": {
+          "$ref": "#/$defs/UtcDatetime"
+        }
+      },
+      "required": [
+        "actor",
+        "approved_at"
+      ],
+      "title": "ActionApproval",
+      "type": "object"
+    },
+    "ActionControlIntent": {
+      "description": "The complete mutation vocabulary exposed to a client.",
+      "enum": [
+        "APPROVE",
+        "REJECT",
+        "ROLLBACK"
+      ],
+      "title": "ActionControlIntent",
+      "type": "string"
+    },
+    "ActionControlRequest": {
+      "additionalProperties": false,
+      "description": "An operator's intent against one stable, server-held plan revision.",
+      "properties": {
+        "incident_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "intent": {
+          "$ref": "#/$defs/ActionControlIntent"
+        },
+        "plan_revision": {
+          "minimum": 1,
+          "title": "Plan Revision",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "incident_id",
+        "plan_revision",
+        "intent"
+      ],
+      "title": "ActionControlRequest",
+      "type": "object"
+    },
+    "ActionControlResponse": {
+      "additionalProperties": false,
+      "description": "Typed API response for the latest authoritative plan revision.",
+      "properties": {
+        "control": {
+          "$ref": "#/$defs/ActionControlSnapshot"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "control"
+      ],
+      "title": "ActionControlResponse",
+      "type": "object"
+    },
+    "ActionControlSnapshot": {
+      "additionalProperties": false,
+      "description": "Authoritative durable control state returned after every mutation.",
+      "properties": {
+        "approvals": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ActionApproval"
+          },
+          "title": "Approvals",
+          "type": "array"
+        },
+        "created_at": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "guard_results": {
+          "items": {
+            "$ref": "#/$defs/ActionGateResult"
+          },
+          "title": "Guard Results",
+          "type": "array"
+        },
+        "incident_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "latest_outcome": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActionOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "plan": {
+          "$ref": "#/$defs/ActionPlan"
+        },
+        "plan_revision": {
+          "minimum": 1,
+          "title": "Plan Revision",
+          "type": "integer"
+        },
+        "rejected_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcDatetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rejected_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rung": {
+          "$ref": "#/$defs/ActionRungSnapshot"
+        },
+        "state": {
+          "$ref": "#/$defs/ActionControlState"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/UtcDatetime"
+        }
+      },
+      "required": [
+        "incident_id",
+        "plan_revision",
+        "state",
+        "rung",
+        "plan",
+        "guard_results",
+        "latest_outcome",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "ActionControlSnapshot",
+      "type": "object"
+    },
+    "ActionControlState": {
+      "description": "Durable progress of one immutable plan revision.",
+      "enum": [
+        "AWAITING_APPROVAL",
+        "APPLY_REQUESTED",
+        "REJECTED",
+        "APPLIED",
+        "VERIFIED",
+        "FAILED",
+        "ROLLBACK_REQUESTED",
+        "ROLLED_BACK",
+        "REFUSED",
+        "SIMULATED"
+      ],
+      "title": "ActionControlState",
+      "type": "string"
+    },
+    "ActionGateResult": {
+      "additionalProperties": false,
+      "description": "One measured deterministic guard result for the exact plan.",
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "gate_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "status": {
+          "$ref": "#/$defs/ActionGateStatus"
+        }
+      },
+      "required": [
+        "gate_id",
+        "status",
+        "detail"
+      ],
+      "title": "ActionGateResult",
+      "type": "object"
+    },
+    "ActionGateStatus": {
+      "description": "Whether one deterministic safety gate admitted the exact plan.",
+      "enum": [
+        "PASSED",
+        "REFUSED"
+      ],
+      "title": "ActionGateStatus",
+      "type": "string"
+    },
     "ActionKind": {
       "description": "The rungs of the remediation ladder, cheapest and safest first.\n\nThe ordering of the rungs into ladders, and which rung a given diagnosis\nearns, is operator-owned configuration - this enum is only the vocabulary\nthose ladders are written in.",
       "enum": [
@@ -204,6 +412,87 @@
         "honesty"
       ],
       "title": "ActionPlan",
+      "type": "object"
+    },
+    "ActionRungSnapshot": {
+      "additionalProperties": false,
+      "description": "The exact committed ladder choice from which the plan was built.",
+      "properties": {
+        "action_kind": {
+          "$ref": "#/$defs/ActionKind"
+        },
+        "actuator": {
+          "$ref": "#/$defs/ActuatorKind"
+        },
+        "canary_parameter": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "canary_shares": {
+          "default": [],
+          "items": {
+            "type": "integer"
+          },
+          "title": "Canary Shares",
+          "type": "array"
+        },
+        "ladder_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "maximum_blast_fraction": {
+          "$ref": "#/$defs/Probability"
+        },
+        "parameters": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ActionParameterValue"
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "title": "Parameters",
+          "type": "object"
+        },
+        "reason": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "required_approval_count": {
+          "maximum": 2,
+          "minimum": 0,
+          "title": "Required Approval Count",
+          "type": "integer"
+        },
+        "requires_human_approval": {
+          "title": "Requires Human Approval",
+          "type": "boolean"
+        },
+        "rung_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "ttl_seconds": {
+          "minimum": 1,
+          "title": "Ttl Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "rung_id",
+        "ladder_id",
+        "actuator",
+        "action_kind",
+        "ttl_seconds",
+        "requires_human_approval",
+        "required_approval_count",
+        "maximum_blast_fraction",
+        "reason"
+      ],
+      "title": "ActionRungSnapshot",
       "type": "object"
     },
     "ActionStatus": {
@@ -2803,6 +3092,15 @@
     },
     {
       "$ref": "#/$defs/ActionOutcome"
+    },
+    {
+      "$ref": "#/$defs/ActionControlRequest"
+    },
+    {
+      "$ref": "#/$defs/ActionControlSnapshot"
+    },
+    {
+      "$ref": "#/$defs/ActionControlResponse"
     },
     {
       "$ref": "#/$defs/AuditEntry"

@@ -12,6 +12,12 @@ from psycopg.rows import TupleRow
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from action.control import (
+    ActionControlNotFoundError,
+)
+from action.control import (
+    transition_action_control as apply_action_control_transition,
+)
 from audit.chain import build_entry
 from common.storage.models import (
     AuditRecord,
@@ -20,7 +26,13 @@ from common.storage.models import (
     IncidentRecord,
 )
 from common.storage.pool import PostgresPool
-from contracts import AuditEntry, AuditEventKind, SymptomEpisode
+from contracts import (
+    ActionControlRequest,
+    ActionControlSnapshot,
+    AuditEntry,
+    AuditEventKind,
+    SymptomEpisode,
+)
 
 
 class PostgresRepository:
@@ -31,6 +43,7 @@ class PostgresRepository:
         self._incidents = sql.Identifier(schema, "incidents")
         self._incident_graphs = sql.Identifier(schema, "incident_causal_graphs")
         self._incident_details = sql.Identifier(schema, "incident_details")
+        self._incident_action_controls = sql.Identifier(schema, "incident_action_controls")
         self._audit_entries = sql.Identifier(schema, "audit_entries")
         self._symptom_episodes = sql.Identifier(schema, "symptom_episodes")
 
@@ -236,6 +249,155 @@ class PostgresRepository:
             updated_at=cast(datetime, row[1]),
             payload=cast(dict[str, JsonValue], row[2]),
         )
+
+    async def put_action_control(self, control: ActionControlSnapshot) -> bool:
+        """Append one immutable plan revision, monotonically per incident.
+
+        The advisory transaction lock closes the only race that matters here:
+        two workers materializing different "next" plans for the same incident.
+        Replaying the exact same revision is idempotent; reusing a revision for
+        different evidence is refused rather than silently replacing history.
+        """
+        lock_query = "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))"
+        latest_query = sql.SQL(
+            """
+            SELECT plan_revision, payload::text
+            FROM {}
+            WHERE incident_id = %s
+            ORDER BY plan_revision DESC
+            LIMIT 1
+            """
+        ).format(self._incident_action_controls)
+        insert_query = sql.SQL(
+            """
+            INSERT INTO {}
+                (incident_id, plan_revision, state, created_at, updated_at, payload)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """
+        ).format(self._incident_action_controls)
+        async with self._pool.connection() as connection, connection.transaction():
+            await connection.execute(lock_query, (control.incident_id,))
+            cursor = await connection.execute(latest_query, (control.incident_id,))
+            row = await cursor.fetchone()
+            latest_revision = 0 if row is None else cast(int, row[0])
+            if control.plan_revision == latest_revision:
+                if row is None:
+                    raise AssertionError("revision zero cannot be materialized")
+                existing = ActionControlSnapshot.model_validate_json(cast(str, row[1]))
+                if existing != control:
+                    raise ValueError(
+                        f"plan revision {control.plan_revision} already names different "
+                        "server-held action state"
+                    )
+                return False
+            expected = latest_revision + 1
+            if control.plan_revision != expected:
+                raise ValueError(
+                    f"the next revision for {control.incident_id} is {expected}, "
+                    f"not {control.plan_revision}"
+                )
+            await connection.execute(
+                insert_query,
+                (
+                    control.incident_id,
+                    control.plan_revision,
+                    control.state.value,
+                    control.created_at,
+                    control.updated_at,
+                    Jsonb(control.model_dump(mode="json")),
+                ),
+            )
+            return True
+
+    async def get_action_control(
+        self,
+        incident_id: str,
+        *,
+        plan_revision: int | None = None,
+    ) -> ActionControlSnapshot | None:
+        """Read one exact plan revision, or the incident's latest revision."""
+        if plan_revision is None:
+            query = sql.SQL(
+                """
+                SELECT payload::text
+                FROM {}
+                WHERE incident_id = %s
+                ORDER BY plan_revision DESC
+                LIMIT 1
+                """
+            ).format(self._incident_action_controls)
+            parameters: tuple[object, ...] = (incident_id,)
+        else:
+            if plan_revision < 1:
+                raise ValueError("plan_revision must be positive")
+            query = sql.SQL(
+                """
+                SELECT payload::text
+                FROM {}
+                WHERE incident_id = %s AND plan_revision = %s
+                """
+            ).format(self._incident_action_controls)
+            parameters = (incident_id, plan_revision)
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(query, parameters)
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return ActionControlSnapshot.model_validate_json(cast(str, row[0]))
+
+    async def transition_action_control(
+        self,
+        request: ActionControlRequest,
+        *,
+        actor: str,
+        ts: datetime,
+    ) -> tuple[bool, ActionControlSnapshot]:
+        """Serialize and commit one intent against the exact requested revision."""
+        select_query = sql.SQL(
+            """
+            SELECT payload::text
+            FROM {}
+            WHERE incident_id = %s AND plan_revision = %s
+            FOR UPDATE
+            """
+        ).format(self._incident_action_controls)
+        update_query = sql.SQL(
+            """
+            UPDATE {}
+            SET state = %s, updated_at = %s, payload = %s
+            WHERE incident_id = %s AND plan_revision = %s
+            """
+        ).format(self._incident_action_controls)
+        async with self._pool.connection() as connection, connection.transaction():
+            cursor = await connection.execute(
+                select_query,
+                (request.incident_id, request.plan_revision),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                raise ActionControlNotFoundError(
+                    f"no action control for {request.incident_id} revision {request.plan_revision}"
+                )
+            current = ActionControlSnapshot.model_validate_json(cast(str, row[0]))
+            transitioned = apply_action_control_transition(
+                current,
+                request,
+                actor=actor,
+                ts=ts,
+            )
+            if transitioned == current:
+                return False, current
+            await connection.execute(
+                update_query,
+                (
+                    transitioned.state.value,
+                    transitioned.updated_at,
+                    Jsonb(transitioned.model_dump(mode="json")),
+                    transitioned.incident_id,
+                    transitioned.plan_revision,
+                ),
+            )
+            return True, transitioned
 
     async def put_episode(self, episode: SymptomEpisode) -> bool:
         """Idempotently persist an episode; skip a stale (lower-revision) write.

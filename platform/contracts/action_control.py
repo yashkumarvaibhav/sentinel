@@ -1,0 +1,196 @@
+"""Public, intent-only control state for one evidence-owned action plan.
+
+The browser is allowed to say only what an operator intends to do with a plan
+revision the server already owns. It cannot submit an action target, rung,
+blast radius, TTL, gate result, revert token, or outcome. Those facts are
+materialized while the decision evidence and action-plane objects still exist,
+then carried forward unchanged through this contract.
+"""
+
+from __future__ import annotations
+
+from enum import StrEnum
+from typing import Self
+
+from pydantic import Field, model_validator
+
+from contracts._base import ContractModel, HumanText, Identifier, Probability, UtcDatetime
+from contracts.action import (
+    DESTRUCTIVE_ACTIONS,
+    ActionKind,
+    ActionOutcome,
+    ActionParameterValue,
+    ActionPlan,
+    ActionStatus,
+    ActuatorKind,
+)
+
+
+class ActionControlIntent(StrEnum):
+    """The complete mutation vocabulary exposed to a client."""
+
+    APPROVE = "APPROVE"
+    REJECT = "REJECT"
+    ROLLBACK = "ROLLBACK"
+
+
+class ActionControlState(StrEnum):
+    """Durable progress of one immutable plan revision."""
+
+    AWAITING_APPROVAL = "AWAITING_APPROVAL"
+    APPLY_REQUESTED = "APPLY_REQUESTED"
+    REJECTED = "REJECTED"
+    APPLIED = "APPLIED"
+    VERIFIED = "VERIFIED"
+    FAILED = "FAILED"
+    ROLLBACK_REQUESTED = "ROLLBACK_REQUESTED"
+    ROLLED_BACK = "ROLLED_BACK"
+    REFUSED = "REFUSED"
+    SIMULATED = "SIMULATED"
+
+
+class ActionGateStatus(StrEnum):
+    """Whether one deterministic safety gate admitted the exact plan."""
+
+    PASSED = "PASSED"
+    REFUSED = "REFUSED"
+
+
+class ActionControlRequest(ContractModel):
+    """An operator's intent against one stable, server-held plan revision."""
+
+    incident_id: Identifier
+    plan_revision: int = Field(ge=1)
+    intent: ActionControlIntent
+
+
+class ActionRungSnapshot(ContractModel):
+    """The exact committed ladder choice from which the plan was built."""
+
+    rung_id: Identifier
+    ladder_id: Identifier
+    actuator: ActuatorKind
+    action_kind: ActionKind
+    parameters: dict[Identifier, ActionParameterValue] = Field(default_factory=dict)
+    ttl_seconds: int = Field(ge=1)
+    requires_human_approval: bool
+    required_approval_count: int = Field(ge=0, le=2)
+    maximum_blast_fraction: Probability
+    reason: HumanText
+    canary_parameter: Identifier | None = None
+    canary_shares: tuple[int, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_approval_and_canary(self) -> Self:
+        expected_approvals = (
+            2 if self.action_kind in DESTRUCTIVE_ACTIONS else int(self.requires_human_approval)
+        )
+        if self.required_approval_count != expected_approvals:
+            raise ValueError(
+                "required_approval_count must come from the plan and destructive-rung policy"
+            )
+        if bool(self.canary_parameter) != bool(self.canary_shares):
+            raise ValueError("a canary parameter and its committed shares must travel together")
+        if any(not 1 <= share <= 100 for share in self.canary_shares):
+            raise ValueError("canary shares must be whole percentages within [1, 100]")
+        if tuple(sorted(set(self.canary_shares))) != self.canary_shares:
+            raise ValueError("canary shares must be unique and strictly increasing")
+        return self
+
+
+class ActionGateResult(ContractModel):
+    """One measured deterministic guard result for the exact plan."""
+
+    gate_id: Identifier
+    status: ActionGateStatus
+    detail: HumanText
+
+
+class ActionApproval(ContractModel):
+    """One server-authenticated identity approving one plan revision once."""
+
+    actor: Identifier
+    approved_at: UtcDatetime
+
+
+class ActionControlSnapshot(ContractModel):
+    """Authoritative durable control state returned after every mutation."""
+
+    incident_id: Identifier
+    plan_revision: int = Field(ge=1)
+    state: ActionControlState
+    rung: ActionRungSnapshot
+    plan: ActionPlan
+    guard_results: tuple[ActionGateResult, ...]
+    latest_outcome: ActionOutcome | None
+    approvals: tuple[ActionApproval, ...] = ()
+    rejected_by: Identifier | None = None
+    rejected_at: UtcDatetime | None = None
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
+
+    @model_validator(mode="after")
+    def validate_snapshot(self) -> Self:
+        if self.updated_at < self.created_at:
+            raise ValueError("updated_at must be greater than or equal to created_at")
+        if self.plan.incident_id != self.incident_id:
+            raise ValueError("the control and its server-held plan must name the same incident")
+        if (
+            self.rung.actuator != self.plan.actuator
+            or self.rung.action_kind != self.plan.action_kind
+            or dict(self.rung.parameters) != self.plan.parameters
+            or self.rung.requires_human_approval != self.plan.requires_human_approval
+        ):
+            raise ValueError("rung and plan safety-critical fields must agree exactly")
+        if self.plan.estimated_blast_fraction > self.rung.maximum_blast_fraction:
+            raise ValueError("the stored plan exceeds its server-held rung blast-radius ceiling")
+        gate_ids = tuple(result.gate_id for result in self.guard_results)
+        if len(gate_ids) != len(set(gate_ids)):
+            raise ValueError("guard_results must not contain duplicate gate ids")
+        approval_actors = tuple(approval.actor for approval in self.approvals)
+        if len(approval_actors) != len(set(approval_actors)):
+            raise ValueError("an identity may approve one plan revision only once")
+        if any(approval.approved_at < self.created_at for approval in self.approvals):
+            raise ValueError("an approval cannot predate the plan revision")
+        self._validate_rejection()
+        self._validate_outcome()
+        return self
+
+    def _validate_rejection(self) -> None:
+        rejected = self.state is ActionControlState.REJECTED
+        if rejected != (self.rejected_by is not None and self.rejected_at is not None):
+            raise ValueError("only a rejected plan carries both rejection identity and time")
+        if self.rejected_at is not None and self.rejected_at < self.created_at:
+            raise ValueError("a rejection cannot predate the plan revision")
+
+    def _validate_outcome(self) -> None:
+        if self.latest_outcome is not None:
+            if self.latest_outcome.plan_id != self.plan.plan_id:
+                raise ValueError("latest_outcome must belong to the server-held plan")
+            if self.latest_outcome.idempotency_key != self.plan.idempotency_key:
+                raise ValueError("latest_outcome must carry the server-held plan's effect key")
+        expected = {
+            ActionControlState.APPLIED: ActionStatus.APPLIED,
+            ActionControlState.VERIFIED: ActionStatus.VERIFIED,
+            ActionControlState.FAILED: ActionStatus.FAILED,
+            ActionControlState.ROLLED_BACK: ActionStatus.REVERTED,
+            ActionControlState.SIMULATED: ActionStatus.SIMULATED,
+        }
+        if self.state in expected:
+            if (
+                self.latest_outcome is None
+                or self.latest_outcome.status is not expected[self.state]
+            ):
+                raise ValueError(f"{self.state.value} requires its matching verified outcome")
+        elif self.state is ActionControlState.ROLLBACK_REQUESTED:
+            if self.latest_outcome is None or not self.latest_outcome.in_force:
+                raise ValueError("rollback can be requested only for a server-held effect in force")
+        elif self.latest_outcome is not None:
+            raise ValueError(f"{self.state.value} cannot carry an action outcome")
+
+
+class ActionControlResponse(ContractModel):
+    """Typed API response for the latest authoritative plan revision."""
+
+    status: str
+    control: ActionControlSnapshot
