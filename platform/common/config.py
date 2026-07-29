@@ -551,6 +551,7 @@ class DetectorConfig(ConfigModel):
 
 class ServiceSlo(ConfigModel):
     service: Identifier
+    telemetry_service: Identifier | None = None
     availability_target: Probability
     latency_p95_ms: PositiveFloat
     evaluation_window_minutes: int = Field(ge=1, le=43_200)

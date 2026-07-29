@@ -20,6 +20,9 @@ from action.control import (
     complete_action_control,
 )
 from action.control import (
+    complete_rollback_verification as apply_rollback_verification,
+)
+from action.control import (
     transition_action_control as apply_action_control_transition,
 )
 from audit.chain import build_entry
@@ -34,6 +37,8 @@ from contracts import (
     ActionControlRequest,
     ActionControlSnapshot,
     ActionOutcome,
+    ActionRollbackVerification,
+    ActionSloSample,
     ActionStatus,
     AuditEntry,
     AuditEventKind,
@@ -440,12 +445,15 @@ class PostgresRepository:
         worker_id: str,
         ts: datetime,
         lease_seconds: int,
+        settlement_delay_seconds: int,
     ) -> ActionExecutionClaim | None:
         """Lease one requested plan without exposing worker state to the browser."""
         if not worker_id:
             raise ValueError("an action execution claim needs a worker identity")
         if lease_seconds < 1:
             raise ValueError("an action execution lease must last at least one second")
+        if settlement_delay_seconds < 1:
+            raise ValueError("an action settlement delay must last at least one second")
         select = sql.SQL(
             """
             SELECT c.payload::text, q.claim_id, q.phase
@@ -453,7 +461,19 @@ class PostgresRepository:
             LEFT JOIN {claims} AS q
               ON q.incident_id = c.incident_id
              AND q.plan_revision = c.plan_revision
-            WHERE c.state IN ('APPLY_REQUESTED', 'ROLLBACK_REQUESTED')
+            WHERE (
+                    c.state IN ('APPLY_REQUESTED', 'ROLLBACK_REQUESTED')
+                 OR (
+                        c.state = 'APPLIED'
+                    AND c.updated_at <= %s
+                 )
+                 OR (
+                        c.state = 'ROLLED_BACK'
+                    AND c.updated_at <= %s
+                    AND c.payload -> 'rollback_verification' = 'null'::jsonb
+                    AND jsonb_array_length(c.payload -> 'rollback_slo_before') > 0
+                 )
+            )
               AND c.plan_revision = (
                   SELECT MAX(latest.plan_revision)
                   FROM {controls} AS latest
@@ -481,8 +501,12 @@ class PostgresRepository:
             """
         ).format(claims=self._action_execution_claims)
         expires_at = ts + timedelta(seconds=lease_seconds)
+        settlement_ready_at = ts - timedelta(seconds=settlement_delay_seconds)
         async with self._pool.connection() as connection, connection.transaction():
-            cursor = await connection.execute(select, (ts,))
+            cursor = await connection.execute(
+                select,
+                (settlement_ready_at, settlement_ready_at, ts),
+            )
             row = await cursor.fetchone()
             if row is None:
                 return None
@@ -501,11 +525,12 @@ class PostgresRepository:
             if latest_row is None or cast(int, latest_row[0]) != control.plan_revision:
                 return None
             recovered = row[1] is not None
-            operation = (
-                ActionExecutionOperation.APPLY
-                if control.state.value == "APPLY_REQUESTED"
-                else ActionExecutionOperation.ROLLBACK
-            )
+            operation = {
+                "APPLY_REQUESTED": ActionExecutionOperation.APPLY,
+                "ROLLBACK_REQUESTED": ActionExecutionOperation.ROLLBACK,
+                "APPLIED": ActionExecutionOperation.VERIFY,
+                "ROLLED_BACK": ActionExecutionOperation.VERIFY_ROLLBACK,
+            }[control.state.value]
             phase = (
                 ActionExecutionPhase(cast(str, row[2]))
                 if recovered
@@ -586,6 +611,7 @@ class PostgresRepository:
         outcome: ActionOutcome,
         *,
         ts: datetime,
+        rollback_slo_before: tuple[ActionSloSample, ...] = (),
     ) -> ActionControlSnapshot:
         """Atomically commit terminal control state, audit evidence, and claim release."""
         claim_query = sql.SQL(
@@ -637,6 +663,7 @@ class PostgresRepository:
                 operation=claim.operation,
                 outcome=outcome,
                 ts=ts,
+                rollback_slo_before=rollback_slo_before,
             )
             await connection.execute(
                 update,
@@ -656,6 +683,83 @@ class PostgresRepository:
             await connection.execute(delete, identity)
         return completed
 
+    async def complete_rollback_verification(
+        self,
+        claim: ActionExecutionClaim,
+        verification: ActionRollbackVerification,
+        *,
+        ts: datetime,
+    ) -> ActionControlSnapshot:
+        """Commit a read-only delayed rollback proof and release its lease atomically."""
+        if claim.operation is not ActionExecutionOperation.VERIFY_ROLLBACK:
+            raise RuntimeError("only a rollback-verification claim can attach SLO proof")
+        claim_query = sql.SQL(
+            """
+            SELECT claim_id, worker_id, expires_at
+            FROM {claims}
+            WHERE incident_id = %s AND plan_revision = %s
+            FOR UPDATE
+            """
+        ).format(claims=self._action_execution_claims)
+        control_query = sql.SQL(
+            """
+            SELECT payload::text
+            FROM {controls}
+            WHERE incident_id = %s AND plan_revision = %s
+            FOR UPDATE
+            """
+        ).format(controls=self._incident_action_controls)
+        update = sql.SQL(
+            """
+            UPDATE {controls}
+            SET state = %s, updated_at = %s, payload = %s
+            WHERE incident_id = %s AND plan_revision = %s
+            """
+        ).format(controls=self._incident_action_controls)
+        delete = sql.SQL(
+            "DELETE FROM {claims} WHERE incident_id = %s AND plan_revision = %s"
+        ).format(claims=self._action_execution_claims)
+        identity = (claim.control.incident_id, claim.control.plan_revision)
+        async with self._pool.connection() as connection, connection.transaction():
+            claim_cursor = await connection.execute(claim_query, identity)
+            claim_row = await claim_cursor.fetchone()
+            if (
+                claim_row is None
+                or cast(str, claim_row[0]) != claim.claim_id
+                or cast(str, claim_row[1]) != claim.worker_id
+                or cast(datetime, claim_row[2]) <= ts
+            ):
+                raise RuntimeError("the action verification claim expired or changed before commit")
+            control_cursor = await connection.execute(control_query, identity)
+            control_row = await control_cursor.fetchone()
+            if control_row is None:
+                raise ActionControlNotFoundError(
+                    f"no action control for {identity[0]} revision {identity[1]}"
+                )
+            current = ActionControlSnapshot.model_validate_json(cast(str, control_row[0]))
+            completed = apply_rollback_verification(
+                current,
+                verification=verification,
+                ts=ts,
+            )
+            await connection.execute(
+                update,
+                (
+                    completed.state.value,
+                    completed.updated_at,
+                    Jsonb(completed.model_dump(mode="json")),
+                    *identity,
+                ),
+            )
+            await self._append_rollback_verification_audit(
+                connection,
+                claim=claim,
+                verification=verification,
+                ts=ts,
+            )
+            await connection.execute(delete, identity)
+        return completed
+
     async def _append_action_audit(
         self,
         connection: AsyncConnection[TupleRow],
@@ -665,23 +769,12 @@ class PostgresRepository:
         ts: datetime,
     ) -> AuditEntry:
         """Append the control completion to the global chain on the same transaction."""
-        await connection.execute(
-            "SELECT pg_advisory_xact_lock(%s)",
-            (self._audit_lock_key,),
-        )
-        head_query = sql.SQL("SELECT {columns} FROM {table} ORDER BY sequence DESC LIMIT 1").format(
-            columns=_AUDIT_COLUMNS, table=self._audit_ledger
-        )
-        head_cursor = await connection.execute(head_query)
-        head_row = await head_cursor.fetchone()
-        previous = None if head_row is None else _audit_entry(head_row)
-        kind = _action_audit_kind(outcome)
         plan = claim.control.plan
-        entry = build_entry(
-            previous=previous,
+        return await self._append_claim_audit(
+            connection,
+            claim=claim,
             ts=ts,
-            kind=kind,
-            actor=claim.worker_id,
+            kind=_action_audit_kind(outcome),
             summary=(
                 f"{outcome.status.value.lower()} {plan.action_kind.value} on "
                 f"{plan.target_ref}: {outcome.detail}"
@@ -695,10 +788,73 @@ class PostgresRepository:
                 "gates_passed": list(outcome.gates_passed),
                 "observed": list(outcome.observed),
             },
+            honesty=outcome.honesty,
+        )
+
+    async def _append_rollback_verification_audit(
+        self,
+        connection: AsyncConnection[TupleRow],
+        *,
+        claim: ActionExecutionClaim,
+        verification: ActionRollbackVerification,
+        ts: datetime,
+    ) -> AuditEntry:
+        """Append the delayed SLO proof without presenting it as another revert."""
+        return await self._append_claim_audit(
+            connection,
+            claim=claim,
+            ts=ts,
+            kind=AuditEventKind.ROLLBACK,
+            summary=(
+                f"{verification.status.value.lower()} rollback recovery for "
+                f"{claim.control.plan.target_ref}: {verification.detail}"
+            ),
+            body={
+                "claim_id": claim.claim_id,
+                "operation": claim.operation.value,
+                "status": verification.status.value,
+                "checked_signals": list(verification.checked_signals),
+                "users_restored": verification.users_restored,
+                "before": [sample.model_dump(mode="json") for sample in verification.before],
+                "after": [sample.model_dump(mode="json") for sample in verification.after],
+            },
+            honesty=claim.control.plan.honesty,
+        )
+
+    async def _append_claim_audit(
+        self,
+        connection: AsyncConnection[TupleRow],
+        *,
+        claim: ActionExecutionClaim,
+        ts: datetime,
+        kind: AuditEventKind,
+        summary: str,
+        body: dict[str, object],
+        honesty: Literal["REAL", "SIMULATED"],
+    ) -> AuditEntry:
+        """Append one claim completion under the ledger's global writer lock."""
+        await connection.execute(
+            "SELECT pg_advisory_xact_lock(%s)",
+            (self._audit_lock_key,),
+        )
+        head_query = sql.SQL("SELECT {columns} FROM {table} ORDER BY sequence DESC LIMIT 1").format(
+            columns=_AUDIT_COLUMNS, table=self._audit_ledger
+        )
+        head_cursor = await connection.execute(head_query)
+        head_row = await head_cursor.fetchone()
+        previous = None if head_row is None else _audit_entry(head_row)
+        plan = claim.control.plan
+        entry = build_entry(
+            previous=previous,
+            ts=ts,
+            kind=kind,
+            actor=claim.worker_id,
+            summary=summary,
+            body=body,
             incident_id=plan.incident_id,
             decision_id=plan.decision_id,
             plan_id=plan.plan_id,
-            honesty=outcome.honesty,
+            honesty=honesty,
         )
         insert = sql.SQL(
             """

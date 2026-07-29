@@ -99,6 +99,13 @@ function probability(value: unknown, name: string): number {
   return value;
 }
 
+function nonnegative(value: unknown, name: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new Error(`${name} must be finite and non-negative`);
+  }
+  return value;
+}
+
 function member<T extends string>(value: unknown, values: Set<T>, name: string): T {
   if (typeof value !== 'string' || !values.has(value as T)) throw new Error(`${name} is unknown`);
   return value as T;
@@ -300,6 +307,91 @@ function parseOutcome(
   return { body, status };
 }
 
+function parseSloSample(value: unknown): Record<string, unknown> {
+  const body = record(value, 'action SLO sample');
+  exact(
+    body,
+    [
+      'service',
+      'sampled_at',
+      'status',
+      'availability',
+      'latency_p95_ms',
+      'availability_target',
+      'latency_p95_target_ms',
+    ],
+    'action SLO sample',
+  );
+  text(body.service, 'SLO service');
+  time(body.sampled_at, 'SLO sample time');
+  if (body.status !== 'MEASURED' && body.status !== 'INSUFFICIENT') {
+    throw new Error('SLO sample status is unknown');
+  }
+  const measured = body.availability !== null && body.latency_p95_ms !== null;
+  if (measured !== (body.status === 'MEASURED')) {
+    throw new Error('SLO sample measurement contradicts its status');
+  }
+  if (measured) {
+    probability(body.availability, 'SLO availability');
+    nonnegative(body.latency_p95_ms, 'SLO latency');
+  }
+  probability(body.availability_target, 'SLO availability target');
+  if (nonnegative(body.latency_p95_target_ms, 'SLO latency target') === 0) {
+    throw new Error('SLO latency target must be positive');
+  }
+  return body;
+}
+
+function parseRollbackVerification(
+  value: unknown,
+  beforeSamples: Record<string, unknown>[],
+): Record<string, unknown> | null {
+  if (value === null) return null;
+  const body = record(value, 'rollback verification');
+  exact(
+    body,
+    ['status', 'verified_at', 'checked_signals', 'before', 'after', 'users_restored', 'detail'],
+    'rollback verification',
+  );
+  if (!['VERIFIED', 'FAILED', 'INSUFFICIENT'].includes(String(body.status))) {
+    throw new Error('rollback verification status is unknown');
+  }
+  time(body.verified_at, 'rollback verification time');
+  if (
+    !Array.isArray(body.checked_signals) ||
+    JSON.stringify(body.checked_signals) !== JSON.stringify(['availability', 'latency_p95_ms'])
+  ) {
+    throw new Error('rollback verification must check availability then latency');
+  }
+  if (!Array.isArray(body.before) || !Array.isArray(body.after)) {
+    throw new Error('rollback verification needs before and after SLO samples');
+  }
+  const before = body.before.map(parseSloSample);
+  const after = body.after.map(parseSloSample);
+  if (JSON.stringify(before) !== JSON.stringify(beforeSamples)) {
+    throw new Error('rollback verification does not use the durable pre-revert samples');
+  }
+  if (
+    before.length === 0 ||
+    before.length !== after.length ||
+    before.some((sample, index) => sample.service !== after[index]?.service)
+  ) {
+    throw new Error('rollback verification must compare the same protected services');
+  }
+  const insufficient = [...before, ...after].some((sample) => sample.status === 'INSUFFICIENT');
+  if (insufficient !== (body.status === 'INSUFFICIENT')) {
+    throw new Error('missing SLO telemetry must remain insufficient');
+  }
+  if (body.users_restored === null) {
+    if (!insufficient) throw new Error('measured rollback proof must record users restored');
+  } else {
+    if (insufficient) throw new Error('insufficient rollback proof cannot claim users restored');
+    probability(body.users_restored, 'users restored');
+  }
+  text(body.detail, 'rollback verification detail');
+  return body;
+}
+
 function parseControl(value: unknown): ActionControlSnapshot {
   const body = record(value, 'action control');
   exact(
@@ -312,6 +404,8 @@ function parseControl(value: unknown): ActionControlSnapshot {
       'plan',
       'guard_results',
       'latest_outcome',
+      'rollback_slo_before',
+      'rollback_verification',
       'approvals',
       'rejected_by',
       'rejected_at',
@@ -338,6 +432,20 @@ function parseControl(value: unknown): ActionControlSnapshot {
   });
   if (new Set(gateIds).size !== gateIds.length) throw new Error('guard results must be unique');
   const outcome = parseOutcome(body.latest_outcome, plan);
+  if (!Array.isArray(body.rollback_slo_before)) {
+    throw new Error('pre-revert SLO evidence must be an array');
+  }
+  const rollbackBefore = body.rollback_slo_before.map(parseSloSample);
+  const rollbackVerification = parseRollbackVerification(
+    body.rollback_verification,
+    rollbackBefore,
+  );
+  if (
+    state !== 'ROLLED_BACK' &&
+    (rollbackBefore.length > 0 || rollbackVerification !== null)
+  ) {
+    throw new Error('only a rolled-back control may carry rollback SLO evidence');
+  }
   if (!Array.isArray(body.approvals)) throw new Error('control approvals must be an array');
   const actors = body.approvals.map((value) => {
     const approval = record(value, 'control approval');

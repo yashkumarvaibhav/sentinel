@@ -159,6 +159,25 @@
           ],
           "default": null
         },
+        "rollback_slo_before": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ActionSloSample"
+          },
+          "title": "Rollback Slo Before",
+          "type": "array"
+        },
+        "rollback_verification": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActionRollbackVerification"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "rung": {
           "$ref": "#/$defs/ActionRungSnapshot"
         },
@@ -437,6 +456,71 @@
       "title": "ActionPlan",
       "type": "object"
     },
+    "ActionRollbackVerification": {
+      "additionalProperties": false,
+      "description": "Delayed, read-only proof of protected-service recovery after rollback.",
+      "properties": {
+        "after": {
+          "items": {
+            "$ref": "#/$defs/ActionSloSample"
+          },
+          "minItems": 1,
+          "title": "After",
+          "type": "array"
+        },
+        "before": {
+          "items": {
+            "$ref": "#/$defs/ActionSloSample"
+          },
+          "minItems": 1,
+          "title": "Before",
+          "type": "array"
+        },
+        "checked_signals": {
+          "items": {
+            "enum": [
+              "availability",
+              "latency_p95_ms"
+            ],
+            "type": "string"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "Checked Signals",
+          "type": "array"
+        },
+        "detail": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "status": {
+          "$ref": "#/$defs/RollbackVerificationStatus"
+        },
+        "users_restored": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Probability"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verified_at": {
+          "$ref": "#/$defs/UtcDatetime"
+        }
+      },
+      "required": [
+        "status",
+        "verified_at",
+        "checked_signals",
+        "before",
+        "after",
+        "users_restored",
+        "detail"
+      ],
+      "title": "ActionRollbackVerification",
+      "type": "object"
+    },
     "ActionRungSnapshot": {
       "additionalProperties": false,
       "description": "The exact committed ladder choice from which the plan was built.",
@@ -517,6 +601,71 @@
       ],
       "title": "ActionRungSnapshot",
       "type": "object"
+    },
+    "ActionSloSample": {
+      "additionalProperties": false,
+      "description": "One immutable SLO reading with the exact targets used to judge it.",
+      "properties": {
+        "availability": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Probability"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "availability_target": {
+          "$ref": "#/$defs/Probability"
+        },
+        "latency_p95_ms": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Latency P95 Ms"
+        },
+        "latency_p95_target_ms": {
+          "exclusiveMinimum": 0.0,
+          "title": "Latency P95 Target Ms",
+          "type": "number"
+        },
+        "sampled_at": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "service": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "status": {
+          "$ref": "#/$defs/ActionSloSampleStatus"
+        }
+      },
+      "required": [
+        "service",
+        "sampled_at",
+        "status",
+        "availability",
+        "latency_p95_ms",
+        "availability_target",
+        "latency_p95_target_ms"
+      ],
+      "title": "ActionSloSample",
+      "type": "object"
+    },
+    "ActionSloSampleStatus": {
+      "description": "Whether both signals needed for one SLO judgement were observable.",
+      "enum": [
+        "MEASURED",
+        "INSUFFICIENT"
+      ],
+      "title": "ActionSloSampleStatus",
+      "type": "string"
     },
     "ActionStatus": {
       "description": "How far one action got, and whether the world was touched.\n\n``SIMULATED`` means nothing was touched - either the caller asked for a\nsimulation or the executor is in dry-run mode. ``APPLIED`` means the effect\nwas put in place; ``VERIFIED`` means it was afterwards observed to actually\nbe in place, which is a different and stronger claim. ``FAILED`` is the\nhonest answer when an actuator could not finish, and it deliberately does\nnot assert whether the world changed - only a ``verify`` can settle that.",
@@ -2522,6 +2671,16 @@
       ],
       "title": "RejectedAlternative",
       "type": "object"
+    },
+    "RollbackVerificationStatus": {
+      "description": "What delayed protected-service telemetry can support after a revert.",
+      "enum": [
+        "VERIFIED",
+        "FAILED",
+        "INSUFFICIENT"
+      ],
+      "title": "RollbackVerificationStatus",
+      "type": "string"
     },
     "ScoreHeadline": {
       "additionalProperties": false,

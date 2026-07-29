@@ -101,6 +101,41 @@ class Settings(BaseSettings):
         max_length=255,
         pattern=r"^[A-Za-z0-9][A-Za-z0-9._:@/-]*$",
     )
+    action_worker_enabled: bool = Field(
+        default=False,
+        alias="SENTINEL_ACTION_WORKER_ENABLED",
+    )
+    action_worker_id: str = Field(
+        default="gateway-action-worker",
+        alias="SENTINEL_ACTION_WORKER_ID",
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+    )
+    action_poll_interval_seconds: float = Field(
+        default=1.0,
+        alias="SENTINEL_ACTION_POLL_INTERVAL_SECONDS",
+        ge=0.1,
+        le=60.0,
+    )
+    action_poll_batch_limit: int = Field(
+        default=8,
+        alias="SENTINEL_ACTION_POLL_BATCH_LIMIT",
+        ge=1,
+        le=100,
+    )
+    action_settlement_delay_seconds: int = Field(
+        default=15,
+        alias="SENTINEL_ACTION_SETTLEMENT_DELAY_SECONDS",
+        ge=1,
+        le=3600,
+    )
+    action_slo_window_seconds: int = Field(
+        default=300,
+        alias="SENTINEL_ACTION_SLO_WINDOW_SECONDS",
+        ge=30,
+        le=86_400,
+    )
 
     @property
     def first_broker(self) -> tuple[str, int]:

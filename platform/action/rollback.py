@@ -26,15 +26,26 @@ collateral meant, and this is the answer.
 
 from __future__ import annotations
 
+import json
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+import httpx
+
 from action.executor import ActionExecutor
 from action.guards import CollateralReport
 from common.config import ServiceSlo, SloConfig
-from contracts import ActionOutcome, ActionPlan
+from contracts import (
+    ActionOutcome,
+    ActionPlan,
+    ActionRollbackVerification,
+    ActionSloSample,
+    ActionSloSampleStatus,
+    RollbackVerificationStatus,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +80,168 @@ class SloReader(Protocol):
 
     def __call__(self, service: str, *, ts: datetime) -> SloReading | None:
         """The service's position against its SLO now, or None if unreadable."""
+
+
+@dataclass(frozen=True, slots=True)
+class VictoriaMetricsSloReader:
+    """Read availability and latency from the testbed's real span metrics."""
+
+    client: httpx.Client
+    window_seconds: int = 300
+
+    def __post_init__(self) -> None:
+        if not 30 <= self.window_seconds <= 86_400:
+            raise ValueError("an SLO verification window must be within [30, 86400] seconds")
+
+    def __call__(self, service: str, *, ts: datetime) -> SloReading | None:
+        selector = (
+            f'service_name={json.dumps(service)},span_kind=~"SPAN_KIND_SERVER|SPAN_KIND_CONSUMER"'
+        )
+        window = f"{self.window_seconds}s"
+        availability_query = (
+            "1 - ((sum(rate(traces_span_metrics_calls_total{"
+            f'{selector},status_code="STATUS_CODE_ERROR"'
+            f"}}[{window}])) or vector(0)) / "
+            "clamp_min(sum(rate(traces_span_metrics_calls_total{"
+            f"{selector}"
+            f"}}[{window}])), 1e-12))"
+        )
+        latency_query = (
+            "histogram_quantile(0.95, sum by (le) "
+            "(rate(traces_span_metrics_duration_milliseconds_bucket{"
+            f"{selector}"
+            f"}}[{window}])))"
+        )
+        availability = self._query(availability_query, ts=ts)
+        latency = self._query(latency_query, ts=ts)
+        if availability is None or latency is None:
+            return None
+        if not 0.0 <= availability <= 1.0 or latency < 0.0:
+            return None
+        return SloReading(
+            service=service,
+            availability=availability,
+            latency_p95_ms=latency,
+        )
+
+    def _query(self, query: str, *, ts: datetime) -> float | None:
+        try:
+            response = self.client.get(
+                "/api/v1/query",
+                params={"query": query, "time": ts.timestamp()},
+            )
+            response.raise_for_status()
+            document = response.json()
+            result = document["data"]["result"]
+            if document.get("status") != "success" or len(result) != 1:
+                return None
+            value = float(result[0]["value"][1])
+        except (httpx.HTTPError, KeyError, TypeError, ValueError, IndexError):
+            return None
+        return value if math.isfinite(value) else None
+
+
+@dataclass(frozen=True, slots=True)
+class SloSettlementVerifier:
+    """Capture durable before/after SLO evidence without performing a revert."""
+
+    slos: SloConfig
+    reader: SloReader
+
+    def capture(self, *, ts: datetime) -> tuple[ActionSloSample, ...]:
+        """Sample every committed protected-service SLO in stable config order."""
+        samples: list[ActionSloSample] = []
+        for slo in self.slos.slos:
+            reading = self.reader(slo.telemetry_service or slo.service, ts=ts)
+            samples.append(
+                ActionSloSample(
+                    service=slo.service,
+                    sampled_at=ts,
+                    status=(
+                        ActionSloSampleStatus.MEASURED
+                        if reading is not None
+                        else ActionSloSampleStatus.INSUFFICIENT
+                    ),
+                    availability=None if reading is None else reading.availability,
+                    latency_p95_ms=None if reading is None else reading.latency_p95_ms,
+                    availability_target=slo.availability_target,
+                    latency_p95_target_ms=slo.latency_p95_ms,
+                )
+            )
+        return tuple(samples)
+
+    def verify_rollback(
+        self,
+        *,
+        before: tuple[ActionSloSample, ...],
+        ts: datetime,
+    ) -> ActionRollbackVerification:
+        """Compare a delayed read with the durable pre-revert samples."""
+        expected = tuple(slo.service for slo in self.slos.slos)
+        if tuple(sample.service for sample in before) != expected:
+            raise ValueError("pre-revert SLO evidence disagrees with the committed SLO services")
+        after = self.capture(ts=ts)
+        insufficient = any(
+            sample.status is ActionSloSampleStatus.INSUFFICIENT for sample in (*before, *after)
+        )
+        if insufficient:
+            return ActionRollbackVerification(
+                status=RollbackVerificationStatus.INSUFFICIENT,
+                verified_at=ts,
+                checked_signals=("availability", "latency_p95_ms"),
+                before=before,
+                after=after,
+                users_restored=None,
+                detail=(
+                    "At least one protected-service SLO reading was unavailable before or after "
+                    "the revert; recovery is insufficient and none is claimed."
+                ),
+            )
+        harmed = tuple(sample.service for sample in before if sample.breaches)
+        restored = self._availability_restored(before=before, after=after, harmed=harmed)
+        after_breaches = tuple(sample.service for sample in after if sample.breaches)
+        status = (
+            RollbackVerificationStatus.FAILED
+            if after_breaches
+            else RollbackVerificationStatus.VERIFIED
+        )
+        detail = (
+            f"Protected-service SLOs still breached after the revert: {', '.join(after_breaches)}."
+            if after_breaches
+            else (
+                "Every measured protected-service SLO recovered after the revert; "
+                f"availability restored on the worst harmed service was {restored:.4f}."
+            )
+        )
+        return ActionRollbackVerification(
+            status=status,
+            verified_at=ts,
+            checked_signals=("availability", "latency_p95_ms"),
+            before=before,
+            after=after,
+            users_restored=restored,
+            detail=detail,
+        )
+
+    @staticmethod
+    def _availability_restored(
+        *,
+        before: tuple[ActionSloSample, ...],
+        after: tuple[ActionSloSample, ...],
+        harmed: tuple[str, ...],
+    ) -> float:
+        if not harmed:
+            return 0.0
+        before_by_service = {sample.service: sample for sample in before}
+        after_by_service = {sample.service: sample for sample in after}
+        deltas: list[float] = []
+        for service in harmed:
+            before_sample = before_by_service[service]
+            after_sample = after_by_service[service]
+            assert before_sample.availability is not None
+            assert after_sample.availability is not None
+            deltas.append(after_sample.availability - before_sample.availability)
+        return min(1.0, max(0.0, min(deltas)))
 
 
 @dataclass(frozen=True, slots=True)

@@ -42,7 +42,10 @@ from contracts import (
     ActionKind,
     ActionOutcome,
     ActionPlan,
+    ActionRollbackVerification,
     ActionRungSnapshot,
+    ActionSloSample,
+    ActionSloSampleStatus,
     ActionStatus,
     ActuatorKind,
     AuditEventKind,
@@ -50,6 +53,7 @@ from contracts import (
     DecompFrame,
     EpisodeStatus,
     Observation,
+    RollbackVerificationStatus,
     Symptom,
     SymptomEpisode,
     SymptomKind,
@@ -439,12 +443,14 @@ async def _round_trip_incident_graph_bundle(
         worker_id="storage-worker-a",
         ts=incident.updated_at + timedelta(seconds=2),
         lease_seconds=30,
+        settlement_delay_seconds=15,
     )
     assert claim is not None and claim.recovered is False
     competing = await repository.claim_action_control(
         worker_id="storage-worker-b",
         ts=incident.updated_at + timedelta(seconds=3),
         lease_seconds=30,
+        settlement_delay_seconds=15,
     )
     assert competing is None
     dispatched = await repository.mark_action_dispatched(
@@ -456,6 +462,7 @@ async def _round_trip_incident_graph_bundle(
         worker_id="storage-worker-b",
         ts=incident.updated_at + timedelta(seconds=35),
         lease_seconds=30,
+        settlement_delay_seconds=15,
     )
     assert recovered is not None and recovered.recovered is True
     assert recovered.phase is ActionExecutionPhase.DISPATCHED
@@ -479,6 +486,179 @@ async def _round_trip_incident_graph_bundle(
     ledger = AuditLedgerRepository(pool=pool, schema=config.postgres_schema)
     assert any(
         entry.plan_id == control.plan.plan_id and entry.body["outcome_id"] == failed.outcome_id
+        for entry in await ledger.entries(limit=1000)
+    )
+
+    # A fresh autonomous revision proves the read-only settlement leases are
+    # delayed, exclusive, auditable, and never routed through DISPATCHED.
+    settlement_start = incident.updated_at + timedelta(seconds=40)
+    settlement_plan = control.plan.model_copy(
+        update={
+            "plan_id": f"{control.plan.plan_id}-settlement",
+            "ts": settlement_start,
+            "requires_human_approval": False,
+        }
+    )
+    settlement_control = ActionControlSnapshot(
+        incident_id=control.incident_id,
+        plan_revision=2,
+        state=ActionControlState.APPLY_REQUESTED,
+        rung=control.rung.model_copy(
+            update={
+                "requires_human_approval": False,
+                "required_approval_count": 0,
+            }
+        ),
+        plan=settlement_plan,
+        guard_results=control.guard_results,
+        latest_outcome=None,
+        created_at=settlement_start,
+        updated_at=settlement_start,
+    )
+    assert await repository.put_action_control(settlement_control) is True
+    apply_claim = await repository.claim_action_control(
+        worker_id="storage-settlement-worker",
+        ts=settlement_start + timedelta(seconds=1),
+        lease_seconds=30,
+        settlement_delay_seconds=5,
+    )
+    assert apply_claim is not None
+    apply_claim = await repository.mark_action_dispatched(
+        apply_claim,
+        ts=settlement_start + timedelta(seconds=2),
+    )
+    applied_outcome = ActionOutcome(
+        outcome_id=f"{settlement_plan.plan_id}-applied",
+        ts=settlement_start + timedelta(seconds=3),
+        plan_id=settlement_plan.plan_id,
+        idempotency_key=settlement_plan.idempotency_key,
+        status=ActionStatus.APPLIED,
+        dry_run=False,
+        detail="The real adapter reported the effect applied.",
+        gates_passed=tuple(result.gate_id for result in control.guard_results),
+        revert_token="storage-owned-revert-token",
+        honesty=settlement_plan.honesty,
+    )
+    applied_control = await repository.complete_action_execution(
+        apply_claim,
+        applied_outcome,
+        ts=settlement_start + timedelta(seconds=4),
+    )
+    assert applied_control.state is ActionControlState.APPLIED
+    too_early = await repository.claim_action_control(
+        worker_id="storage-settlement-worker",
+        ts=settlement_start + timedelta(seconds=8),
+        lease_seconds=30,
+        settlement_delay_seconds=5,
+    )
+    assert too_early is None
+    verify_claim = await repository.claim_action_control(
+        worker_id="storage-settlement-worker",
+        ts=settlement_start + timedelta(seconds=9),
+        lease_seconds=30,
+        settlement_delay_seconds=5,
+    )
+    assert verify_claim is not None
+    assert verify_claim.operation.value == "VERIFY"
+    assert verify_claim.phase is ActionExecutionPhase.CLAIMED
+    verified_outcome = applied_outcome.model_copy(
+        update={
+            "outcome_id": f"{settlement_plan.plan_id}-verified",
+            "ts": settlement_start + timedelta(seconds=10),
+            "status": ActionStatus.VERIFIED,
+        }
+    )
+    verified_control = await repository.complete_action_execution(
+        verify_claim,
+        verified_outcome,
+        ts=settlement_start + timedelta(seconds=10),
+    )
+    assert verified_control.state is ActionControlState.VERIFIED
+    _, rollback_requested = await repository.transition_action_control(
+        ActionControlRequest(
+            incident_id=control.incident_id,
+            plan_revision=2,
+            intent=ActionControlIntent.ROLLBACK,
+        ),
+        actor="storage-operator",
+        ts=settlement_start + timedelta(seconds=11),
+    )
+    rollback_claim = await repository.claim_action_control(
+        worker_id="storage-settlement-worker",
+        ts=settlement_start + timedelta(seconds=12),
+        lease_seconds=30,
+        settlement_delay_seconds=5,
+    )
+    assert rollback_claim is not None
+    rollback_claim = await repository.mark_action_dispatched(
+        rollback_claim,
+        ts=settlement_start + timedelta(seconds=13),
+    )
+    before = (
+        ActionSloSample(
+            service="checkout",
+            sampled_at=settlement_start + timedelta(seconds=13),
+            status=ActionSloSampleStatus.MEASURED,
+            availability=0.90,
+            latency_p95_ms=1200.0,
+            availability_target=0.995,
+            latency_p95_target_ms=1000.0,
+        ),
+    )
+    reverted_outcome = ActionOutcome(
+        outcome_id=f"{settlement_plan.plan_id}-reverted",
+        ts=settlement_start + timedelta(seconds=14),
+        plan_id=settlement_plan.plan_id,
+        idempotency_key=settlement_plan.idempotency_key,
+        status=ActionStatus.REVERTED,
+        dry_run=False,
+        detail="The exact server-held effect was reverted.",
+        honesty=settlement_plan.honesty,
+    )
+    rolled_back = await repository.complete_action_execution(
+        rollback_claim,
+        reverted_outcome,
+        ts=settlement_start + timedelta(seconds=15),
+        rollback_slo_before=before,
+    )
+    assert rolled_back.state is ActionControlState.ROLLED_BACK
+    rollback_verify_claim = await repository.claim_action_control(
+        worker_id="storage-settlement-worker",
+        ts=settlement_start + timedelta(seconds=20),
+        lease_seconds=30,
+        settlement_delay_seconds=5,
+    )
+    assert rollback_verify_claim is not None
+    assert rollback_verify_claim.operation.value == "VERIFY_ROLLBACK"
+    after = (
+        before[0].model_copy(
+            update={
+                "sampled_at": settlement_start + timedelta(seconds=20),
+                "availability": 0.999,
+                "latency_p95_ms": 300.0,
+            }
+        ),
+    )
+    proof = ActionRollbackVerification(
+        status=RollbackVerificationStatus.VERIFIED,
+        verified_at=settlement_start + timedelta(seconds=20),
+        checked_signals=("availability", "latency_p95_ms"),
+        before=before,
+        after=after,
+        users_restored=0.099,
+        detail="The checkout SLO recovered after the real revert.",
+    )
+    settled = await repository.complete_rollback_verification(
+        rollback_verify_claim,
+        proof,
+        ts=settlement_start + timedelta(seconds=20),
+    )
+    assert settled.rollback_verification == proof
+    assert rollback_requested.plan_revision == settled.plan_revision
+    assert any(
+        entry.plan_id == settlement_plan.plan_id
+        and entry.body.get("operation") == "VERIFY_ROLLBACK"
+        and entry.body.get("users_restored") == proof.users_restored
         for entry in await ledger.entries(limit=1000)
     )
 

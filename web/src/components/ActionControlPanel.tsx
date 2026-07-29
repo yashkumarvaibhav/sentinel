@@ -60,10 +60,43 @@ function State({ control }: { control: ActionControlSnapshot }) {
       </p>
     );
   }
+  if (control.state === 'APPLIED') {
+    return (
+      <p className="text-warn text-xs">
+        The actuator reports the effect was applied. Delayed target verification is still pending,
+        so this is not yet a verified effect.
+      </p>
+    );
+  }
+  if (control.state === 'ROLLED_BACK') {
+    const proof = control.rollback_verification ?? null;
+    if (proof === null) {
+      return (
+        <p className="text-warn text-xs">
+          The actuator reports the server-held effect was reverted. Delayed protected-service SLO
+          verification is still pending.
+        </p>
+      );
+    }
+    return (
+      <div className="grid gap-1 text-xs">
+        <p className={proof.status === 'VERIFIED' ? 'text-ok' : 'text-warn'}>
+          Rollback recovery · {title(proof.status)} · {proof.detail}
+        </p>
+        <p className="text-muted">
+          Checked availability + p95 latency across {proof.after.length} protected service
+          {proof.after.length === 1 ? '' : 's'} · users restored:{' '}
+          {proof.users_restored === null
+            ? 'insufficient telemetry'
+            : `${(proof.users_restored * 100).toFixed(2)}%`}
+        </p>
+      </div>
+    );
+  }
   if (control.latest_outcome !== null) {
     return (
       <p className="text-muted text-xs">
-        Latest verified actuator state · {title(control.latest_outcome.status)} ·{' '}
+        Latest actuator state · {title(control.latest_outcome.status)} ·{' '}
         {control.latest_outcome.detail}
       </p>
     );

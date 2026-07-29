@@ -39,6 +39,7 @@ def test_postgres_migration_separates_runtime_and_dev_label_schemas() -> None:
         "0006",
         "0007",
         "0008",
+        "0009",
     ]
     sql = render_migration(
         migrations[0],
@@ -107,6 +108,16 @@ def test_action_execution_claims_are_leased_and_bound_to_one_plan_revision() -> 
     assert "expires_at > claimed_at" in sql
     assert "ON DELETE CASCADE" in sql
     assert "{{dev_schema}}" not in sql
+
+
+def test_action_settlement_reuses_the_lease_without_crossing_dispatch() -> None:
+    migrations = {migration.version: migration for migration in load_migrations("postgres")}
+
+    sql = render_migration(migrations["0009"], schema="sentinel_test")
+    assert "'VERIFY'" in sql
+    assert "'VERIFY_ROLLBACK'" in sql
+    assert "incident_action_execution_claims_operation_check" in sql
+    assert "{{schema}}" not in sql
 
 
 def test_migration_versions_are_sorted_and_unique() -> None:

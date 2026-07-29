@@ -1,6 +1,9 @@
 version: 1
 slos:
   - service: frontend
+    # The user-facing frontend SLO is measured at the owned ingress proxy,
+    # which is where every frontend request has a server span.
+    telemetry_service: frontend-proxy
     availability_target: 0.999
     latency_p95_ms: 500.0
     evaluation_window_minutes: 1440

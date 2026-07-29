@@ -56,6 +56,21 @@ class ActionGateStatus(StrEnum):
     REFUSED = "REFUSED"
 
 
+class ActionSloSampleStatus(StrEnum):
+    """Whether both signals needed for one SLO judgement were observable."""
+
+    MEASURED = "MEASURED"
+    INSUFFICIENT = "INSUFFICIENT"
+
+
+class RollbackVerificationStatus(StrEnum):
+    """What delayed protected-service telemetry can support after a revert."""
+
+    VERIFIED = "VERIFIED"
+    FAILED = "FAILED"
+    INSUFFICIENT = "INSUFFICIENT"
+
+
 class ActionControlRequest(ContractModel):
     """An operator's intent against one stable, server-held plan revision."""
 
@@ -124,6 +139,93 @@ class ActionApproval(ContractModel):
     approved_at: UtcDatetime
 
 
+class ActionSloSample(ContractModel):
+    """One immutable SLO reading with the exact targets used to judge it."""
+
+    service: Identifier
+    sampled_at: UtcDatetime
+    status: ActionSloSampleStatus
+    availability: Probability | None
+    latency_p95_ms: float | None = Field(ge=0.0, allow_inf_nan=False)
+    availability_target: Probability
+    latency_p95_target_ms: float = Field(gt=0.0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def validate_measurement(self) -> Self:
+        measured = self.availability is not None and self.latency_p95_ms is not None
+        if measured != (self.status is ActionSloSampleStatus.MEASURED):
+            raise ValueError(
+                "a measured SLO sample carries both signals; insufficient carries neither"
+            )
+        if self.availability_target == 0.0:
+            raise ValueError("an SLO availability target must be greater than zero")
+        return self
+
+    @property
+    def breaches(self) -> tuple[str, ...]:
+        """The committed signals this measured sample misses."""
+        if self.status is ActionSloSampleStatus.INSUFFICIENT:
+            return ()
+        assert self.availability is not None
+        assert self.latency_p95_ms is not None
+        missed: list[str] = []
+        if self.availability < self.availability_target:
+            missed.append("availability")
+        if self.latency_p95_ms > self.latency_p95_target_ms:
+            missed.append("latency_p95_ms")
+        return tuple(missed)
+
+
+class ActionRollbackVerification(ContractModel):
+    """Delayed, read-only proof of protected-service recovery after rollback."""
+
+    status: RollbackVerificationStatus
+    verified_at: UtcDatetime
+    checked_signals: tuple[Literal["availability", "latency_p95_ms"], ...] = Field(
+        min_length=2,
+        max_length=2,
+    )
+    before: tuple[ActionSloSample, ...] = Field(min_length=1)
+    after: tuple[ActionSloSample, ...] = Field(min_length=1)
+    users_restored: Probability | None
+    detail: HumanText
+
+    @model_validator(mode="after")
+    def validate_evidence(self) -> Self:
+        if self.checked_signals != ("availability", "latency_p95_ms"):
+            raise ValueError("rollback verification checks availability and latency in that order")
+        before_services = tuple(sample.service for sample in self.before)
+        after_services = tuple(sample.service for sample in self.after)
+        if len(before_services) != len(set(before_services)):
+            raise ValueError("rollback verification samples each protected service once")
+        if before_services != after_services:
+            raise ValueError("rollback verification must compare the same services in stable order")
+        for before, after in zip(self.before, self.after, strict=True):
+            if (
+                before.availability_target != after.availability_target
+                or before.latency_p95_target_ms != after.latency_p95_target_ms
+            ):
+                raise ValueError("rollback verification must use one committed target before/after")
+            if before.sampled_at > after.sampled_at or after.sampled_at > self.verified_at:
+                raise ValueError("rollback verification evidence cannot move time backwards")
+        insufficient = any(
+            sample.status is ActionSloSampleStatus.INSUFFICIENT
+            for sample in (*self.before, *self.after)
+        )
+        if insufficient != (self.status is RollbackVerificationStatus.INSUFFICIENT):
+            raise ValueError("missing SLO telemetry must produce an insufficient verification")
+        if self.status is RollbackVerificationStatus.INSUFFICIENT:
+            if self.users_restored is not None:
+                raise ValueError("insufficient telemetry cannot claim users_restored")
+            return self
+        if self.users_restored is None:
+            raise ValueError("a measured rollback verification must record users_restored")
+        after_breaches = any(sample.breaches for sample in self.after)
+        if after_breaches == (self.status is RollbackVerificationStatus.VERIFIED):
+            raise ValueError("verified means every measured protected SLO recovered")
+        return self
+
+
 class ActionControlSnapshot(ContractModel):
     """Authoritative durable control state returned after every mutation."""
 
@@ -134,6 +236,8 @@ class ActionControlSnapshot(ContractModel):
     plan: ActionPlan
     guard_results: tuple[ActionGateResult, ...]
     latest_outcome: ActionOutcome | None
+    rollback_slo_before: tuple[ActionSloSample, ...] = ()
+    rollback_verification: ActionRollbackVerification | None = None
     approvals: tuple[ActionApproval, ...] = ()
     rejected_by: Identifier | None = None
     rejected_at: UtcDatetime | None = None
@@ -182,6 +286,7 @@ class ActionControlSnapshot(ContractModel):
             raise ValueError("apply can be requested only after every required approval is durable")
         self._validate_rejection()
         self._validate_outcome()
+        self._validate_rollback_verification()
         return self
 
     def _validate_rejection(self) -> None:
@@ -229,6 +334,21 @@ class ActionControlSnapshot(ContractModel):
                 raise ValueError("rollback can be requested only for a server-held effect in force")
         elif self.latest_outcome is not None:
             raise ValueError(f"{self.state.value} cannot carry an action outcome")
+
+    def _validate_rollback_verification(self) -> None:
+        if self.rollback_slo_before:
+            services = tuple(sample.service for sample in self.rollback_slo_before)
+            if len(services) != len(set(services)):
+                raise ValueError("rollback_slo_before samples each protected service once")
+        if self.state is not ActionControlState.ROLLED_BACK:
+            if self.rollback_slo_before or self.rollback_verification is not None:
+                raise ValueError("only a rolled-back control carries rollback SLO evidence")
+            return
+        if self.rollback_verification is not None:
+            if tuple(self.rollback_verification.before) != tuple(self.rollback_slo_before):
+                raise ValueError("rollback verification must use the durable pre-revert samples")
+            if self.rollback_verification.verified_at < self.updated_at:
+                raise ValueError("rollback verification cannot predate the control settlement")
 
 
 class ActionControlResponse(ContractModel):

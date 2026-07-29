@@ -23,7 +23,7 @@
   --color-residual: oklch(0.65 0.21 25);
 
   /* --- domain: state, used by chips and the connection dot -------------- */
-  --color-ok: #2f8f63;
+  --color-ok: #1f6f4c;
   --color-warn: #8a5a14;
   --color-bad: #a33a3a;
 

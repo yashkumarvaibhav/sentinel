@@ -31,7 +31,9 @@ from contracts import (
     ActionGateStatus,
     ActionOutcome,
     ActionPlan,
+    ActionRollbackVerification,
     ActionRungSnapshot,
+    ActionSloSample,
     ActionStatus,
 )
 
@@ -49,6 +51,8 @@ class ActionExecutionOperation(StrEnum):
 
     APPLY = "APPLY"
     ROLLBACK = "ROLLBACK"
+    VERIFY = "VERIFY"
+    VERIFY_ROLLBACK = "VERIFY_ROLLBACK"
 
 
 class ActionExecutionPhase(StrEnum):
@@ -76,11 +80,12 @@ class ActionExecutionClaim:
             raise ValueError("an execution claim needs stable claim and worker identities")
         if self.expires_at <= self.claimed_at:
             raise ValueError("an execution claim must expire after it was acquired")
-        expected = (
-            ActionControlState.APPLY_REQUESTED
-            if self.operation is ActionExecutionOperation.APPLY
-            else ActionControlState.ROLLBACK_REQUESTED
-        )
+        expected = {
+            ActionExecutionOperation.APPLY: ActionControlState.APPLY_REQUESTED,
+            ActionExecutionOperation.ROLLBACK: ActionControlState.ROLLBACK_REQUESTED,
+            ActionExecutionOperation.VERIFY: ActionControlState.APPLIED,
+            ActionExecutionOperation.VERIFY_ROLLBACK: ActionControlState.ROLLED_BACK,
+        }[self.operation]
         if self.control.state is not expected:
             raise ValueError(
                 f"{self.operation.value} cannot claim {self.control.state.value}; "
@@ -193,13 +198,18 @@ def complete_action_control(
     operation: ActionExecutionOperation,
     outcome: ActionOutcome,
     ts: datetime,
+    rollback_slo_before: tuple[ActionSloSample, ...] = (),
 ) -> ActionControlSnapshot:
     """Commit an observed executor outcome against the exact claimed plan."""
-    expected = (
-        ActionControlState.APPLY_REQUESTED
-        if operation is ActionExecutionOperation.APPLY
-        else ActionControlState.ROLLBACK_REQUESTED
-    )
+    if operation is ActionExecutionOperation.VERIFY_ROLLBACK:
+        raise ActionControlTransitionError(
+            "rollback verification completes with telemetry proof, not an actuator outcome"
+        )
+    expected = {
+        ActionExecutionOperation.APPLY: ActionControlState.APPLY_REQUESTED,
+        ActionExecutionOperation.ROLLBACK: ActionControlState.ROLLBACK_REQUESTED,
+        ActionExecutionOperation.VERIFY: ActionControlState.APPLIED,
+    }[operation]
     if current.state is not expected:
         raise ActionControlTransitionError(
             f"{operation.value} cannot complete {current.state.value}; expected {expected.value}"
@@ -222,6 +232,17 @@ def complete_action_control(
         raise ActionControlTransitionError(
             f"a rollback cannot complete with {outcome.status.value}"
         )
+    if operation is ActionExecutionOperation.VERIFY and outcome.status not in {
+        ActionStatus.VERIFIED,
+        ActionStatus.FAILED,
+    }:
+        raise ActionControlTransitionError(
+            f"target verification cannot complete with {outcome.status.value}"
+        )
+    if operation is not ActionExecutionOperation.ROLLBACK and rollback_slo_before:
+        raise ActionControlTransitionError(
+            "only a rollback completion can attach pre-revert SLO telemetry"
+        )
     state = (
         ActionControlState.ROLLED_BACK
         if operation is ActionExecutionOperation.ROLLBACK
@@ -232,6 +253,43 @@ def complete_action_control(
         current,
         state=state,
         latest_outcome=outcome,
+        rollback_slo_before=(
+            rollback_slo_before if state is ActionControlState.ROLLED_BACK else ()
+        ),
+        updated_at=ts,
+    )
+
+
+def complete_rollback_verification(
+    current: ActionControlSnapshot,
+    *,
+    verification: ActionRollbackVerification,
+    ts: datetime,
+) -> ActionControlSnapshot:
+    """Attach delayed SLO evidence without changing or re-dispatching the revert."""
+    if current.state is not ActionControlState.ROLLED_BACK:
+        raise ActionControlTransitionError(
+            f"rollback verification cannot complete {current.state.value}"
+        )
+    if current.rollback_verification is not None:
+        if current.rollback_verification == verification:
+            return current
+        raise ActionControlTransitionError("rollback verification is already durable")
+    if not current.rollback_slo_before:
+        raise ActionControlTransitionError(
+            "rollback verification needs the pre-revert SLO evidence"
+        )
+    if tuple(verification.before) != tuple(current.rollback_slo_before):
+        raise ActionControlTransitionError(
+            "rollback verification must use the durable pre-revert SLO evidence"
+        )
+    if ts < current.updated_at or verification.verified_at > ts:
+        raise ActionControlTransitionError(
+            "rollback verification completion cannot move event time backwards"
+        )
+    return _revalidate(
+        current,
+        rollback_verification=verification,
         updated_at=ts,
     )
 

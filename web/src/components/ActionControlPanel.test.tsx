@@ -103,3 +103,64 @@ it('refuses to turn one interim identity into two approvals', async () => {
   await waitFor(() => expect(screen.getByText(/two distinct approvers required/i)).toBeVisible());
   expect(screen.getByRole('button', { name: /approve plan/i })).toBeDisabled();
 });
+
+it('distinguishes a reverted target from delayed SLO-verified recovery', async () => {
+  const sample = {
+    service: 'checkout',
+    sampled_at: '2026-07-28T12:02:00Z',
+    status: 'MEASURED',
+    availability: 0.9,
+    latency_p95_ms: 1200,
+    availability_target: 0.995,
+    latency_p95_target_ms: 1000,
+  };
+  const after = {
+    ...sample,
+    sampled_at: '2026-07-28T12:03:00Z',
+    availability: 0.999,
+    latency_p95_ms: 300,
+  };
+  const rolledBack = {
+    ...ACTION_RESPONSE,
+    control: {
+      ...ACTION_RESPONSE.control,
+      state: 'ROLLED_BACK',
+      latest_outcome: {
+        outcome_id: 'rollback-proof-1',
+        ts: '2026-07-28T12:02:00Z',
+        plan_id: ACTION_RESPONSE.control.plan.plan_id,
+        idempotency_key: ACTION_RESPONSE.control.plan.idempotency_key,
+        status: 'REVERTED',
+        dry_run: false,
+        detail: 'The server-held edge restraint was reverted.',
+        deduplicated: false,
+        observed: [],
+        approvals: [],
+        gates_passed: [],
+        revert_token: null,
+        honesty: 'REAL',
+      },
+      rollback_slo_before: [sample],
+      rollback_verification: {
+        status: 'VERIFIED',
+        verified_at: '2026-07-28T12:03:00Z',
+        checked_signals: ['availability', 'latency_p95_ms'],
+        before: [sample],
+        after: [after],
+        users_restored: 0.099,
+        detail: 'The protected checkout SLO recovered after the revert.',
+      },
+      updated_at: '2026-07-28T12:03:00Z',
+    },
+  };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => Promise.resolve(new Response(JSON.stringify(rolledBack), { status: 200 }))),
+  );
+
+  renderPanel();
+
+  await waitFor(() => expect(screen.getByText(/rollback recovery · verified/i)).toBeVisible());
+  expect(screen.getByText(/users restored: 9.90%/i)).toBeVisible();
+  expect(screen.queryByRole('button', { name: /rollback/i })).not.toBeInTheDocument();
+});

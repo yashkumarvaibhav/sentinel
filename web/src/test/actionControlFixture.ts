@@ -49,6 +49,8 @@ export const ACTION_RESPONSE = {
       },
     ],
     latest_outcome: null,
+    rollback_slo_before: [],
+    rollback_verification: null,
     approvals: [],
     rejected_by: null,
     rejected_at: null,

@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from action.control import (
     ActionControlTransitionError,
+    complete_rollback_verification,
     materialize_action_control,
     transition_action_control,
 )
@@ -23,9 +24,15 @@ from contracts import (
     ActionGateResult,
     ActionGateStatus,
     ActionKind,
+    ActionOutcome,
     ActionPlan,
+    ActionRollbackVerification,
     ActionRungSnapshot,
+    ActionSloSample,
+    ActionSloSampleStatus,
+    ActionStatus,
     ActuatorKind,
+    RollbackVerificationStatus,
     action_idempotency_key,
 )
 
@@ -290,6 +297,92 @@ def test_rollback_request_requires_a_server_held_effect_in_force() -> None:
             request,
             actor="interim-operator",
             ts=TS.replace(minute=1),
+        )
+
+
+def test_rollback_proof_keeps_before_after_slo_evidence_and_never_changes_effect_state() -> None:
+    before = (
+        ActionSloSample(
+            service="checkout",
+            sampled_at=TS.replace(minute=2),
+            status=ActionSloSampleStatus.MEASURED,
+            availability=0.91,
+            latency_p95_ms=900.0,
+            availability_target=0.995,
+            latency_p95_target_ms=1000.0,
+        ),
+    )
+    after = (
+        ActionSloSample(
+            service="checkout",
+            sampled_at=TS.replace(minute=3),
+            status=ActionSloSampleStatus.MEASURED,
+            availability=0.999,
+            latency_p95_ms=300.0,
+            availability_target=0.995,
+            latency_p95_target_ms=1000.0,
+        ),
+    )
+    rolled_back = ActionControlSnapshot.model_validate(
+        {
+            **_snapshot().model_dump(),
+            "state": ActionControlState.ROLLED_BACK,
+            "latest_outcome": ActionOutcome(
+                outcome_id="rollback-1",
+                ts=TS.replace(minute=2),
+                plan_id="plan-1",
+                idempotency_key=_plan().idempotency_key,
+                status=ActionStatus.REVERTED,
+                dry_run=False,
+                detail="The server-held effect was reverted.",
+                honesty="REAL",
+            ),
+            "rollback_slo_before": before,
+            "updated_at": TS.replace(minute=2),
+        }
+    )
+    proof = ActionRollbackVerification(
+        status=RollbackVerificationStatus.VERIFIED,
+        verified_at=TS.replace(minute=3),
+        checked_signals=("availability", "latency_p95_ms"),
+        before=before,
+        after=after,
+        users_restored=0.089,
+        detail="The protected checkout SLO recovered after the revert.",
+    )
+
+    settled = complete_rollback_verification(
+        rolled_back,
+        verification=proof,
+        ts=TS.replace(minute=3),
+    )
+
+    assert settled.state is ActionControlState.ROLLED_BACK
+    assert settled.latest_outcome == rolled_back.latest_outcome
+    assert settled.rollback_verification == proof
+    assert settled.rollback_slo_before == before
+
+
+def test_missing_slo_telemetry_is_explicit_and_cannot_claim_users_restored() -> None:
+    missing = ActionSloSample(
+        service="checkout",
+        sampled_at=TS,
+        status=ActionSloSampleStatus.INSUFFICIENT,
+        availability=None,
+        latency_p95_ms=None,
+        availability_target=0.995,
+        latency_p95_target_ms=1000.0,
+    )
+
+    with pytest.raises(ValidationError, match="users_restored"):
+        ActionRollbackVerification(
+            status=RollbackVerificationStatus.INSUFFICIENT,
+            verified_at=TS,
+            checked_signals=("availability", "latency_p95_ms"),
+            before=(missing,),
+            after=(missing,),
+            users_restored=0.0,
+            detail="Telemetry was unavailable.",
         )
 
 

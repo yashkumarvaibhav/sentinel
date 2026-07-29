@@ -7,6 +7,7 @@ healthy.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
@@ -18,6 +19,7 @@ from fastapi import FastAPI, Response
 from fastapi.responses import StreamingResponse
 
 from action.control import ActionControlNotFoundError, ActionControlTransitionError
+from action.runtime import ActionControlRuntime, build_action_runtime
 from api.action_control import (
     ActionControlStore,
     action_control_response,
@@ -135,6 +137,9 @@ def create_app(
         app.state.action_control_store = action_control_store
         app.state.incident_publisher = None
         incident_pool = None
+        action_runtime: ActionControlRuntime | None = None
+        action_stop: asyncio.Event | None = None
+        action_task: asyncio.Task[None] | None = None
         if incident_reader is None and probes is None:
             incident_pool = create_postgres_pool(config)
             await incident_pool.open(wait=True)
@@ -151,6 +156,29 @@ def create_app(
                 store=incident_store,
                 broker=app.state.stream_broker,
             )
+            if config.action_worker_enabled:
+                action_runtime = build_action_runtime(
+                    store=incident_store,
+                    config_dir=config.config_dir,
+                    victoriametrics_url=config.victoriametrics_url,
+                    victoriametrics_timeout_seconds=config.storage_timeout_seconds,
+                    worker_id=config.action_worker_id,
+                    poll_interval_seconds=config.action_poll_interval_seconds,
+                    batch_limit=config.action_poll_batch_limit,
+                    settlement_delay_seconds=config.action_settlement_delay_seconds,
+                    slo_window_seconds=config.action_slo_window_seconds,
+                    after_commit=lambda _control: app.state.stream_broker.publish(
+                        snapshot_invalidation(
+                            SnapshotResource.INCIDENTS,
+                            SnapshotResource.ACTIONS,
+                        )
+                    ),
+                )
+                action_stop = asyncio.Event()
+                action_task = asyncio.create_task(
+                    action_runtime.run(action_stop),
+                    name="sentinel-action-control-runtime",
+                )
         try:
             app.state.score_proof = (
                 score_proof
@@ -184,6 +212,16 @@ def create_app(
                     )
                     yield
         finally:
+            if action_stop is not None:
+                action_stop.set()
+            if action_task is not None:
+                try:
+                    await asyncio.wait_for(action_task, timeout=5.0)
+                except TimeoutError:
+                    action_task.cancel()
+                    await asyncio.gather(action_task, return_exceptions=True)
+            if action_runtime is not None:
+                action_runtime.close()
             if incident_pool is not None:
                 await incident_pool.close()
 

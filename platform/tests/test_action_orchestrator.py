@@ -8,6 +8,7 @@ import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import httpx
 import pytest
 
 from action.actuators.kubernetes import KubernetesActuator
@@ -18,12 +19,24 @@ from action.control import (
     ActionExecutionOperation,
     ActionExecutionPhase,
     complete_action_control,
+    complete_rollback_verification,
     transition_action_control,
 )
 from action.executor import ActionExecutor
 from action.guards import BLAST_CAP_GATE, BlastRadiusGuard
 from action.orchestrator import ActionControlOrchestrator
-from common.config import CohortConfig, CohortDefinition, load_config
+from action.rollback import (
+    SloReading,
+    SloSettlementVerifier,
+    VictoriaMetricsSloReader,
+)
+from common.config import (
+    CohortConfig,
+    CohortDefinition,
+    ServiceSlo,
+    SloConfig,
+    load_config,
+)
 from contracts import (
     ActionControlIntent,
     ActionControlRequest,
@@ -34,7 +47,10 @@ from contracts import (
     ActionKind,
     ActionOutcome,
     ActionPlan,
+    ActionRollbackVerification,
     ActionRungSnapshot,
+    ActionSloSample,
+    ActionSloSampleStatus,
     ActionStatus,
     ActuatorKind,
     action_idempotency_key,
@@ -56,8 +72,9 @@ class _Store:
         worker_id: str,
         ts: datetime,
         lease_seconds: int,
+        settlement_delay_seconds: int,
     ) -> ActionExecutionClaim | None:
-        del worker_id, ts, lease_seconds
+        del worker_id, ts, lease_seconds, settlement_delay_seconds
         claim, self.claim = self.claim, None
         return claim
 
@@ -85,12 +102,27 @@ class _Store:
         outcome: ActionOutcome,
         *,
         ts: datetime,
+        rollback_slo_before: tuple[ActionSloSample, ...] = (),
     ) -> ActionControlSnapshot:
         self.completed.append(outcome)
         return complete_action_control(
             claim.control,
             operation=claim.operation,
             outcome=outcome,
+            ts=ts,
+            rollback_slo_before=rollback_slo_before,
+        )
+
+    async def complete_rollback_verification(
+        self,
+        claim: ActionExecutionClaim,
+        verification: ActionRollbackVerification,
+        *,
+        ts: datetime,
+    ) -> ActionControlSnapshot:
+        return complete_rollback_verification(
+            claim.control,
+            verification=verification,
             ts=ts,
         )
 
@@ -174,6 +206,90 @@ def test_rollback_uses_only_the_server_held_plan_and_revert_token() -> None:
     assert completed.latest_outcome.status is ActionStatus.REVERTED
 
 
+def test_delayed_target_verification_reads_the_adapter_without_redispatching() -> None:
+    executor, adapter = _executor()
+    initial = _control()
+    applied_outcome = executor.apply(initial.plan, ts=TS, owner="earlier-worker")
+    applied = ActionControlSnapshot.model_validate(
+        initial.model_copy(
+            update={
+                "state": ActionControlState.APPLIED,
+                "latest_outcome": applied_outcome,
+                "updated_at": TS + timedelta(seconds=1),
+            }
+        )
+    )
+    store = _Store(
+        _claim(
+            applied,
+            operation=ActionExecutionOperation.VERIFY,
+        )
+    )
+    worker = ActionControlOrchestrator(
+        store=store,
+        executor=executor,
+        guard=_guard(),
+        worker_id="action-worker-verifier",
+    )
+
+    completed = asyncio.run(worker.run_once(ts=TS + timedelta(seconds=31)))
+
+    assert completed is not None and completed.state is ActionControlState.VERIFIED
+    assert completed.latest_outcome is not None
+    assert completed.latest_outcome.revert_token == applied_outcome.revert_token
+    assert adapter.call_count("apply") == 1
+    assert adapter.call_count("verify") == 1
+    assert store.dispatched == 0
+
+
+def test_delayed_rollback_settlement_records_slo_proof_without_second_revert() -> None:
+    executor, adapter = _executor()
+    initial = _control()
+    applied_outcome = executor.apply(initial.plan, ts=TS, owner="earlier-worker")
+    reverted_outcome = executor.revert(
+        initial.plan,
+        ts=TS + timedelta(seconds=1),
+        owner="earlier-worker",
+    )
+    verifier = _settlement_verifier(
+        before_at=TS + timedelta(seconds=1),
+        after_at=TS + timedelta(seconds=31),
+    )
+    before = verifier.capture(ts=TS + timedelta(seconds=1))
+    rolled_back = ActionControlSnapshot.model_validate(
+        initial.model_copy(
+            update={
+                "state": ActionControlState.ROLLED_BACK,
+                "latest_outcome": reverted_outcome,
+                "rollback_slo_before": before,
+                "updated_at": TS + timedelta(seconds=1),
+            }
+        )
+    )
+    store = _Store(
+        _claim(
+            rolled_back,
+            operation=ActionExecutionOperation.VERIFY_ROLLBACK,
+        )
+    )
+    worker = ActionControlOrchestrator(
+        store=store,
+        executor=executor,
+        guard=_guard(),
+        settlement=verifier,
+        worker_id="action-worker-rollback-verifier",
+    )
+
+    completed = asyncio.run(worker.run_once(ts=TS + timedelta(seconds=31)))
+
+    assert completed is not None and completed.state is ActionControlState.ROLLED_BACK
+    assert completed.rollback_verification is not None
+    assert completed.rollback_verification.users_restored == pytest.approx(0.09)
+    assert adapter.call_count("revert") == 1
+    assert store.dispatched == 0
+    assert applied_outcome.revert_token is not None
+
+
 @pytest.mark.skipif(
     os.getenv("SENTINEL_ACTION_ORCHESTRATOR_INTEGRATION") != "1",
     reason="set SENTINEL_ACTION_ORCHESTRATOR_INTEGRATION=1 for a contained live scale",
@@ -188,6 +304,11 @@ def test_real_testbed_scale_is_applied_and_rolled_back_through_the_worker() -> N
         actuators=[actuator],
         configuration=configuration,
         dry_run=False,
+    )
+    slo_client = httpx.Client(base_url="http://127.0.0.1:8042", timeout=10.0)
+    settlement = SloSettlementVerifier(
+        slos=runtime.slos,
+        reader=VictoriaMetricsSloReader(client=slo_client, window_seconds=60),
     )
     original = int(_kubectl("get", "deployment/payment", "-o", "jsonpath={.spec.replicas}"))
     target = original + 1
@@ -229,6 +350,7 @@ def test_real_testbed_scale_is_applied_and_rolled_back_through_the_worker() -> N
             store=store,
             executor=executor,
             guard=BlastRadiusGuard(runtime.cohorts),
+            settlement=settlement,
             worker_id="contained-action-worker",
         )
         applied = asyncio.run(worker.run_once(ts=now + timedelta(seconds=1)))
@@ -236,21 +358,39 @@ def test_real_testbed_scale_is_applied_and_rolled_back_through_the_worker() -> N
         assert (
             int(_kubectl("get", "deployment/payment", "-o", "jsonpath={.spec.replicas}")) == target
         )
+        _kubectl("rollout", "status", "deployment/payment", "--timeout=90s")
+
+        verify_store = _Store(
+            _claim_at(
+                applied,
+                now=now + timedelta(seconds=2),
+                operation=ActionExecutionOperation.VERIFY,
+            )
+        )
+        verify_worker = ActionControlOrchestrator(
+            store=verify_store,
+            executor=executor,
+            guard=BlastRadiusGuard(runtime.cohorts),
+            settlement=settlement,
+            worker_id="contained-action-worker",
+        )
+        verified = asyncio.run(verify_worker.run_once(ts=now + timedelta(seconds=2)))
+        assert verified is not None and verified.state is ActionControlState.VERIFIED
 
         rollback = transition_action_control(
-            applied,
+            verified,
             ActionControlRequest(
-                incident_id=applied.incident_id,
-                plan_revision=applied.plan_revision,
+                incident_id=verified.incident_id,
+                plan_revision=verified.plan_revision,
                 intent=ActionControlIntent.ROLLBACK,
             ),
             actor="contained-operator",
-            ts=now + timedelta(seconds=2),
+            ts=now + timedelta(seconds=3),
         )
         rollback_store = _Store(
             _claim_at(
                 rollback,
-                now=now + timedelta(seconds=2),
+                now=now + timedelta(seconds=3),
                 operation=ActionExecutionOperation.ROLLBACK,
             )
         )
@@ -258,15 +398,39 @@ def test_real_testbed_scale_is_applied_and_rolled_back_through_the_worker() -> N
             store=rollback_store,
             executor=executor,
             guard=BlastRadiusGuard(runtime.cohorts),
+            settlement=settlement,
             worker_id="contained-action-worker",
         )
-        reverted = asyncio.run(rollback_worker.run_once(ts=now + timedelta(seconds=3)))
+        reverted = asyncio.run(rollback_worker.run_once(ts=now + timedelta(seconds=4)))
         assert reverted is not None and reverted.state is ActionControlState.ROLLED_BACK
+        assert reverted.rollback_slo_before
+        assert all(
+            sample.status is ActionSloSampleStatus.MEASURED
+            for sample in reverted.rollback_slo_before
+        )
         assert (
             int(_kubectl("get", "deployment/payment", "-o", "jsonpath={.spec.replicas}"))
             == original
         )
+        settlement_store = _Store(
+            _claim_at(
+                reverted,
+                now=now + timedelta(seconds=19),
+                operation=ActionExecutionOperation.VERIFY_ROLLBACK,
+            )
+        )
+        settlement_worker = ActionControlOrchestrator(
+            store=settlement_store,
+            executor=executor,
+            guard=BlastRadiusGuard(runtime.cohorts),
+            settlement=settlement,
+            worker_id="contained-action-worker",
+        )
+        settled = asyncio.run(settlement_worker.run_once(ts=now + timedelta(seconds=19)))
+        assert settled is not None and settled.rollback_verification is not None
+        assert settled.rollback_verification.users_restored is not None
     finally:
+        slo_client.close()
         current = int(_kubectl("get", "deployment/payment", "-o", "jsonpath={.spec.replicas}"))
         if current != original:
             _kubectl("scale", "deployment/payment", f"--replicas={original}")
@@ -450,4 +614,32 @@ def _guard() -> BlastRadiusGuard:
                 ),
             ),
         )
+    )
+
+
+def _settlement_verifier(
+    *,
+    before_at: datetime,
+    after_at: datetime,
+) -> SloSettlementVerifier:
+    def read(service: str, *, ts: datetime) -> SloReading | None:
+        assert service == "checkout"
+        if ts == before_at:
+            return SloReading(service=service, availability=0.90, latency_p95_ms=1200.0)
+        assert ts == after_at
+        return SloReading(service=service, availability=0.99, latency_p95_ms=200.0)
+
+    return SloSettlementVerifier(
+        slos=SloConfig(
+            version=1,
+            slos=(
+                ServiceSlo(
+                    service="checkout",
+                    availability_target=0.98,
+                    latency_p95_ms=1000.0,
+                    evaluation_window_minutes=1440,
+                ),
+            ),
+        ),
+        reader=read,
     )

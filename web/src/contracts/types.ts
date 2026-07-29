@@ -219,6 +219,30 @@ export type Approvals1 = ActionApproval[];
 export type ActionGateStatus = "PASSED" | "REFUSED";
 export type GuardResults = ActionGateResult[];
 export type PlanRevision1 = number;
+export type LatencyP95Ms = number | null;
+export type LatencyP95TargetMs = number;
+/**
+ * Whether both signals needed for one SLO judgement were observable.
+ */
+export type ActionSloSampleStatus = "MEASURED" | "INSUFFICIENT";
+export type RollbackSloBefore = ActionSloSample[];
+/**
+ * @minItems 1
+ */
+export type After = [ActionSloSample, ...ActionSloSample[]];
+/**
+ * @minItems 1
+ */
+export type Before = [ActionSloSample, ...ActionSloSample[]];
+/**
+ * @minItems 2
+ * @maxItems 2
+ */
+export type CheckedSignals = ["availability" | "latency_p95_ms", "availability" | "latency_p95_ms"];
+/**
+ * What delayed protected-service telemetry can support after a revert.
+ */
+export type RollbackVerificationStatus = "VERIFIED" | "FAILED" | "INSUFFICIENT";
 export type CanaryShares = number[];
 export type RequiredApprovalCount = number;
 export type RequiresHumanApproval2 = boolean;
@@ -747,6 +771,8 @@ export interface ActionControlSnapshot {
   plan_revision: PlanRevision1;
   rejected_at?: UtcDatetime | null;
   rejected_by?: Identifier | null;
+  rollback_slo_before?: RollbackSloBefore;
+  rollback_verification?: ActionRollbackVerification | null;
   rung: ActionRungSnapshot;
   state: ActionControlState;
   updated_at: UtcDatetime;
@@ -765,6 +791,30 @@ export interface ActionGateResult {
   detail: HumanText;
   gate_id: Identifier;
   status: ActionGateStatus;
+}
+/**
+ * One immutable SLO reading with the exact targets used to judge it.
+ */
+export interface ActionSloSample {
+  availability: Probability | null;
+  availability_target: Probability;
+  latency_p95_ms: LatencyP95Ms;
+  latency_p95_target_ms: LatencyP95TargetMs;
+  sampled_at: UtcDatetime;
+  service: Identifier;
+  status: ActionSloSampleStatus;
+}
+/**
+ * Delayed, read-only proof of protected-service recovery after rollback.
+ */
+export interface ActionRollbackVerification {
+  after: After;
+  before: Before;
+  checked_signals: CheckedSignals;
+  detail: HumanText;
+  status: RollbackVerificationStatus;
+  users_restored: Probability | null;
+  verified_at: UtcDatetime;
 }
 /**
  * The exact committed ladder choice from which the plan was built.
