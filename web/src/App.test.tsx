@@ -62,6 +62,7 @@ describe('App', () => {
       'href',
       '/command#live-incidents',
     );
+    expect(screen.getByRole('link', { name: 'Security' })).toHaveAttribute('href', '/security');
   });
 
   it('labels the decomposition as real, because it now reads the real store', () => {

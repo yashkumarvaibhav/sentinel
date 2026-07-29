@@ -26,7 +26,15 @@ export function OperatorCredentialProvider({ children }: { children: ReactNode }
   );
 }
 
-export function OperatorCredentialPrompt({ detail }: { detail: string | undefined }) {
+export function OperatorCredentialPrompt({
+  detail,
+  title = 'Protected operator surface',
+  buttonLabel = 'Unlock action controls',
+}: {
+  detail: string | undefined;
+  title?: string;
+  buttonLabel?: string;
+}) {
   const { setCredential } = useOperatorCredential();
   const [draft, setDraft] = useState('');
 
@@ -42,7 +50,7 @@ export function OperatorCredentialPrompt({ detail }: { detail: string | undefine
       onSubmit={submit}
     >
       <div>
-        <strong className="text-sm">Protected operator surface</strong>
+        <strong className="text-sm">{title}</strong>
         <p className="text-muted mt-1 text-xs">
           This interim credential is held in memory only and is forgotten on reload.
         </p>
@@ -63,7 +71,7 @@ export function OperatorCredentialPrompt({ detail }: { detail: string | undefine
         className="bg-accent text-accent-contrast min-h-11 rounded px-4 text-sm font-medium"
         type="submit"
       >
-        Unlock action controls
+        {buttonLabel}
       </button>
     </form>
   );

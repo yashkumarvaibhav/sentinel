@@ -13,6 +13,11 @@ async function incidentDetailRoute() {
   return { Component: module.IncidentDetailPage };
 }
 
+async function securityRoute() {
+  const module = await import('@/components/SecurityPage');
+  return { Component: module.SecurityPage };
+}
+
 /**
  * One browser router, created outside React state as the package requires.
  *
@@ -27,6 +32,7 @@ export const router = createBrowserRouter([
     children: [
       { index: true, lazy: commandRoute },
       { path: 'command', lazy: commandRoute },
+      { path: 'security', lazy: securityRoute },
       { path: 'incidents/:incidentId', lazy: incidentDetailRoute },
       { path: '*', Component: NotFoundPage },
     ],
