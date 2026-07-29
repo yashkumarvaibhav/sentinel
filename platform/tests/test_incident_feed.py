@@ -14,6 +14,7 @@ from api.incidents import IncidentFeedPublisher, build_incident_feed_item
 from common.config import TopologyConfig, TopologyService
 from common.storage import IncidentDetailRecord, IncidentGraphRecord, IncidentRecord
 from contracts import (
+    ActionControlSnapshot,
     CheckOutcome,
     Decision,
     DecisionAction,
@@ -310,16 +311,20 @@ class _Store:
         self.records: list[IncidentRecord] = []
         self.graphs: list[IncidentGraphRecord] = []
         self.details: list[IncidentDetailRecord] = []
+        self.action_controls: list[ActionControlSnapshot] = []
 
     async def put_incident_bundle(
         self,
         record: IncidentRecord,
         graph: IncidentGraphRecord,
         detail: IncidentDetailRecord,
+        action_control: ActionControlSnapshot | None = None,
     ) -> bool:
         self.records.append(record)
         self.graphs.append(graph)
         self.details.append(detail)
+        if action_control is not None:
+            self.action_controls.append(action_control)
         return self.changed
 
 
@@ -329,8 +334,9 @@ class _BrokenStore:
         record: IncidentRecord,
         graph: IncidentGraphRecord,
         detail: IncidentDetailRecord,
+        action_control: ActionControlSnapshot | None = None,
     ) -> NoReturn:
-        del record, graph, detail
+        del record, graph, detail, action_control
         raise RuntimeError("database unavailable")
 
 

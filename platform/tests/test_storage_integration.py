@@ -12,7 +12,7 @@ import httpx
 import pytest
 from psycopg import sql
 
-from action.control import ActionControlTransitionError
+from action.control import ActionControlTransitionError, ActionExecutionPhase
 from audit import verify_chain
 from common.config import DetectorConfig
 from common.settings import Settings
@@ -40,8 +40,10 @@ from contracts import (
     ActionGateResult,
     ActionGateStatus,
     ActionKind,
+    ActionOutcome,
     ActionPlan,
     ActionRungSnapshot,
+    ActionStatus,
     ActuatorKind,
     AuditEventKind,
     ContextWindow,
@@ -281,61 +283,8 @@ async def _round_trip_action_control(
     incident: IncidentRecord,
     ts: datetime,
 ) -> None:
-    parameters: dict[str, str | bool | int | float] = {
-        "cohort": "invalid-credentials",
-        "requests_per_second": 5,
-    }
-    plan = ActionPlan(
-        plan_id=f"{incident.incident_id}-plan",
-        ts=ts + timedelta(seconds=2),
-        decision_id=f"{incident.incident_id}-decision",
-        incident_id=incident.incident_id,
-        actuator=ActuatorKind.MESH,
-        action_kind=ActionKind.RATE_LIMIT,
-        target_service="frontend",
-        target_ref="route/login",
-        parameters=parameters,
-        reason="The verified credential residual earned the committed rate-limit rung.",
-        expected_effect="Invalid-credential traffic remains under five requests per second.",
-        reversible=True,
-        requires_human_approval=True,
-        estimated_blast_fraction=0.1,
-        idempotency_key=action_idempotency_key(
-            actuator=ActuatorKind.MESH,
-            action_kind=ActionKind.RATE_LIMIT,
-            target_ref="route/login",
-            parameters=parameters,
-        ),
-        honesty="REAL",
-    )
-    control = ActionControlSnapshot(
-        incident_id=incident.incident_id,
-        plan_revision=1,
-        state=ActionControlState.AWAITING_APPROVAL,
-        rung=ActionRungSnapshot(
-            rung_id="rate-limit-invalid-credentials",
-            ladder_id="attack",
-            actuator=plan.actuator,
-            action_kind=plan.action_kind,
-            parameters=plan.parameters,
-            ttl_seconds=300,
-            requires_human_approval=True,
-            required_approval_count=1,
-            maximum_blast_fraction=0.2,
-            reason=plan.reason,
-        ),
-        plan=plan,
-        guard_results=(
-            ActionGateResult(
-                gate_id="protected-cohort-unharmed",
-                status=ActionGateStatus.PASSED,
-                detail="The committed protected-cohort allowance was respected.",
-            ),
-        ),
-        latest_outcome=None,
-        created_at=plan.ts,
-        updated_at=plan.ts,
-    )
+    control = _action_control(incident, ts=ts + timedelta(seconds=2))
+    plan = control.plan
     assert await repository.put_action_control(control) is True
     assert await repository.put_action_control(control) is False
     assert await repository.get_action_control(control.incident_id) == control
@@ -379,6 +328,64 @@ async def _round_trip_action_control(
         await repository.put_action_control(stale)
 
 
+def _action_control(incident: IncidentRecord, *, ts: datetime) -> ActionControlSnapshot:
+    parameters: dict[str, str | bool | int | float] = {
+        "cohort": "invalid-credentials",
+        "requests_per_second": 5,
+    }
+    plan = ActionPlan(
+        plan_id=f"{incident.incident_id}-plan",
+        ts=ts,
+        decision_id=f"{incident.incident_id}-decision",
+        incident_id=incident.incident_id,
+        actuator=ActuatorKind.MESH,
+        action_kind=ActionKind.RATE_LIMIT,
+        target_service="frontend",
+        target_ref="route/login",
+        parameters=parameters,
+        reason="The verified credential residual earned the committed rate-limit rung.",
+        expected_effect="Invalid-credential traffic remains under five requests per second.",
+        reversible=True,
+        requires_human_approval=True,
+        estimated_blast_fraction=0.1,
+        idempotency_key=action_idempotency_key(
+            actuator=ActuatorKind.MESH,
+            action_kind=ActionKind.RATE_LIMIT,
+            target_ref="route/login",
+            parameters=parameters,
+        ),
+        honesty="REAL",
+    )
+    return ActionControlSnapshot(
+        incident_id=incident.incident_id,
+        plan_revision=1,
+        state=ActionControlState.AWAITING_APPROVAL,
+        rung=ActionRungSnapshot(
+            rung_id="rate-limit-invalid-credentials",
+            ladder_id="attack",
+            actuator=plan.actuator,
+            action_kind=plan.action_kind,
+            parameters=plan.parameters,
+            ttl_seconds=300,
+            requires_human_approval=True,
+            required_approval_count=1,
+            maximum_blast_fraction=0.2,
+            reason=plan.reason,
+        ),
+        plan=plan,
+        guard_results=(
+            ActionGateResult(
+                gate_id="protected-cohort-unharmed",
+                status=ActionGateStatus.PASSED,
+                detail="The committed protected-cohort allowance was respected.",
+            ),
+        ),
+        latest_outcome=None,
+        created_at=plan.ts,
+        updated_at=plan.ts,
+    )
+
+
 async def _round_trip_incident_graph_bundle(
     config: Settings,
     repository: PostgresRepository,
@@ -411,10 +418,69 @@ async def _round_trip_incident_graph_bundle(
             "proof": "complete",
         },
     )
-    assert await repository.put_incident_bundle(incident, graph, detail) is True
+    control = _action_control(incident, ts=incident.updated_at)
+    assert await repository.put_incident_bundle(incident, graph, detail, control) is True
     assert await repository.put_incident_bundle(incident, graph, detail) is False
     assert await repository.latest_incident_graph() == graph
     assert await repository.get_incident_detail(incident.incident_id) == detail
+    assert await repository.get_action_control(incident.incident_id) == control
+    changed, requested = await repository.transition_action_control(
+        ActionControlRequest(
+            incident_id=control.incident_id,
+            plan_revision=control.plan_revision,
+            intent=ActionControlIntent.APPROVE,
+        ),
+        actor="storage-operator",
+        ts=incident.updated_at + timedelta(seconds=1),
+    )
+    assert changed is True and requested.state is ActionControlState.APPLY_REQUESTED
+
+    claim = await repository.claim_action_control(
+        worker_id="storage-worker-a",
+        ts=incident.updated_at + timedelta(seconds=2),
+        lease_seconds=30,
+    )
+    assert claim is not None and claim.recovered is False
+    competing = await repository.claim_action_control(
+        worker_id="storage-worker-b",
+        ts=incident.updated_at + timedelta(seconds=3),
+        lease_seconds=30,
+    )
+    assert competing is None
+    dispatched = await repository.mark_action_dispatched(
+        claim,
+        ts=incident.updated_at + timedelta(seconds=4),
+    )
+    assert dispatched.phase is ActionExecutionPhase.DISPATCHED
+    recovered = await repository.claim_action_control(
+        worker_id="storage-worker-b",
+        ts=incident.updated_at + timedelta(seconds=35),
+        lease_seconds=30,
+    )
+    assert recovered is not None and recovered.recovered is True
+    assert recovered.phase is ActionExecutionPhase.DISPATCHED
+    failed = ActionOutcome(
+        outcome_id=f"{control.plan.plan_id}-recovered-failed",
+        ts=incident.updated_at + timedelta(seconds=36),
+        plan_id=control.plan.plan_id,
+        idempotency_key=control.plan.idempotency_key,
+        status=ActionStatus.FAILED,
+        dry_run=False,
+        detail="The expired dispatched claim was not repeated.",
+        honesty=control.plan.honesty,
+    )
+    completed = await repository.complete_action_execution(
+        recovered,
+        failed,
+        ts=failed.ts,
+    )
+    assert completed.state is ActionControlState.FAILED
+    assert await repository.get_action_control(incident.incident_id) == completed
+    ledger = AuditLedgerRepository(pool=pool, schema=config.postgres_schema)
+    assert any(
+        entry.plan_id == control.plan.plan_id and entry.body["outcome_id"] == failed.outcome_id
+        for entry in await ledger.entries(limit=1000)
+    )
 
     # Make only the graph artificially newer, then prove the bundle refuses to
     # advance half of the pair and rolls its incident write back.
@@ -670,8 +736,8 @@ async def _exercise_audit_ledger(config: Settings, pool: PostgresPool) -> None:
     ledger = AuditLedgerRepository(pool=pool, schema=config.postgres_schema)
     ts = datetime(2026, 7, 21, 12, 0, tzinfo=UTC)
 
-    assert await ledger.head() is None, "a fresh ledger has no head"
-    assert await ledger.entries() == ()
+    existing = await ledger.entries(limit=100)
+    assert verify_chain(existing).intact
 
     first = await ledger.append(
         ts=ts,
@@ -681,7 +747,7 @@ async def _exercise_audit_ledger(config: Settings, pool: PostgresPool) -> None:
         body={"confidence": 0.88},
         incident_id="incident-1",
     )
-    assert first.sequence == 0
+    assert first.sequence == len(existing)
     head = await ledger.head()
     assert head is not None
     assert head.entry_hash == first.entry_hash
@@ -707,13 +773,15 @@ async def _exercise_audit_ledger(config: Settings, pool: PostgresPool) -> None:
         )
     )
     sequences = sorted(entry.sequence for entry in appended)
-    assert sequences == list(range(1, concurrent + 1)), "the chain forked or skipped a place"
+    assert sequences == list(range(first.sequence + 1, first.sequence + concurrent + 1)), (
+        "the chain forked or skipped a place"
+    )
     assert len({entry.previous_hash for entry in appended}) == concurrent, (
         "two entries built on the same head"
     )
 
     stored = await ledger.entries(limit=100)
-    assert len(stored) == concurrent + 1
+    assert len(stored) == len(existing) + concurrent + 1
     verification = verify_chain(stored)
     assert verification.intact, verification.detail
     assert verification.head_hash == stored[-1].entry_hash
@@ -729,7 +797,7 @@ async def _exercise_audit_ledger(config: Settings, pool: PostgresPool) -> None:
             sql.SQL("UPDATE {} SET summary = %s WHERE sequence = %s").format(
                 sql.Identifier(config.postgres_schema, "audit_ledger")
             ),
-            ("nothing happened here", 2),
+            ("nothing happened here", first.sequence + 2),
         )
     with pytest.raises(ValueError, match="must be the digest of this entry's own content"):
         await ledger.entries(limit=100)

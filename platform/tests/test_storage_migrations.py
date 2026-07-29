@@ -38,6 +38,7 @@ def test_postgres_migration_separates_runtime_and_dev_label_schemas() -> None:
         "0005",
         "0006",
         "0007",
+        "0008",
     ]
     sql = render_migration(
         migrations[0],
@@ -93,6 +94,18 @@ def test_action_control_migration_binds_payload_to_plan_revision_and_incident() 
     assert "payload ->> 'incident_id'" in sql
     assert "payload ->> 'plan_revision'" in sql
     assert "payload ->> 'state'" in sql
+    assert "{{dev_schema}}" not in sql
+
+
+def test_action_execution_claims_are_leased_and_bound_to_one_plan_revision() -> None:
+    migrations = {migration.version: migration for migration in load_migrations("postgres")}
+
+    sql = render_migration(migrations["0008"], schema="sentinel_test")
+    assert "sentinel_test.incident_action_execution_claims" in sql
+    assert "PRIMARY KEY (incident_id, plan_revision)" in sql
+    assert "phase IN ('CLAIMED', 'DISPATCHED')" in sql
+    assert "expires_at > claimed_at" in sql
+    assert "ON DELETE CASCADE" in sql
     assert "{{dev_schema}}" not in sql
 
 

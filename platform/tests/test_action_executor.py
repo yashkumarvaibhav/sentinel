@@ -348,6 +348,8 @@ def test_the_adapter_gets_back_the_revert_token_it_minted() -> None:
     plan = _plan(adapter)
     applied = executor.apply(plan, ts=TICK, owner="executor-a")
     assert applied.revert_token is not None
+    verified = executor.verify(plan, ts=TICK + timedelta(seconds=3))
+    assert verified.revert_token == applied.revert_token
     executor.revert(plan, ts=TICK + timedelta(seconds=5), owner="executor-a")
     assert adapter.reverted_with == [applied.revert_token]
 

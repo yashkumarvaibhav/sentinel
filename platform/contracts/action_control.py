@@ -153,16 +153,33 @@ class ActionControlSnapshot(ContractModel):
             or self.rung.requires_human_approval != self.plan.requires_human_approval
         ):
             raise ValueError("rung and plan safety-critical fields must agree exactly")
-        if self.plan.estimated_blast_fraction > self.rung.maximum_blast_fraction:
+        if (
+            self.state is not ActionControlState.REFUSED
+            and self.plan.estimated_blast_fraction > self.rung.maximum_blast_fraction
+        ):
             raise ValueError("the stored plan exceeds its server-held rung blast-radius ceiling")
         gate_ids = tuple(result.gate_id for result in self.guard_results)
         if len(gate_ids) != len(set(gate_ids)):
             raise ValueError("guard_results must not contain duplicate gate ids")
+        refused_gates = tuple(
+            result for result in self.guard_results if result.status is ActionGateStatus.REFUSED
+        )
+        if (self.state is ActionControlState.REFUSED) != bool(refused_gates):
+            raise ValueError(
+                "a guard refusal state and a refused guard result must travel together"
+            )
         approval_actors = tuple(approval.actor for approval in self.approvals)
         if len(approval_actors) != len(set(approval_actors)):
             raise ValueError("an identity may approve one plan revision only once")
         if any(approval.approved_at < self.created_at for approval in self.approvals):
             raise ValueError("an approval cannot predate the plan revision")
+        if self.state is ActionControlState.AWAITING_APPROVAL and self.approvals:
+            raise ValueError("an awaiting plan cannot already carry an approval")
+        if (
+            self.state is ActionControlState.APPLY_REQUESTED
+            and len(self.approvals) < self.rung.required_approval_count
+        ):
+            raise ValueError("apply can be requested only after every required approval is durable")
         self._validate_rejection()
         self._validate_outcome()
         return self
@@ -180,6 +197,20 @@ class ActionControlSnapshot(ContractModel):
                 raise ValueError("latest_outcome must belong to the server-held plan")
             if self.latest_outcome.idempotency_key != self.plan.idempotency_key:
                 raise ValueError("latest_outcome must carry the server-held plan's effect key")
+            if (
+                self.latest_outcome.in_force
+                and self.plan.reversible
+                and self.latest_outcome.revert_token is None
+            ):
+                raise ValueError(
+                    "a reversible effect in force must retain its server-held revert token"
+                )
+            if self.latest_outcome.in_force and tuple(self.latest_outcome.approvals) != tuple(
+                approval.actor for approval in self.approvals
+            ):
+                raise ValueError(
+                    "an in-force outcome must retain the control's authenticated approvals"
+                )
         expected = {
             ActionControlState.APPLIED: ActionStatus.APPLIED,
             ActionControlState.VERIFIED: ActionStatus.VERIFIED,

@@ -168,6 +168,16 @@ class ActionExecutor:
         """
         actuator = self._actuator_for(plan)
         outcome = self._checked(plan, actuator.verify(plan, ts=ts), expect_simulated=False)
+        prior = self._journal.latest(plan.idempotency_key)
+        if outcome.status is ActionStatus.VERIFIED and prior is not None and prior.in_force:
+            outcome = ActionOutcome.model_validate(
+                {
+                    **outcome.model_dump(),
+                    "approvals": prior.approvals,
+                    "gates_passed": prior.gates_passed,
+                    "revert_token": prior.revert_token,
+                }
+            )
         if not self._dry_run:
             self._journal.record(outcome)
         return self._record(outcome, plan, ts=ts, owner="verifier")

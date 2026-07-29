@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
 
-from action.control import ActionControlTransitionError, transition_action_control
+from action.control import (
+    ActionControlTransitionError,
+    materialize_action_control,
+    transition_action_control,
+)
+from action.guards import BlastRadiusGuard
+from action.ladder import RungChoice
+from common.config import CohortConfig, CohortDefinition
 from contracts import (
     ActionControlIntent,
     ActionControlRequest,
@@ -142,6 +149,45 @@ def test_action_snapshot_keeps_rung_plan_and_guard_identity_consistent() -> None
         )
 
 
+def test_materializer_owns_the_rung_plan_guards_and_initial_request_state() -> None:
+    plan = _plan()
+    choice = _choice(plan, maximum_blast_fraction=0.2)
+
+    control = materialize_action_control(
+        plan_revision=1,
+        choice=choice,
+        plan=plan,
+        guard=_guard(),
+        ts=TS,
+    )
+
+    assert control.state is ActionControlState.AWAITING_APPROVAL
+    assert control.plan is plan
+    assert control.rung.rung_id == choice.rung_id
+    assert tuple(result.gate_id for result in control.guard_results) == (
+        "protected-cohort-unharmed",
+        "blast-radius-within-the-rung-ceiling",
+    )
+    assert all(result.status is ActionGateStatus.PASSED for result in control.guard_results)
+
+
+def test_materializer_persists_a_guard_refusal_instead_of_requesting_execution() -> None:
+    plan = _plan()
+
+    control = materialize_action_control(
+        plan_revision=1,
+        choice=_choice(plan, maximum_blast_fraction=0.05),
+        plan=plan,
+        guard=_guard(),
+        ts=TS,
+    )
+
+    assert control.state is ActionControlState.REFUSED
+    assert control.guard_results[0].gate_id == "blast-radius-within-the-rung-ceiling"
+    assert control.guard_results[0].status is ActionGateStatus.REFUSED
+    assert "authorises at most" in control.guard_results[0].detail
+
+
 def test_one_key_approval_requests_apply_without_claiming_it_happened() -> None:
     approved = transition_action_control(
         _snapshot(),
@@ -245,3 +291,41 @@ def test_rollback_request_requires_a_server_held_effect_in_force() -> None:
             actor="interim-operator",
             ts=TS.replace(minute=1),
         )
+
+
+def _choice(plan: ActionPlan, *, maximum_blast_fraction: float) -> RungChoice:
+    return RungChoice(
+        rung_id="rate-limit-invalid-credentials",
+        ladder_id="attack",
+        actuator=plan.actuator,
+        action_kind=plan.action_kind,
+        parameters=plan.parameters,
+        ttl=timedelta(minutes=5),
+        requires_human_approval=True,
+        maximum_blast_fraction=maximum_blast_fraction,
+        reason=plan.reason,
+    )
+
+
+def _guard() -> BlastRadiusGuard:
+    return BlastRadiusGuard(
+        CohortConfig(
+            version=1,
+            cohorts=(
+                CohortDefinition(
+                    cohort_id="invalid-credentials",
+                    description="Untrusted sessions failing authentication.",
+                    match={"auth.valid": False},
+                    protected=False,
+                    max_blast_radius_pct=20.0,
+                ),
+                CohortDefinition(
+                    cohort_id="checkout-users",
+                    description="Users submitting checkout requests.",
+                    match={"http.route": "/api/checkout"},
+                    protected=True,
+                    max_blast_radius_pct=0.0,
+                ),
+            ),
+        )
+    )

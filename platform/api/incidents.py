@@ -14,6 +14,7 @@ from api.stream import snapshot_invalidation
 from common.config import TopologyConfig
 from common.storage import IncidentDetailRecord, IncidentGraphRecord, IncidentRecord
 from contracts import (
+    ActionControlSnapshot,
     AuditEntry,
     DecisionAction,
     DecompFrame,
@@ -48,6 +49,7 @@ class IncidentFeedStore(Protocol):
         record: IncidentRecord,
         graph: IncidentGraphRecord,
         detail: IncidentDetailRecord,
+        action_control: ActionControlSnapshot | None = None,
     ) -> bool: ...
 
 
@@ -94,6 +96,7 @@ class IncidentFeedPublisher:
         calibrated_confidence: float | None = None,
         calibration_note: str | None = None,
         explained_event: str | None = None,
+        action_control: ActionControlSnapshot | None = None,
     ) -> IncidentPublishResult:
         """Write a newer incident revision and signal browsers after commit."""
         item = build_incident_feed_item(
@@ -129,9 +132,15 @@ class IncidentFeedPublisher:
             incident_record(item),
             causal_graph_record(graph),
             incident_detail_record(detail),
+            action_control,
         )
         if persisted:
-            self._broker.publish(snapshot_invalidation(SnapshotResource.INCIDENTS))
+            resources = (
+                (SnapshotResource.INCIDENTS, SnapshotResource.ACTIONS)
+                if action_control is not None
+                else (SnapshotResource.INCIDENTS,)
+            )
+            self._broker.publish(snapshot_invalidation(*resources))
         return IncidentPublishResult(item=item, persisted=persisted)
 
 

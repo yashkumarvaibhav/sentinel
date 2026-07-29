@@ -14,6 +14,10 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from action.control import (
     ActionControlNotFoundError,
+    ActionExecutionClaim,
+    ActionExecutionOperation,
+    ActionExecutionPhase,
+    complete_action_control,
 )
 from action.control import (
     transition_action_control as apply_action_control_transition,
@@ -29,6 +33,8 @@ from common.storage.pool import PostgresPool
 from contracts import (
     ActionControlRequest,
     ActionControlSnapshot,
+    ActionOutcome,
+    ActionStatus,
     AuditEntry,
     AuditEventKind,
     SymptomEpisode,
@@ -44,6 +50,10 @@ class PostgresRepository:
         self._incident_graphs = sql.Identifier(schema, "incident_causal_graphs")
         self._incident_details = sql.Identifier(schema, "incident_details")
         self._incident_action_controls = sql.Identifier(schema, "incident_action_controls")
+        self._action_execution_claims = sql.Identifier(schema, "incident_action_execution_claims")
+        self._audit_ledger = sql.Identifier(schema, "audit_ledger")
+        digest = hashlib.sha256(f"sentinel-audit-ledger:{schema}".encode()).digest()
+        self._audit_lock_key = int.from_bytes(digest[:8], "big", signed=True)
         self._audit_entries = sql.Identifier(schema, "audit_entries")
         self._symptom_episodes = sql.Identifier(schema, "symptom_episodes")
 
@@ -80,8 +90,9 @@ class PostgresRepository:
         record: IncidentRecord,
         graph: IncidentGraphRecord,
         detail: IncidentDetailRecord,
+        action_control: ActionControlSnapshot | None = None,
     ) -> bool:
-        """Atomically advance one incident, its graph and its complete proof."""
+        """Atomically advance one incident, its proof, and any evidence-time action plan."""
         if (
             graph.incident_id != record.incident_id
             or detail.incident_id != record.incident_id
@@ -89,6 +100,14 @@ class PostgresRepository:
             or detail.updated_at != record.updated_at
         ):
             raise ValueError("incident, causal graph and detail storage identities must match")
+        if action_control is not None and (
+            action_control.incident_id != record.incident_id
+            or action_control.created_at != record.updated_at
+        ):
+            raise ValueError(
+                "an action control attached to an incident bundle must share its identity "
+                "and evidence revision time"
+            )
         incident_query = sql.SQL(
             """
             INSERT INTO {table} (incident_id, state, payload, created_at, updated_at)
@@ -157,6 +176,8 @@ class PostgresRepository:
             )
             if await detail_cursor.fetchone() is None:
                 raise RuntimeError("incident detail could not advance with its incident")
+            if action_control is not None:
+                await self._insert_action_control(connection, action_control)
             return True
 
     async def get_incident(self, incident_id: str) -> IncidentRecord | None:
@@ -258,6 +279,15 @@ class PostgresRepository:
         Replaying the exact same revision is idempotent; reusing a revision for
         different evidence is refused rather than silently replacing history.
         """
+        async with self._pool.connection() as connection, connection.transaction():
+            return await self._insert_action_control(connection, control)
+
+    async def _insert_action_control(
+        self,
+        connection: AsyncConnection[TupleRow],
+        control: ActionControlSnapshot,
+    ) -> bool:
+        """Insert one revision on the caller's transaction and incident lock."""
         lock_query = "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))"
         latest_query = sql.SQL(
             """
@@ -275,39 +305,38 @@ class PostgresRepository:
             VALUES (%s, %s, %s, %s, %s, %s)
             """
         ).format(self._incident_action_controls)
-        async with self._pool.connection() as connection, connection.transaction():
-            await connection.execute(lock_query, (control.incident_id,))
-            cursor = await connection.execute(latest_query, (control.incident_id,))
-            row = await cursor.fetchone()
-            latest_revision = 0 if row is None else cast(int, row[0])
-            if control.plan_revision == latest_revision:
-                if row is None:
-                    raise AssertionError("revision zero cannot be materialized")
-                existing = ActionControlSnapshot.model_validate_json(cast(str, row[1]))
-                if existing != control:
-                    raise ValueError(
-                        f"plan revision {control.plan_revision} already names different "
-                        "server-held action state"
-                    )
-                return False
-            expected = latest_revision + 1
-            if control.plan_revision != expected:
+        await connection.execute(lock_query, (control.incident_id,))
+        cursor = await connection.execute(latest_query, (control.incident_id,))
+        row = await cursor.fetchone()
+        latest_revision = 0 if row is None else cast(int, row[0])
+        if control.plan_revision == latest_revision:
+            if row is None:
+                raise AssertionError("revision zero cannot be materialized")
+            existing = ActionControlSnapshot.model_validate_json(cast(str, row[1]))
+            if existing != control:
                 raise ValueError(
-                    f"the next revision for {control.incident_id} is {expected}, "
-                    f"not {control.plan_revision}"
+                    f"plan revision {control.plan_revision} already names different "
+                    "server-held action state"
                 )
-            await connection.execute(
-                insert_query,
-                (
-                    control.incident_id,
-                    control.plan_revision,
-                    control.state.value,
-                    control.created_at,
-                    control.updated_at,
-                    Jsonb(control.model_dump(mode="json")),
-                ),
+            return False
+        expected = latest_revision + 1
+        if control.plan_revision != expected:
+            raise ValueError(
+                f"the next revision for {control.incident_id} is {expected}, "
+                f"not {control.plan_revision}"
             )
-            return True
+        await connection.execute(
+            insert_query,
+            (
+                control.incident_id,
+                control.plan_revision,
+                control.state.value,
+                control.created_at,
+                control.updated_at,
+                Jsonb(control.model_dump(mode="json")),
+            ),
+        )
+        return True
 
     async def get_action_control(
         self,
@@ -357,7 +386,9 @@ class PostgresRepository:
             """
             SELECT payload::text
             FROM {}
-            WHERE incident_id = %s AND plan_revision = %s
+            WHERE incident_id = %s
+            ORDER BY plan_revision DESC
+            LIMIT 1
             FOR UPDATE
             """
         ).format(self._incident_action_controls)
@@ -369,9 +400,13 @@ class PostgresRepository:
             """
         ).format(self._incident_action_controls)
         async with self._pool.connection() as connection, connection.transaction():
+            await connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (request.incident_id,),
+            )
             cursor = await connection.execute(
                 select_query,
-                (request.incident_id, request.plan_revision),
+                (request.incident_id,),
             )
             row = await cursor.fetchone()
             if row is None:
@@ -398,6 +433,300 @@ class PostgresRepository:
                 ),
             )
             return True, transitioned
+
+    async def claim_action_control(
+        self,
+        *,
+        worker_id: str,
+        ts: datetime,
+        lease_seconds: int,
+    ) -> ActionExecutionClaim | None:
+        """Lease one requested plan without exposing worker state to the browser."""
+        if not worker_id:
+            raise ValueError("an action execution claim needs a worker identity")
+        if lease_seconds < 1:
+            raise ValueError("an action execution lease must last at least one second")
+        select = sql.SQL(
+            """
+            SELECT c.payload::text, q.claim_id, q.phase
+            FROM {controls} AS c
+            LEFT JOIN {claims} AS q
+              ON q.incident_id = c.incident_id
+             AND q.plan_revision = c.plan_revision
+            WHERE c.state IN ('APPLY_REQUESTED', 'ROLLBACK_REQUESTED')
+              AND c.plan_revision = (
+                  SELECT MAX(latest.plan_revision)
+                  FROM {controls} AS latest
+                  WHERE latest.incident_id = c.incident_id
+              )
+              AND (q.claim_id IS NULL OR q.expires_at <= %s)
+            ORDER BY c.updated_at ASC, c.incident_id ASC, c.plan_revision ASC
+            FOR UPDATE OF c SKIP LOCKED
+            LIMIT 1
+            """
+        ).format(controls=self._incident_action_controls, claims=self._action_execution_claims)
+        upsert = sql.SQL(
+            """
+            INSERT INTO {claims}
+                (incident_id, plan_revision, claim_id, worker_id, operation,
+                 phase, claimed_at, expires_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (incident_id, plan_revision) DO UPDATE SET
+                claim_id = EXCLUDED.claim_id,
+                worker_id = EXCLUDED.worker_id,
+                operation = EXCLUDED.operation,
+                phase = EXCLUDED.phase,
+                claimed_at = EXCLUDED.claimed_at,
+                expires_at = EXCLUDED.expires_at
+            """
+        ).format(claims=self._action_execution_claims)
+        expires_at = ts + timedelta(seconds=lease_seconds)
+        async with self._pool.connection() as connection, connection.transaction():
+            cursor = await connection.execute(select, (ts,))
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            control = ActionControlSnapshot.model_validate_json(cast(str, row[0]))
+            await connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (control.incident_id,),
+            )
+            latest_cursor = await connection.execute(
+                sql.SQL("SELECT MAX(plan_revision) FROM {} WHERE incident_id = %s").format(
+                    self._incident_action_controls
+                ),
+                (control.incident_id,),
+            )
+            latest_row = await latest_cursor.fetchone()
+            if latest_row is None or cast(int, latest_row[0]) != control.plan_revision:
+                return None
+            recovered = row[1] is not None
+            operation = (
+                ActionExecutionOperation.APPLY
+                if control.state.value == "APPLY_REQUESTED"
+                else ActionExecutionOperation.ROLLBACK
+            )
+            phase = (
+                ActionExecutionPhase(cast(str, row[2]))
+                if recovered
+                else ActionExecutionPhase.CLAIMED
+            )
+            claim_id = _claim_id(control, worker_id=worker_id, ts=ts)
+            await connection.execute(
+                upsert,
+                (
+                    control.incident_id,
+                    control.plan_revision,
+                    claim_id,
+                    worker_id,
+                    operation.value,
+                    phase.value,
+                    ts,
+                    expires_at,
+                ),
+            )
+        return ActionExecutionClaim(
+            claim_id=claim_id,
+            worker_id=worker_id,
+            operation=operation,
+            phase=phase,
+            claimed_at=ts,
+            expires_at=expires_at,
+            control=control,
+            recovered=recovered,
+        )
+
+    async def mark_action_dispatched(
+        self,
+        claim: ActionExecutionClaim,
+        *,
+        ts: datetime,
+    ) -> ActionExecutionClaim:
+        """Persist the side-effect boundary before the actuator is called."""
+        duration = claim.expires_at - claim.claimed_at
+        expires_at = ts + duration
+        update = sql.SQL(
+            """
+            UPDATE {claims}
+            SET phase = 'DISPATCHED', expires_at = %s
+            WHERE incident_id = %s AND plan_revision = %s
+              AND claim_id = %s AND worker_id = %s
+              AND expires_at > %s
+            RETURNING claim_id
+            """
+        ).format(claims=self._action_execution_claims)
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                update,
+                (
+                    expires_at,
+                    claim.control.incident_id,
+                    claim.control.plan_revision,
+                    claim.claim_id,
+                    claim.worker_id,
+                    ts,
+                ),
+            )
+            if await cursor.fetchone() is None:
+                raise RuntimeError("the action execution claim expired or changed before dispatch")
+        return ActionExecutionClaim(
+            claim_id=claim.claim_id,
+            worker_id=claim.worker_id,
+            operation=claim.operation,
+            phase=ActionExecutionPhase.DISPATCHED,
+            claimed_at=claim.claimed_at,
+            expires_at=expires_at,
+            control=claim.control,
+            recovered=claim.recovered,
+        )
+
+    async def complete_action_execution(
+        self,
+        claim: ActionExecutionClaim,
+        outcome: ActionOutcome,
+        *,
+        ts: datetime,
+    ) -> ActionControlSnapshot:
+        """Atomically commit terminal control state, audit evidence, and claim release."""
+        claim_query = sql.SQL(
+            """
+            SELECT claim_id, worker_id, expires_at
+            FROM {claims}
+            WHERE incident_id = %s AND plan_revision = %s
+            FOR UPDATE
+            """
+        ).format(claims=self._action_execution_claims)
+        control_query = sql.SQL(
+            """
+            SELECT payload::text
+            FROM {controls}
+            WHERE incident_id = %s AND plan_revision = %s
+            FOR UPDATE
+            """
+        ).format(controls=self._incident_action_controls)
+        update = sql.SQL(
+            """
+            UPDATE {controls}
+            SET state = %s, updated_at = %s, payload = %s
+            WHERE incident_id = %s AND plan_revision = %s
+            """
+        ).format(controls=self._incident_action_controls)
+        delete = sql.SQL(
+            "DELETE FROM {claims} WHERE incident_id = %s AND plan_revision = %s"
+        ).format(claims=self._action_execution_claims)
+        identity = (claim.control.incident_id, claim.control.plan_revision)
+        async with self._pool.connection() as connection, connection.transaction():
+            claim_cursor = await connection.execute(claim_query, identity)
+            claim_row = await claim_cursor.fetchone()
+            if (
+                claim_row is None
+                or cast(str, claim_row[0]) != claim.claim_id
+                or cast(str, claim_row[1]) != claim.worker_id
+                or cast(datetime, claim_row[2]) <= ts
+            ):
+                raise RuntimeError("the action execution claim expired or changed before commit")
+            control_cursor = await connection.execute(control_query, identity)
+            control_row = await control_cursor.fetchone()
+            if control_row is None:
+                raise ActionControlNotFoundError(
+                    f"no action control for {identity[0]} revision {identity[1]}"
+                )
+            current = ActionControlSnapshot.model_validate_json(cast(str, control_row[0]))
+            completed = complete_action_control(
+                current,
+                operation=claim.operation,
+                outcome=outcome,
+                ts=ts,
+            )
+            await connection.execute(
+                update,
+                (
+                    completed.state.value,
+                    completed.updated_at,
+                    Jsonb(completed.model_dump(mode="json")),
+                    *identity,
+                ),
+            )
+            await self._append_action_audit(
+                connection,
+                claim=claim,
+                outcome=outcome,
+                ts=ts,
+            )
+            await connection.execute(delete, identity)
+        return completed
+
+    async def _append_action_audit(
+        self,
+        connection: AsyncConnection[TupleRow],
+        *,
+        claim: ActionExecutionClaim,
+        outcome: ActionOutcome,
+        ts: datetime,
+    ) -> AuditEntry:
+        """Append the control completion to the global chain on the same transaction."""
+        await connection.execute(
+            "SELECT pg_advisory_xact_lock(%s)",
+            (self._audit_lock_key,),
+        )
+        head_query = sql.SQL("SELECT {columns} FROM {table} ORDER BY sequence DESC LIMIT 1").format(
+            columns=_AUDIT_COLUMNS, table=self._audit_ledger
+        )
+        head_cursor = await connection.execute(head_query)
+        head_row = await head_cursor.fetchone()
+        previous = None if head_row is None else _audit_entry(head_row)
+        kind = _action_audit_kind(outcome)
+        plan = claim.control.plan
+        entry = build_entry(
+            previous=previous,
+            ts=ts,
+            kind=kind,
+            actor=claim.worker_id,
+            summary=(
+                f"{outcome.status.value.lower()} {plan.action_kind.value} on "
+                f"{plan.target_ref}: {outcome.detail}"
+            ),
+            body={
+                "claim_id": claim.claim_id,
+                "operation": claim.operation.value,
+                "outcome_id": outcome.outcome_id,
+                "status": outcome.status.value,
+                "idempotency_key": outcome.idempotency_key,
+                "gates_passed": list(outcome.gates_passed),
+                "observed": list(outcome.observed),
+            },
+            incident_id=plan.incident_id,
+            decision_id=plan.decision_id,
+            plan_id=plan.plan_id,
+            honesty=outcome.honesty,
+        )
+        insert = sql.SQL(
+            """
+            INSERT INTO {table}
+                (entry_id, sequence, ts, kind, actor, summary, incident_id,
+                 decision_id, plan_id, body, previous_hash, entry_hash, honesty)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+        ).format(table=self._audit_ledger)
+        await connection.execute(
+            insert,
+            (
+                entry.entry_id,
+                entry.sequence,
+                entry.ts,
+                entry.kind.value,
+                entry.actor,
+                entry.summary,
+                entry.incident_id,
+                entry.decision_id,
+                entry.plan_id,
+                Jsonb(entry.body),
+                entry.previous_hash,
+                entry.entry_hash,
+                entry.honesty,
+            ),
+        )
+        return entry
 
     async def put_episode(self, episode: SymptomEpisode) -> bool:
         """Idempotently persist an episode; skip a stale (lower-revision) write.
@@ -640,6 +969,26 @@ def _stored_vector(payload: object) -> tuple[float, ...]:
         if isinstance(stored, list):
             return tuple(float(value) for value in stored)
     raise ValueError("a stored signature must carry its vector in the payload")
+
+
+def _claim_id(control: ActionControlSnapshot, *, worker_id: str, ts: datetime) -> str:
+    digest = hashlib.sha256(
+        (
+            f"{control.incident_id}:{control.plan_revision}:{control.state.value}:"
+            f"{worker_id}:{ts.isoformat()}"
+        ).encode()
+    ).hexdigest()
+    return f"action-claim-{digest[:32]}"
+
+
+def _action_audit_kind(outcome: ActionOutcome) -> AuditEventKind:
+    return {
+        ActionStatus.SIMULATED: AuditEventKind.ACTION_PLANNED,
+        ActionStatus.APPLIED: AuditEventKind.ACTION_APPLIED,
+        ActionStatus.VERIFIED: AuditEventKind.ACTION_VERIFIED,
+        ActionStatus.REVERTED: AuditEventKind.ACTION_REVERTED,
+        ActionStatus.FAILED: AuditEventKind.ACTION_REFUSED,
+    }[outcome.status]
 
 
 class AuditLedgerRepository:

@@ -40,6 +40,16 @@ from action.config import (
     load_ladder_config,
     resolve_dry_run,
 )
+from action.control import (
+    ActionControlNotFoundError,
+    ActionControlTransitionError,
+    ActionExecutionClaim,
+    ActionExecutionOperation,
+    ActionExecutionPhase,
+    complete_action_control,
+    materialize_action_control,
+    transition_action_control,
+)
 from action.executor import TWO_KEY_APPROVERS, ActionExecutor
 from action.guards import (
     BLAST_CAP_GATE,
@@ -68,6 +78,11 @@ from action.ladder import (
     StandingRestraint,
 )
 from action.leases import LeaseRegistry, TargetBusyError, TargetLease
+from action.orchestrator import (
+    DEFAULT_CLAIM_TTL,
+    ActionControlOrchestrator,
+    ActionOrchestrationStore,
+)
 from action.remediator import (
     DEFAULT_OWNER,
     AppliedEffect,
@@ -86,15 +101,23 @@ from action.rollback import (
 __all__ = [
     "BLAST_CAP_GATE",
     "CANARY_GATE",
+    "DEFAULT_CLAIM_TTL",
     "DEFAULT_OWNER",
     "FORCE_DRY_RUN_ENV",
     "PROTECTED_COHORT_GATE",
     "TWO_KEY_APPROVERS",
     "ActionConfig",
     "ActionConfigLoadError",
+    "ActionControlNotFoundError",
+    "ActionControlOrchestrator",
+    "ActionControlTransitionError",
+    "ActionExecutionClaim",
+    "ActionExecutionOperation",
+    "ActionExecutionPhase",
     "ActionExecutor",
     "ActionJournal",
     "ActionJournalFullError",
+    "ActionOrchestrationStore",
     "ActionRecord",
     "ActionRejectedError",
     "Actuator",
@@ -151,9 +174,12 @@ __all__ = [
     "TargetLease",
     "VerifiedRollback",
     "build_plan",
+    "complete_action_control",
     "guarded_apply",
     "load_action_config",
     "load_ladder_config",
+    "materialize_action_control",
     "resolve_dry_run",
+    "transition_action_control",
     "with_gates",
 ]
