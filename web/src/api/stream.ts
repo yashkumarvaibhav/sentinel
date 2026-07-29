@@ -9,6 +9,7 @@ const RESOURCES = new Set<SnapshotResource>([
   'decomposition',
   'incidents',
   'actions',
+  'security',
   'audit',
 ]);
 const FIELDS = new Set(['event_id', 'ts', 'kind', 'resources']);

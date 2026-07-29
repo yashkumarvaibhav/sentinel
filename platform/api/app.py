@@ -62,6 +62,12 @@ from api.kpis import (
     unavailable_kpi_response,
 )
 from api.probes import platform_probes
+from api.security import (
+    SecuritySnapshotDataError,
+    SecuritySnapshotReader,
+    security_snapshot,
+    unavailable_security_snapshot,
+)
 from api.stream import StreamBroker, snapshot_invalidation, stream_response
 from audit import verify_chain
 from common.buildinfo import build_info
@@ -81,6 +87,7 @@ from contracts import (
     IncidentFeedResponse,
     KpiResponse,
     ScoreProof,
+    SecurityResponse,
     SnapshotResource,
 )
 
@@ -91,7 +98,12 @@ LOGGER = logging.getLogger(__name__)
 # gate even for reads. The audit ledger records what the platform did and why;
 # the per-incident proof joins the full evidence and action history. Both need
 # the interim identity check named by the architecture until OIDC replaces it.
-_SENSITIVE_PREFIXES = ("/api/lab", "/api/audit", "/api/incidents/")
+_SENSITIVE_PREFIXES = (
+    "/api/lab",
+    "/api/audit",
+    "/api/incidents/",
+    "/api/security",
+)
 
 # How much of the chain one request may ask for. A ledger read is a scan in
 # sequence order, so an unbounded one is a way to make the gateway do arbitrary
@@ -116,6 +128,7 @@ def create_app(
     causal_graph_reader: CausalGraphReader | None = None,
     incident_detail_reader: IncidentDetailReader | None = None,
     action_control_store: ActionControlStore | None = None,
+    security_reader: SecuritySnapshotReader | None = None,
 ) -> FastAPI:
     """Build the gateway application.
 
@@ -135,6 +148,7 @@ def create_app(
         app.state.causal_graph_reader = causal_graph_reader
         app.state.incident_detail_reader = incident_detail_reader
         app.state.action_control_store = action_control_store
+        app.state.security_reader = security_reader
         app.state.incident_publisher = None
         incident_pool = None
         action_runtime: ActionControlRuntime | None = None
@@ -150,6 +164,7 @@ def create_app(
             app.state.incident_reader = incident_store
             app.state.causal_graph_reader = incident_store
             app.state.incident_detail_reader = incident_store
+            app.state.security_reader = incident_store
             if action_control_store is None:
                 app.state.action_control_store = incident_store
             app.state.incident_publisher = IncidentFeedPublisher(
@@ -171,6 +186,7 @@ def create_app(
                         snapshot_invalidation(
                             SnapshotResource.INCIDENTS,
                             SnapshotResource.ACTIONS,
+                            SnapshotResource.SECURITY,
                         )
                     ),
                 )
@@ -463,6 +479,7 @@ def create_app(
                     snapshot_invalidation(
                         SnapshotResource.INCIDENTS,
                         SnapshotResource.ACTIONS,
+                        SnapshotResource.SECURITY,
                     )
                 )
             return action_control_response(control)
@@ -554,6 +571,39 @@ def create_app(
             response.status_code = 503
             return unavailable_causal_graph(
                 detail="causal graph store could not provide a snapshot"
+            )
+
+    @app.get(
+        "/api/security",
+        tags=["security"],
+        response_model=SecurityResponse,
+    )
+    async def security(response: Response) -> SecurityResponse:
+        """The newest unresolved incident's evidence-only security projection."""
+        reader: SecuritySnapshotReader | None = getattr(
+            app.state,
+            "security_reader",
+            None,
+        )
+        if reader is None:
+            response.status_code = 503
+            return unavailable_security_snapshot(
+                detail="no security snapshot store is attached to this gateway"
+            )
+        try:
+            record = await reader.latest_security_snapshot()
+            control = (
+                None if record is None else await reader.get_action_control(record.incident_id)
+            )
+            return security_snapshot(record, action_control=control)
+        except SecuritySnapshotDataError as exc:
+            response.status_code = 503
+            return unavailable_security_snapshot(detail=str(exc))
+        except Exception:
+            LOGGER.exception("security snapshot read failed")
+            response.status_code = 503
+            return unavailable_security_snapshot(
+                detail="security snapshot store could not provide a trusted response"
             )
 
     return app

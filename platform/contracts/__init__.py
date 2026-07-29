@@ -105,11 +105,25 @@ from contracts.kpi import (
     ScoreHeadline,
     ScoreProof,
 )
+from contracts.security import (
+    COHORT_FEATURE_ORDER,
+    SECURITY_FEATURE_ORDER,
+    SecurityCohort,
+    SecurityFeature,
+    SecurityMeasurement,
+    SecurityMeasurementStatus,
+    SecurityMeasurementUnit,
+    SecurityMitigation,
+    SecurityResponse,
+    SecuritySnapshot,
+    SecurityTimelineEvent,
+)
 from contracts.stream import SnapshotInvalidation, SnapshotResource, StreamEventKind
 from contracts.telemetry import Observation
 
 __all__ = [
     "ACTING_ACTIONS",
+    "COHORT_FEATURE_ORDER",
     "DEDUPLICABLE_STATUSES",
     "DESTRUCTIVE_ACTIONS",
     "DETECTION_LATENCY_HEADLINE_KEY",
@@ -117,6 +131,7 @@ __all__ = [
     "ESCALATING_ACTIONS",
     "GENESIS_HASH",
     "REQUIRED_CHECKS",
+    "SECURITY_FEATURE_ORDER",
     "WATCHING_ACTIONS",
     "ActionApproval",
     "ActionControlIntent",
@@ -185,6 +200,15 @@ __all__ = [
     "RollbackVerificationStatus",
     "ScoreHeadline",
     "ScoreProof",
+    "SecurityCohort",
+    "SecurityFeature",
+    "SecurityMeasurement",
+    "SecurityMeasurementStatus",
+    "SecurityMeasurementUnit",
+    "SecurityMitigation",
+    "SecurityResponse",
+    "SecuritySnapshot",
+    "SecurityTimelineEvent",
     "SnapshotInvalidation",
     "SnapshotResource",
     "StreamEventKind",

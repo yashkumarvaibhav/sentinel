@@ -40,6 +40,7 @@ def test_postgres_migration_separates_runtime_and_dev_label_schemas() -> None:
         "0007",
         "0008",
         "0009",
+        "0010",
     ]
     sql = render_migration(
         migrations[0],
@@ -118,6 +119,16 @@ def test_action_settlement_reuses_the_lease_without_crossing_dispatch() -> None:
     assert "'VERIFY_ROLLBACK'" in sql
     assert "incident_action_execution_claims_operation_check" in sql
     assert "{{schema}}" not in sql
+
+
+def test_security_snapshot_migration_is_incident_owned_runtime_state() -> None:
+    migrations = {migration.version: migration for migration in load_migrations("postgres")}
+
+    sql = render_migration(migrations["0010"], schema="sentinel_test")
+    assert "sentinel_test.incident_security_snapshots" in sql
+    assert "REFERENCES sentinel_test.incidents (incident_id)" in sql
+    assert "incident_security_snapshots_latest_idx" in sql
+    assert "{{dev_schema}}" not in sql
 
 
 def test_migration_versions_are_sorted_and_unique() -> None:

@@ -33,6 +33,7 @@ from contracts.detection import DecompFrame, Symptom, SymptomEpisode
 from contracts.incident_detail import IncidentDetailResponse
 from contracts.incident_feed import IncidentFeedResponse
 from contracts.kpi import KpiResponse, ScoreProof
+from contracts.security import SecurityResponse
 from contracts.stream import SnapshotInvalidation
 from contracts.telemetry import Observation
 
@@ -63,6 +64,7 @@ PUBLIC_MODELS: tuple[type[BaseModel], ...] = (
     IncidentFeedResponse,
     CausalGraphResponse,
     IncidentDetailResponse,
+    SecurityResponse,
 )
 
 

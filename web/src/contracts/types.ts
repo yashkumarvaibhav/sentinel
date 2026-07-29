@@ -29,7 +29,8 @@ export type SentinelContract =
   | KpiResponse
   | IncidentFeedResponse
   | CausalGraphResponse
-  | IncidentDetailResponse;
+  | IncidentDetailResponse
+  | SecurityResponse;
 export type TelemetryScalar = string | boolean | number;
 export type Identifier = string;
 export type FlowRefs = Identifier[];
@@ -292,7 +293,7 @@ export type Resources = [SnapshotResource, ...SnapshotResource[]];
 /**
  * Authoritative snapshots an invalidation may ask the browser to refetch.
  */
-export type SnapshotResource = "all" | "health" | "decomposition" | "incidents" | "actions" | "audit";
+export type SnapshotResource = "all" | "health" | "decomposition" | "incidents" | "actions" | "security" | "audit";
 /**
  * @minItems 1
  */
@@ -378,6 +379,67 @@ export type Services5 = [Identifier, ...Identifier[]];
 export type Distribution1 = VerdictProbability[];
 export type Status5 = "decided" | "insufficient";
 export type Status6 = "ready" | "not_found" | "degraded";
+export type Honesty7 = "REAL" | "SIMULATED";
+/**
+ * @minItems 7
+ * @maxItems 7
+ */
+export type Measurements = [
+  SecurityMeasurement,
+  SecurityMeasurement,
+  SecurityMeasurement,
+  SecurityMeasurement,
+  SecurityMeasurement,
+  SecurityMeasurement,
+  SecurityMeasurement
+];
+export type EvidenceRefs5 = Identifier[];
+/**
+ * The security-view signals, whether measured or explicitly unavailable.
+ */
+export type SecurityFeature =
+  | "PATH_ENTROPY"
+  | "SOURCE_ENTROPY"
+  | "AUTH_FAILURE_RATIO"
+  | "ASN_REPUTATION"
+  | "SESSION_ENTROPY"
+  | "MACHINE_TIMING"
+  | "PROTECTED_COHORT_INTEGRITY";
+/**
+ * Whether telemetry supports a numeric security claim.
+ */
+export type SecurityMeasurementStatus = "MEASURED" | "INSUFFICIENT";
+/**
+ * What a measured numeric security value actually represents.
+ */
+export type SecurityMeasurementUnit =
+  "DEFORMATION_SCORE" | "RATIO" | "ENTROPY" | "REPUTATION_SCORE" | "COEFFICIENT_OF_VARIATION" | "INTEGRITY_RATIO";
+export type WindowCount = number;
+export type PlanRevision2 = number | null;
+/**
+ * @minItems 1
+ */
+export type EvidenceRefs6 = [Identifier, ...Identifier[]];
+/**
+ * @minItems 5
+ * @maxItems 5
+ */
+export type Measurements1 = [
+  SecurityMeasurement,
+  SecurityMeasurement,
+  SecurityMeasurement,
+  SecurityMeasurement,
+  SecurityMeasurement
+];
+export type RequestCount = number;
+export type SuspectCohorts = SecurityCohort[];
+export type BreachWindowCount = number;
+/**
+ * @minItems 1
+ */
+export type EvidenceRefs7 = [Identifier, ...Identifier[]];
+export type Timeline = SecurityTimelineEvent[];
+export type Status7 = "ready" | "empty" | "degraded";
 
 /**
  * One event-time telemetry value, containing evidence but never answer-key data.
@@ -1136,4 +1198,86 @@ export interface IncidentVerdictProof {
 export interface VerdictProbability {
   probability: Probability;
   verdict_class: VerdictClass;
+}
+/**
+ * The latest unresolved security snapshot or an explicit absence.
+ */
+export interface SecurityResponse {
+  detail: HumanText | null;
+  snapshot: SecuritySnapshot | null;
+  status: Status7;
+}
+/**
+ * One evidence-only security projection for an unresolved incident revision.
+ */
+export interface SecuritySnapshot {
+  decomposition: IncidentDecomposition;
+  honesty: Honesty7;
+  incident_id: Identifier;
+  measurements: Measurements;
+  mitigation: SecurityMitigation;
+  opened_at: UtcDatetime;
+  state: IncidentState;
+  suspect_cohorts: SuspectCohorts;
+  timeline: Timeline;
+  updated_at: UtcDatetime;
+}
+/**
+ * One scoped security measurement with evidence-window provenance.
+ */
+export interface SecurityMeasurement {
+  baseline: FiniteFloat | null;
+  detail: HumanText;
+  evidence_refs: EvidenceRefs5;
+  feature: SecurityFeature;
+  scope: Identifier | null;
+  status: SecurityMeasurementStatus;
+  unit: SecurityMeasurementUnit | null;
+  value: FiniteFloat | null;
+  window_count: WindowCount;
+  window_end: UtcDatetime | null;
+  window_start: UtcDatetime | null;
+}
+/**
+ * Latest server-held surgical action plus independent cohort integrity.
+ */
+export interface SecurityMitigation {
+  action_kind: ActionKind | null;
+  detail: HumanText;
+  estimated_blast_fraction: Probability | null;
+  plan_revision?: PlanRevision2;
+  protected_cohort_integrity: SecurityMeasurement;
+  rung_id: Identifier | null;
+  state: ActionControlState | null;
+  target_ref: Identifier | null;
+  updated_at: UtcDatetime | null;
+}
+/**
+ * One suspect cohort explicitly named by public telemetry evidence.
+ */
+export interface SecurityCohort {
+  cohort_id: Identifier;
+  detail: HumanText;
+  evidence_refs: EvidenceRefs6;
+  measurements: Measurements1;
+  request_count: RequestCount;
+  window_end: UtcDatetime;
+  window_start: UtcDatetime;
+}
+/**
+ * One security-axis episode referenced by the exact incident assessment.
+ */
+export interface SecurityTimelineEvent {
+  breach_window_count: BreachWindowCount;
+  closed_at: UtcDatetime | null;
+  detail: HumanText;
+  episode_id: Identifier;
+  evidence_refs: EvidenceRefs7;
+  kind: SymptomKind;
+  last_breach_at: UtcDatetime;
+  opened_at: UtcDatetime;
+  peak_deformation_score: Probability;
+  service: Identifier;
+  signal: SignalName;
+  status: EpisodeStatus;
 }

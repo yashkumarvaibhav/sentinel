@@ -12,7 +12,12 @@ import pytest
 from api.causal_graph import build_causal_graph
 from api.incidents import IncidentFeedPublisher, build_incident_feed_item
 from common.config import TopologyConfig, TopologyService
-from common.storage import IncidentDetailRecord, IncidentGraphRecord, IncidentRecord
+from common.storage import (
+    IncidentDetailRecord,
+    IncidentGraphRecord,
+    IncidentRecord,
+    IncidentSecurityRecord,
+)
 from contracts import (
     ActionControlSnapshot,
     CheckOutcome,
@@ -311,6 +316,7 @@ class _Store:
         self.records: list[IncidentRecord] = []
         self.graphs: list[IncidentGraphRecord] = []
         self.details: list[IncidentDetailRecord] = []
+        self.security: list[IncidentSecurityRecord] = []
         self.action_controls: list[ActionControlSnapshot] = []
 
     async def put_incident_bundle(
@@ -318,11 +324,13 @@ class _Store:
         record: IncidentRecord,
         graph: IncidentGraphRecord,
         detail: IncidentDetailRecord,
+        security: IncidentSecurityRecord,
         action_control: ActionControlSnapshot | None = None,
     ) -> bool:
         self.records.append(record)
         self.graphs.append(graph)
         self.details.append(detail)
+        self.security.append(security)
         if action_control is not None:
             self.action_controls.append(action_control)
         return self.changed
@@ -334,9 +342,10 @@ class _BrokenStore:
         record: IncidentRecord,
         graph: IncidentGraphRecord,
         detail: IncidentDetailRecord,
+        security: IncidentSecurityRecord,
         action_control: ActionControlSnapshot | None = None,
     ) -> NoReturn:
-        del record, graph, detail, action_control
+        del record, graph, detail, security, action_control
         raise RuntimeError("database unavailable")
 
 
@@ -385,11 +394,16 @@ def test_invalidation_happens_only_after_a_durable_new_revision() -> None:
         assert len(store.records) == 1
         assert len(store.graphs) == 1
         assert len(store.details) == 1
+        assert len(store.security) == 1
         assert store.records[0].payload["incident_id"] == "incident-live-1"
         assert store.graphs[0].payload["incident_id"] == "incident-live-1"
         assert store.details[0].payload["incident_id"] == "incident-live-1"
+        assert store.security[0].payload["incident_id"] == "incident-live-1"
         assert len(broker.events) == 1
-        assert broker.events[0].resources == (SnapshotResource.INCIDENTS,)
+        assert broker.events[0].resources == (
+            SnapshotResource.INCIDENTS,
+            SnapshotResource.SECURITY,
+        )
 
         stale_broker = _Broker()
         stale = IncidentFeedPublisher(store=_Store(changed=False), broker=stale_broker)

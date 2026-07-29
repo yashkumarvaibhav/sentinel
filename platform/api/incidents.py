@@ -10,9 +10,15 @@ from pydantic import ValidationError
 
 from api.causal_graph import build_causal_graph, causal_graph_record
 from api.incident_detail import build_incident_detail, incident_detail_record
+from api.security import build_security_snapshot, security_record
 from api.stream import snapshot_invalidation
 from common.config import TopologyConfig
-from common.storage import IncidentDetailRecord, IncidentGraphRecord, IncidentRecord
+from common.storage import (
+    IncidentDetailRecord,
+    IncidentGraphRecord,
+    IncidentRecord,
+    IncidentSecurityRecord,
+)
 from contracts import (
     ActionControlSnapshot,
     AuditEntry,
@@ -24,6 +30,8 @@ from contracts import (
     IncidentEvidenceValue,
     IncidentFeedItem,
     IncidentFeedResponse,
+    SecurityCohort,
+    SecurityMeasurement,
     SnapshotInvalidation,
     SnapshotResource,
     SymptomEpisode,
@@ -49,6 +57,7 @@ class IncidentFeedStore(Protocol):
         record: IncidentRecord,
         graph: IncidentGraphRecord,
         detail: IncidentDetailRecord,
+        security: IncidentSecurityRecord,
         action_control: ActionControlSnapshot | None = None,
     ) -> bool: ...
 
@@ -97,6 +106,8 @@ class IncidentFeedPublisher:
         calibration_note: str | None = None,
         explained_event: str | None = None,
         action_control: ActionControlSnapshot | None = None,
+        security_cohorts: tuple[SecurityCohort, ...] = (),
+        protected_cohort_integrity: SecurityMeasurement | None = None,
     ) -> IncidentPublishResult:
         """Write a newer incident revision and signal browsers after commit."""
         item = build_incident_feed_item(
@@ -128,17 +139,31 @@ class IncidentFeedPublisher:
             calibration_note=calibration_note,
             decomposition_truncated=decomposition_truncated,
         )
+        security = build_security_snapshot(
+            outcome,
+            episodes=episodes,
+            decomposition=detail.decomposition,
+            honesty=honesty,
+            cohorts=security_cohorts,
+            action_control=action_control,
+            protected_cohort_integrity=protected_cohort_integrity,
+        )
         persisted = await self._store.put_incident_bundle(
             incident_record(item),
             causal_graph_record(graph),
             incident_detail_record(detail),
+            security_record(security),
             action_control,
         )
         if persisted:
             resources = (
-                (SnapshotResource.INCIDENTS, SnapshotResource.ACTIONS)
+                (
+                    SnapshotResource.INCIDENTS,
+                    SnapshotResource.ACTIONS,
+                    SnapshotResource.SECURITY,
+                )
                 if action_control is not None
-                else (SnapshotResource.INCIDENTS,)
+                else (SnapshotResource.INCIDENTS, SnapshotResource.SECURITY)
             )
             self._broker.publish(snapshot_invalidation(*resources))
         return IncidentPublishResult(item=item, persisted=persisted)

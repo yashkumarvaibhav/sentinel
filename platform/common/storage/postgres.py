@@ -31,6 +31,7 @@ from common.storage.models import (
     IncidentDetailRecord,
     IncidentGraphRecord,
     IncidentRecord,
+    IncidentSecurityRecord,
 )
 from common.storage.pool import PostgresPool
 from contracts import (
@@ -54,6 +55,10 @@ class PostgresRepository:
         self._incidents = sql.Identifier(schema, "incidents")
         self._incident_graphs = sql.Identifier(schema, "incident_causal_graphs")
         self._incident_details = sql.Identifier(schema, "incident_details")
+        self._incident_security_snapshots = sql.Identifier(
+            schema,
+            "incident_security_snapshots",
+        )
         self._incident_action_controls = sql.Identifier(schema, "incident_action_controls")
         self._action_execution_claims = sql.Identifier(schema, "incident_action_execution_claims")
         self._audit_ledger = sql.Identifier(schema, "audit_ledger")
@@ -95,16 +100,21 @@ class PostgresRepository:
         record: IncidentRecord,
         graph: IncidentGraphRecord,
         detail: IncidentDetailRecord,
+        security: IncidentSecurityRecord,
         action_control: ActionControlSnapshot | None = None,
     ) -> bool:
         """Atomically advance one incident, its proof, and any evidence-time action plan."""
         if (
             graph.incident_id != record.incident_id
             or detail.incident_id != record.incident_id
+            or security.incident_id != record.incident_id
             or graph.updated_at != record.updated_at
             or detail.updated_at != record.updated_at
+            or security.updated_at != record.updated_at
         ):
-            raise ValueError("incident, causal graph and detail storage identities must match")
+            raise ValueError(
+                "incident, causal graph, detail and security storage identities must match"
+            )
         if action_control is not None and (
             action_control.incident_id != record.incident_id
             or action_control.created_at != record.updated_at
@@ -148,6 +158,17 @@ class PostgresRepository:
             RETURNING incident_id
             """
         ).format(table=self._incident_details)
+        security_query = sql.SQL(
+            """
+            INSERT INTO {table} (incident_id, updated_at, payload)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (incident_id) DO UPDATE SET
+                updated_at = EXCLUDED.updated_at,
+                payload = EXCLUDED.payload
+            WHERE {table}.updated_at < EXCLUDED.updated_at
+            RETURNING incident_id
+            """
+        ).format(table=self._incident_security_snapshots)
         async with self._pool.connection() as connection:
             incident_cursor = await connection.execute(
                 incident_query,
@@ -181,6 +202,16 @@ class PostgresRepository:
             )
             if await detail_cursor.fetchone() is None:
                 raise RuntimeError("incident detail could not advance with its incident")
+            security_cursor = await connection.execute(
+                security_query,
+                (
+                    security.incident_id,
+                    security.updated_at,
+                    Jsonb(security.payload),
+                ),
+            )
+            if await security_cursor.fetchone() is None:
+                raise RuntimeError("security snapshot could not advance with its incident")
             if action_control is not None:
                 await self._insert_action_control(connection, action_control)
             return True
@@ -271,6 +302,32 @@ class PostgresRepository:
         if row is None:
             return None
         return IncidentDetailRecord(
+            incident_id=cast(str, row[0]),
+            updated_at=cast(datetime, row[1]),
+            payload=cast(dict[str, JsonValue], row[2]),
+        )
+
+    async def latest_security_snapshot(self) -> IncidentSecurityRecord | None:
+        """Return the newest security snapshot whose incident is unresolved."""
+        query = sql.SQL(
+            """
+            SELECT security.incident_id, security.updated_at, security.payload
+            FROM {security} AS security
+            JOIN {incidents} AS incident USING (incident_id)
+            WHERE incident.state IN ('OPEN', 'MITIGATING', 'MONITORING')
+            ORDER BY security.updated_at DESC, security.incident_id ASC
+            LIMIT 1
+            """
+        ).format(
+            security=self._incident_security_snapshots,
+            incidents=self._incidents,
+        )
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(query)
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return IncidentSecurityRecord(
             incident_id=cast(str, row[0]),
             updated_at=cast(datetime, row[1]),
             payload=cast(dict[str, JsonValue], row[2]),

@@ -2808,6 +2808,475 @@
       "title": "ScoreProof",
       "type": "object"
     },
+    "SecurityCohort": {
+      "additionalProperties": false,
+      "description": "One suspect cohort explicitly named by public telemetry evidence.",
+      "properties": {
+        "cohort_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "detail": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "evidence_refs": {
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "minItems": 1,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "measurements": {
+          "items": {
+            "$ref": "#/$defs/SecurityMeasurement"
+          },
+          "maxItems": 5,
+          "minItems": 5,
+          "title": "Measurements",
+          "type": "array"
+        },
+        "request_count": {
+          "minimum": 1,
+          "title": "Request Count",
+          "type": "integer"
+        },
+        "window_end": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "window_start": {
+          "$ref": "#/$defs/UtcDatetime"
+        }
+      },
+      "required": [
+        "cohort_id",
+        "request_count",
+        "window_start",
+        "window_end",
+        "measurements",
+        "evidence_refs",
+        "detail"
+      ],
+      "title": "SecurityCohort",
+      "type": "object"
+    },
+    "SecurityFeature": {
+      "description": "The security-view signals, whether measured or explicitly unavailable.",
+      "enum": [
+        "PATH_ENTROPY",
+        "SOURCE_ENTROPY",
+        "AUTH_FAILURE_RATIO",
+        "ASN_REPUTATION",
+        "SESSION_ENTROPY",
+        "MACHINE_TIMING",
+        "PROTECTED_COHORT_INTEGRITY"
+      ],
+      "title": "SecurityFeature",
+      "type": "string"
+    },
+    "SecurityMeasurement": {
+      "additionalProperties": false,
+      "description": "One scoped security measurement with evidence-window provenance.",
+      "properties": {
+        "baseline": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FiniteFloat"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "detail": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "evidence_refs": {
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "feature": {
+          "$ref": "#/$defs/SecurityFeature"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/SecurityMeasurementStatus"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SecurityMeasurementUnit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FiniteFloat"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "window_count": {
+          "minimum": 0,
+          "title": "Window Count",
+          "type": "integer"
+        },
+        "window_end": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcDatetime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "window_start": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcDatetime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "feature",
+        "status",
+        "scope",
+        "value",
+        "baseline",
+        "unit",
+        "window_start",
+        "window_end",
+        "window_count",
+        "evidence_refs",
+        "detail"
+      ],
+      "title": "SecurityMeasurement",
+      "type": "object"
+    },
+    "SecurityMeasurementStatus": {
+      "description": "Whether telemetry supports a numeric security claim.",
+      "enum": [
+        "MEASURED",
+        "INSUFFICIENT"
+      ],
+      "title": "SecurityMeasurementStatus",
+      "type": "string"
+    },
+    "SecurityMeasurementUnit": {
+      "description": "What a measured numeric security value actually represents.",
+      "enum": [
+        "DEFORMATION_SCORE",
+        "RATIO",
+        "ENTROPY",
+        "REPUTATION_SCORE",
+        "COEFFICIENT_OF_VARIATION",
+        "INTEGRITY_RATIO"
+      ],
+      "title": "SecurityMeasurementUnit",
+      "type": "string"
+    },
+    "SecurityMitigation": {
+      "additionalProperties": false,
+      "description": "Latest server-held surgical action plus independent cohort integrity.",
+      "properties": {
+        "action_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActionKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "detail": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "estimated_blast_fraction": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Probability"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "plan_revision": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plan Revision"
+        },
+        "protected_cohort_integrity": {
+          "$ref": "#/$defs/SecurityMeasurement"
+        },
+        "rung_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActionControlState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcDatetime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "state",
+        "rung_id",
+        "action_kind",
+        "target_ref",
+        "estimated_blast_fraction",
+        "updated_at",
+        "protected_cohort_integrity",
+        "detail"
+      ],
+      "title": "SecurityMitigation",
+      "type": "object"
+    },
+    "SecurityResponse": {
+      "additionalProperties": false,
+      "description": "The latest unresolved security snapshot or an explicit absence.",
+      "properties": {
+        "detail": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HumanText"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SecuritySnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "enum": [
+            "ready",
+            "empty",
+            "degraded"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "snapshot",
+        "detail"
+      ],
+      "title": "SecurityResponse",
+      "type": "object"
+    },
+    "SecuritySnapshot": {
+      "additionalProperties": false,
+      "description": "One evidence-only security projection for an unresolved incident revision.",
+      "properties": {
+        "decomposition": {
+          "$ref": "#/$defs/IncidentDecomposition"
+        },
+        "honesty": {
+          "enum": [
+            "REAL",
+            "SIMULATED"
+          ],
+          "title": "Honesty",
+          "type": "string"
+        },
+        "incident_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "measurements": {
+          "items": {
+            "$ref": "#/$defs/SecurityMeasurement"
+          },
+          "maxItems": 7,
+          "minItems": 7,
+          "title": "Measurements",
+          "type": "array"
+        },
+        "mitigation": {
+          "$ref": "#/$defs/SecurityMitigation"
+        },
+        "opened_at": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "state": {
+          "$ref": "#/$defs/IncidentState"
+        },
+        "suspect_cohorts": {
+          "items": {
+            "$ref": "#/$defs/SecurityCohort"
+          },
+          "title": "Suspect Cohorts",
+          "type": "array"
+        },
+        "timeline": {
+          "items": {
+            "$ref": "#/$defs/SecurityTimelineEvent"
+          },
+          "title": "Timeline",
+          "type": "array"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/UtcDatetime"
+        }
+      },
+      "required": [
+        "incident_id",
+        "opened_at",
+        "updated_at",
+        "state",
+        "honesty",
+        "timeline",
+        "measurements",
+        "suspect_cohorts",
+        "decomposition",
+        "mitigation"
+      ],
+      "title": "SecuritySnapshot",
+      "type": "object"
+    },
+    "SecurityTimelineEvent": {
+      "additionalProperties": false,
+      "description": "One security-axis episode referenced by the exact incident assessment.",
+      "properties": {
+        "breach_window_count": {
+          "minimum": 1,
+          "title": "Breach Window Count",
+          "type": "integer"
+        },
+        "closed_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcDatetime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "detail": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "episode_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "evidence_refs": {
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "minItems": 1,
+          "title": "Evidence Refs",
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/SymptomKind"
+        },
+        "last_breach_at": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "opened_at": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "peak_deformation_score": {
+          "$ref": "#/$defs/Probability"
+        },
+        "service": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "signal": {
+          "$ref": "#/$defs/SignalName"
+        },
+        "status": {
+          "$ref": "#/$defs/EpisodeStatus"
+        }
+      },
+      "required": [
+        "episode_id",
+        "kind",
+        "service",
+        "signal",
+        "status",
+        "opened_at",
+        "last_breach_at",
+        "closed_at",
+        "peak_deformation_score",
+        "breach_window_count",
+        "evidence_refs",
+        "detail"
+      ],
+      "title": "SecurityTimelineEvent",
+      "type": "object"
+    },
     "SignalName": {
       "maxLength": 512,
       "minLength": 1,
@@ -2852,6 +3321,7 @@
         "decomposition",
         "incidents",
         "actions",
+        "security",
         "audit"
       ],
       "title": "SnapshotResource",
@@ -3304,6 +3774,9 @@
     },
     {
       "$ref": "#/$defs/IncidentDetailResponse"
+    },
+    {
+      "$ref": "#/$defs/SecurityResponse"
     }
   ],
   "title": "SentinelContract"

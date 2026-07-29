@@ -24,6 +24,7 @@ from common.storage import (
     IncidentGraphRecord,
     IncidentMemoryRepository,
     IncidentRecord,
+    IncidentSecurityRecord,
     IncidentSignatureRecord,
     PostgresPool,
     PostgresRepository,
@@ -422,11 +423,30 @@ async def _round_trip_incident_graph_bundle(
             "proof": "complete",
         },
     )
+    security = IncidentSecurityRecord(
+        incident_id=incident.incident_id,
+        updated_at=incident.updated_at,
+        payload={
+            "incident_id": incident.incident_id,
+            "updated_at": incident.updated_at.isoformat(),
+            "evidence": "security-only",
+        },
+    )
     control = _action_control(incident, ts=incident.updated_at)
-    assert await repository.put_incident_bundle(incident, graph, detail, control) is True
-    assert await repository.put_incident_bundle(incident, graph, detail) is False
+    assert (
+        await repository.put_incident_bundle(
+            incident,
+            graph,
+            detail,
+            security,
+            control,
+        )
+        is True
+    )
+    assert await repository.put_incident_bundle(incident, graph, detail, security) is False
     assert await repository.latest_incident_graph() == graph
     assert await repository.get_incident_detail(incident.incident_id) == detail
+    assert await repository.latest_security_snapshot() == security
     assert await repository.get_action_control(incident.incident_id) == control
     changed, requested = await repository.transition_action_control(
         ActionControlRequest(
@@ -694,8 +714,19 @@ async def _round_trip_incident_graph_bundle(
             "payload": detail.payload | {"updated_at": half_advance.updated_at.isoformat()},
         }
     )
+    half_security = security.model_copy(
+        update={
+            "updated_at": half_advance.updated_at,
+            "payload": security.payload | {"updated_at": half_advance.updated_at.isoformat()},
+        }
+    )
     with pytest.raises(RuntimeError, match="could not advance"):
-        await repository.put_incident_bundle(half_advance, half_graph, half_detail)
+        await repository.put_incident_bundle(
+            half_advance,
+            half_graph,
+            half_detail,
+            half_security,
+        )
     assert await repository.get_incident(incident.incident_id) == incident
     assert await repository.get_incident_detail(incident.incident_id) == detail
 
@@ -722,8 +753,76 @@ async def _round_trip_incident_graph_bundle(
             "payload": detail.payload | {"updated_at": resolved.updated_at.isoformat()},
         }
     )
-    assert await repository.put_incident_bundle(resolved, resolved_graph, resolved_detail) is True
+    resolved_security = security.model_copy(
+        update={
+            "updated_at": resolved.updated_at,
+            "payload": security.payload | {"updated_at": resolved.updated_at.isoformat()},
+        }
+    )
+    assert (
+        await repository.put_incident_bundle(
+            resolved,
+            resolved_graph,
+            resolved_detail,
+            resolved_security,
+        )
+        is True
+    )
     assert await repository.latest_incident_graph() is None
+    assert await repository.latest_security_snapshot() is None
+    assert await repository.get_incident_detail(incident.incident_id) == resolved_detail
+
+    # Make only the security projection newer. The card, graph, and detail
+    # writes must all roll back when the last member cannot advance.
+    future_security_time = ts + timedelta(seconds=15)
+    security_table = sql.Identifier(
+        config.postgres_schema,
+        "incident_security_snapshots",
+    )
+    async with pool.connection() as connection:
+        await connection.execute(
+            sql.SQL("UPDATE {} SET updated_at = %s WHERE incident_id = %s").format(security_table),
+            (future_security_time, incident.incident_id),
+        )
+    security_blocked_incident = resolved.model_copy(
+        update={
+            "state": "MONITORING",
+            "updated_at": ts + timedelta(seconds=14),
+            "payload": resolved.payload | {"state": "MONITORING"},
+        }
+    )
+    security_blocked_graph = resolved_graph.model_copy(
+        update={
+            "updated_at": security_blocked_incident.updated_at,
+            "payload": resolved_graph.payload
+            | {
+                "incident_state": "MONITORING",
+                "updated_at": security_blocked_incident.updated_at.isoformat(),
+            },
+        }
+    )
+    security_blocked_detail = resolved_detail.model_copy(
+        update={
+            "updated_at": security_blocked_incident.updated_at,
+            "payload": resolved_detail.payload
+            | {"updated_at": security_blocked_incident.updated_at.isoformat()},
+        }
+    )
+    security_blocked_snapshot = resolved_security.model_copy(
+        update={
+            "updated_at": security_blocked_incident.updated_at,
+            "payload": resolved_security.payload
+            | {"updated_at": security_blocked_incident.updated_at.isoformat()},
+        }
+    )
+    with pytest.raises(RuntimeError, match="security snapshot could not advance"):
+        await repository.put_incident_bundle(
+            security_blocked_incident,
+            security_blocked_graph,
+            security_blocked_detail,
+            security_blocked_snapshot,
+        )
+    assert await repository.get_incident(incident.incident_id) == resolved
     assert await repository.get_incident_detail(incident.incident_id) == resolved_detail
 
     # Make only the proof artificially newer. The card and graph writes would
@@ -760,8 +859,20 @@ async def _round_trip_incident_graph_bundle(
             | {"updated_at": blocked_incident.updated_at.isoformat()},
         }
     )
+    blocked_security = resolved_security.model_copy(
+        update={
+            "updated_at": blocked_incident.updated_at,
+            "payload": resolved_security.payload
+            | {"updated_at": blocked_incident.updated_at.isoformat()},
+        }
+    )
     with pytest.raises(RuntimeError, match="incident detail could not advance"):
-        await repository.put_incident_bundle(blocked_incident, blocked_graph, blocked_detail)
+        await repository.put_incident_bundle(
+            blocked_incident,
+            blocked_graph,
+            blocked_detail,
+            blocked_security,
+        )
     assert await repository.get_incident(incident.incident_id) == resolved
     assert await repository.latest_incident_graph() is None
 

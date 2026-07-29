@@ -28,6 +28,7 @@ class SnapshotResource(StrEnum):
     DECOMPOSITION = "decomposition"
     INCIDENTS = "incidents"
     ACTIONS = "actions"
+    SECURITY = "security"
     AUDIT = "audit"
 
 

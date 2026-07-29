@@ -19,6 +19,19 @@ describe('parseSnapshotInvalidation', () => {
     });
   });
 
+  it('accepts a security snapshot invalidation', () => {
+    expect(
+      parseSnapshotInvalidation(
+        JSON.stringify({
+          event_id: 'event-security-1',
+          ts: '2026-07-29T13:00:00Z',
+          kind: 'snapshot.invalidate',
+          resources: ['security'],
+        }),
+      ).resources,
+    ).toEqual(['security']);
+  });
+
   it.each([
     '{}',
     '{"event_id":"x","ts":"not-a-date","kind":"snapshot.invalidate","resources":["health"]}',

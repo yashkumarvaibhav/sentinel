@@ -126,6 +126,7 @@ def test_mutation_is_secret_gated_and_identity_is_server_bound() -> None:
     assert broker.events[-1].resources == (
         SnapshotResource.INCIDENTS,
         SnapshotResource.ACTIONS,
+        SnapshotResource.SECURITY,
     )
 
 
