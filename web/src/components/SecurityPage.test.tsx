@@ -54,6 +54,9 @@ it('renders decomposition, explicit cohort attribution, and honest insufficiency
   expect(screen.getByRole('heading', { name: 'Attack timeline' })).toBeVisible();
   expect(screen.getByText('public-client-group-17')).toBeVisible();
   expect(screen.getByRole('columnheader', { name: 'Machine timing' })).toBeVisible();
+  expect(
+    screen.getByRole('region', { name: 'Scrollable suspect cohort evidence table' }),
+  ).toHaveAttribute('tabindex', '0');
   expect(screen.getAllByText('Insufficient').length).toBeGreaterThan(0);
   expect(
     screen.getAllByText('No evidence window or numeric value exists.').length,

@@ -11,14 +11,15 @@
 
    - **Identity tokens** (`--accent`, `--page`, `--ink`, …) are borrowed, and
      they flip with the theme.
-   - **Domain tokens** (`--color-base`, `--color-event`, `--color-residual`,
+   - **Domain tokens** (`--color-decomp-base`, `--color-event`, `--color-residual`,
      and the state colours) are the product's own vocabulary, and are
      deliberately NOT theme-dependent: "this part of the surge is unexplained"
      must be the same red in a dark room and a lit one, or a screenshot of an
      incident stops meaning one fixed thing. */
 @theme {
   /* --- domain: the decomposition, which is the thesis ------------------- */
-  --color-base: oklch(0.72 0.04 240);
+  /* `base` alone collides with Tailwind's `text-base` font-size utility. */
+  --color-decomp-base: oklch(0.72 0.04 240);
   --color-event: oklch(0.78 0.13 85);
   --color-residual: oklch(0.65 0.21 25);
 
@@ -48,8 +49,8 @@
 :root {
   color-scheme: light;
 
-  --accent: #277a75;
-  --accent-soft: rgba(39, 122, 117, 0.12);
+  --accent: #236b67;
+  --accent-soft: rgba(35, 107, 103, 0.12);
   --accent-contrast: #ffffff;
   --ink: #333333;
   --body: #4d4d4d;

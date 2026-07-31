@@ -96,7 +96,7 @@ export function DecompositionChart({ frames, height = 260 }: DecompositionChartP
         splitLine: { lineStyle: { opacity: 0.12 } },
       },
       series: [
-        band('explained base', series.base, token('--color-base', '#8aa0bf')),
+        band('explained base', series.base, token('--color-decomp-base', '#8aa0bf')),
         band('explained by event', series.event, token('--color-event', '#e0a63c')),
         band('unexplained residual', series.residual, token('--color-residual', '#e2593f')),
         {

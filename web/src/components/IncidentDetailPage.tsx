@@ -120,7 +120,7 @@ function DecompositionProof({ detail }: { detail: IncidentDetail }) {
     frame.residual_score > strongest.residual_score ? frame : strongest,
   );
   const parts: Array<{ name: string; value: number; color: string }> = [
-    { name: 'Explained base', value: peak.explained_base, color: 'var(--color-base)' },
+    { name: 'Explained base', value: peak.explained_base, color: 'var(--color-decomp-base)' },
     { name: 'Explained event', value: peak.explained_event, color: 'var(--color-event)' },
     { name: 'Unexplained residual', value: peak.residual, color: 'var(--color-residual)' },
   ];

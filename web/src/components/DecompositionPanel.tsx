@@ -5,7 +5,7 @@ import type { DecompositionWindow } from '@/api/decomposition';
 import { DecompositionChart } from '@/components/DecompositionChart';
 
 const LEGEND = [
-  { label: 'explained base', className: 'bg-base' },
+  { label: 'explained base', className: 'bg-decomp-base' },
   { label: 'explained by event', className: 'bg-event' },
   { label: 'unexplained residual', className: 'bg-residual' },
 ];

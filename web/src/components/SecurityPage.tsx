@@ -223,7 +223,12 @@ function Cohorts({ cohorts }: { cohorts: SecurityCohort[] }) {
     );
   }
   return (
-    <div className="border-line overflow-x-auto rounded-lg border">
+    <div
+      aria-label="Scrollable suspect cohort evidence table"
+      className="border-line overflow-x-auto rounded-lg border"
+      role="region"
+      tabIndex={0}
+    >
       <table className="w-full min-w-[58rem] text-left text-xs">
         <thead className="bg-sidebar text-muted">
           <tr>

@@ -161,7 +161,7 @@ function nodeStyle(node: CausalGraphNode): React.CSSProperties {
       ? 'var(--color-residual)'
       : node.symptom_heat >= 0.4
         ? 'var(--color-event)'
-        : 'var(--color-base)';
+        : 'var(--color-decomp-base)';
   return {
     background: 'var(--raised)',
     border: `2px solid ${signalColor}`,

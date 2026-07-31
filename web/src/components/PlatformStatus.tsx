@@ -40,7 +40,7 @@ function describe(error: unknown): string {
 function Dot({ ready }: { ready: boolean }) {
   return (
     <span
-      className={`inline-block size-2 rounded-full ${ready ? 'bg-base' : 'bg-residual'}`}
+      className={`inline-block size-2 rounded-full ${ready ? 'bg-decomp-base' : 'bg-residual'}`}
       aria-hidden="true"
     />
   );
