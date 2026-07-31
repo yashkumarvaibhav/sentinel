@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Literal
 
 from common.config import DetectorConfig, SentinelConfig, load_config
-from contracts import AgentStatus, DecisionAction, EvidenceAxis
+from contracts import AgentStatus, DecisionAction, EvidenceAxis, SymptomEpisode
 from decision import ChangeFeed, DecisionPipeline, DecisionTick, episode_timeline
 from decision.config import (
     ActionPolicyConfig,
@@ -113,6 +113,10 @@ class DecisionReplay:
     ticks: tuple[DecisionTick, ...]
     detector_fingerprint: str
     decision_fingerprint: str
+    # Public detector output retained for runtime materialization. This is the
+    # exact revision stream already consumed above; no scorer label is attached
+    # or needed to reconstruct the evidence at a decision tick.
+    episode_revisions: tuple[SymptomEpisode, ...] = ()
 
 
 def covered_services(capture: RuntimeCapture, *, detector: DetectorConfig) -> frozenset[str]:
@@ -188,6 +192,7 @@ def replay_capture_decisions(
         covered_services=tuple(sorted(services)),
         episode_count=len(latest_episode_revisions(replay.episodes)),
         ticks=tuple(ticks),
+        episode_revisions=replay.episodes,
     )
 
 
