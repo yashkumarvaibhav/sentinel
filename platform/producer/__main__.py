@@ -24,13 +24,15 @@ from decision.config import (
     load_verdict_rules,
 )
 from decision.runtime import DecisionConfigBundle, LiveDecisionRuntime
-from detection.live import base_tick_seconds, floor_to_tick
+from detection.live import base_tick_seconds
 from detection.watermark import WatermarkBuffer
 from producer.service import (
     NORMALIZED_TOPIC,
     BusRecord,
     LiveProducerService,
+    plan_resume,
     run_forever,
+    silence_horizon_seconds,
 )
 
 _LOG = logging.getLogger("sentinel.producer")
@@ -88,12 +90,19 @@ async def run() -> None:
         # The anchor is read before anything is built: the detector state is
         # anchored at construction, so a producer that has run before has to
         # start its processors on the same origin its durable position names.
-        resumed = await store.get_live_producer_checkpoint(config.live_producer_id)
-        anchor = (
-            resumed.anchor_ts
-            if resumed is not None
-            else floor_to_tick(datetime.now(UTC), tick_seconds=tick_seconds)
+        plan = plan_resume(
+            await store.get_live_producer_checkpoint(config.live_producer_id),
+            now=datetime.now(UTC),
+            tick_seconds=tick_seconds,
+            max_gap_seconds=silence_horizon_seconds(snapshot.detectors),
         )
+        if plan.discontinuity_seconds is not None:
+            _LOG.warning(
+                "live producer was not running for %.0fs; starting a new stream at %s "
+                "rather than replaying a gap it has no evidence for",
+                plan.discontinuity_seconds,
+                plan.anchor_ts.isoformat(),
+            )
         async with open_context_service(calendar=snapshot.events, runtime=config) as contexts:
             runtime = LiveDecisionRuntime(
                 config=snapshot,
@@ -101,9 +110,9 @@ async def run() -> None:
                 publisher=IncidentFeedPublisher(store=store, broker=broker),
                 checkpoints=store,
                 producer_id=config.live_producer_id,
-                anchor_ts=anchor,
+                anchor_ts=plan.anchor_ts,
                 stimulus_honesty=config.live_producer_stimulus_honesty,
-                published_baseline=0 if resumed is None else resumed.published_incidents,
+                published_baseline=plan.published_baseline,
             )
             service = LiveProducerService(
                 runtime=runtime,
@@ -125,8 +134,8 @@ async def run() -> None:
                     snapshot.fingerprint,
                     config.live_producer_id,
                     config.live_producer_stimulus_honesty,
-                    anchor.isoformat(),
-                    resumed is not None,
+                    plan.anchor_ts.isoformat(),
+                    plan.checkpoint is not None,
                 )
                 await run_forever(service, _records(consumer), asyncio.Event())
             finally:

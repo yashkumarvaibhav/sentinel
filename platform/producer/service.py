@@ -24,8 +24,11 @@ from typing import Protocol
 
 from pydantic import ValidationError
 
+from common.config import DetectorConfig
+from common.storage.models import LiveProducerCheckpoint
 from contracts import ContextWindow, Observation
 from decision.runtime import LiveDecisionRuntime
+from detection.live import floor_to_tick
 from detection.watermark import WatermarkBuffer
 
 LOGGER = logging.getLogger(__name__)
@@ -41,6 +44,66 @@ class BusRecord:
     partition: int
     offset: int
     value: bytes | None
+
+
+@dataclass(frozen=True, slots=True)
+class ResumePlan:
+    """Where a starting producer picks the stream up, and whether it can."""
+
+    anchor_ts: datetime
+    checkpoint: LiveProducerCheckpoint | None
+    published_baseline: int
+    discontinuity_seconds: float | None
+
+
+def silence_horizon_seconds(detector: DetectorConfig) -> float:
+    """How long a stream may go unmeasured before absence becomes a symptom.
+
+    Derived from the committed silence rules rather than offered as a knob:
+    the whole point of the bound is that past this horizon an empty window is
+    read as the service having gone quiet, so a looser value would be a licence
+    to manufacture exactly the symptom it exists to prevent.
+    """
+    return min(rule.maximum_age_seconds for rule in detector.liveness.silence_rules.values())
+
+
+def plan_resume(
+    checkpoint: LiveProducerCheckpoint | None,
+    *,
+    now: datetime,
+    tick_seconds: int,
+    max_gap_seconds: float,
+) -> ResumePlan:
+    """Resume the recorded stream, or declare a discontinuity and start a new one.
+
+    Replaying a gap the platform was switched off for would walk the detectors
+    through thousands of empty windows, and an empty window is precisely what
+    the liveness detector reads as silence. Downtime is not evidence about the
+    service, so past the horizon this producer says so and re-anchors.
+    """
+    if checkpoint is None:
+        return ResumePlan(
+            anchor_ts=floor_to_tick(now, tick_seconds=tick_seconds),
+            checkpoint=None,
+            published_baseline=0,
+            discontinuity_seconds=None,
+        )
+    gap = (now - checkpoint.tick_ts).total_seconds()
+    if gap <= max_gap_seconds:
+        return ResumePlan(
+            anchor_ts=checkpoint.anchor_ts,
+            checkpoint=checkpoint,
+            published_baseline=checkpoint.published_incidents,
+            discontinuity_seconds=None,
+        )
+    return ResumePlan(
+        anchor_ts=floor_to_tick(now, tick_seconds=tick_seconds),
+        checkpoint=None,
+        # A lifetime publication count is not a claim about continuity, so it
+        # survives the break that the anchor does not.
+        published_baseline=checkpoint.published_incidents,
+        discontinuity_seconds=gap,
+    )
 
 
 @dataclass(frozen=True, slots=True)

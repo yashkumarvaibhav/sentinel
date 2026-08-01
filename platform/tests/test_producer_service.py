@@ -12,9 +12,17 @@ from pathlib import Path
 import pytest
 
 from api.incidents import IncidentPublishResult
+from common.config import load_config
+from common.storage import LiveProducerCheckpoint
 from contracts import ContextWindow, Observation
 from detection.watermark import WatermarkBuffer
-from producer.service import NORMALIZED_TOPIC, BusRecord, LiveProducerService
+from producer.service import (
+    NORMALIZED_TOPIC,
+    BusRecord,
+    LiveProducerService,
+    plan_resume,
+    silence_horizon_seconds,
+)
 
 START = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -150,16 +158,14 @@ def test_an_undecodable_record_is_counted_and_stepped_over() -> None:
     assert committer.committed == [0, 1]
 
 
-@dataclass(frozen=True)
-class _Checkpoint:
-    anchor_ts: datetime
-    tick_ts: datetime
-    published_incidents: int = 0
-
-
 def test_a_resumed_producer_continues_from_its_durable_position() -> None:
     runtime = _Runtime(
-        checkpoint=_Checkpoint(anchor_ts=START, tick_ts=START + timedelta(seconds=10))
+        checkpoint=LiveProducerCheckpoint(
+            producer_id="test-producer",
+            published_incidents=0,
+            anchor_ts=START,
+            tick_ts=START + timedelta(seconds=10),
+        )
     )
     service = _service(runtime, _Committer())
 
@@ -175,6 +181,68 @@ def test_a_resumed_producer_continues_from_its_durable_position() -> None:
     assert runtime.ticks[0] == START + timedelta(seconds=12)
 
 
+def test_downtime_longer_than_the_silence_horizon_starts_a_fresh_stream() -> None:
+    """Replaying a gap the platform was switched off for would fabricate silence.
+
+    Every window in the gap is empty, and an empty window is exactly what the
+    liveness detector reads as the service having gone quiet. Past the horizon
+    where that becomes a symptom, the honest answer is that this producer has
+    no evidence for the gap at all.
+    """
+    now = START + timedelta(hours=8)
+    checkpoint = LiveProducerCheckpoint(
+        producer_id="test-producer",
+        published_incidents=7,
+        anchor_ts=START,
+        tick_ts=START + timedelta(seconds=10),
+    )
+
+    plan = plan_resume(checkpoint, now=now, tick_seconds=2, max_gap_seconds=120)
+
+    assert plan.checkpoint is None, "the gap is not replayed"
+    assert plan.anchor_ts == now
+    assert plan.discontinuity_seconds == 8 * 3600 - 10
+    # The lifetime publication count is not a fact about continuity.
+    assert plan.published_baseline == 7
+
+
+def test_a_short_restart_resumes_exactly_where_it_left_off() -> None:
+    now = START + timedelta(seconds=40)
+    checkpoint = LiveProducerCheckpoint(
+        producer_id="test-producer",
+        published_incidents=3,
+        anchor_ts=START,
+        tick_ts=START + timedelta(seconds=10),
+    )
+
+    plan = plan_resume(checkpoint, now=now, tick_seconds=2, max_gap_seconds=120)
+
+    assert plan.checkpoint == checkpoint
+    assert plan.anchor_ts == START
+    assert plan.discontinuity_seconds is None
+    assert plan.published_baseline == 3
+
+
+def test_a_producer_that_has_never_run_anchors_on_the_tick_it_started_in() -> None:
+    plan = plan_resume(None, now=START + timedelta(seconds=3), tick_seconds=2, max_gap_seconds=120)
+
+    assert plan.checkpoint is None
+    assert plan.anchor_ts == START + timedelta(seconds=2)
+    assert plan.published_baseline == 0
+
+
+def test_the_resume_bound_is_the_configured_silence_horizon() -> None:
+    """It is derived, not a knob: loosening it is what would fabricate silence."""
+    detectors = load_config(REPO_ROOT / "config").detectors
+
+    horizon = silence_horizon_seconds(detectors)
+
+    assert horizon == min(
+        rule.maximum_age_seconds for rule in detectors.liveness.silence_rules.values()
+    )
+    assert horizon > 0
+
+
 def test_a_runtime_built_on_a_different_anchor_refuses_to_resume() -> None:
     """The detector state is anchored at construction, so a mismatch is a bug.
 
@@ -182,7 +250,9 @@ def test_a_runtime_built_on_a_different_anchor_refuses_to_resume() -> None:
     origin, which is exactly what a restarted producer did on the testbed.
     """
     runtime = _Runtime(
-        checkpoint=_Checkpoint(
+        checkpoint=LiveProducerCheckpoint(
+            producer_id="test-producer",
+            published_incidents=0,
             anchor_ts=START - timedelta(minutes=5),
             tick_ts=START + timedelta(seconds=10),
         )
