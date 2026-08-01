@@ -198,7 +198,7 @@ export function IncidentFeed() {
   return (
     <section className="flex flex-col gap-4" aria-labelledby="live-incidents">
       <div>
-        <h2 id="live-incidents" className="text-sm font-medium tracking-wide uppercase">
+        <h2 id="live-incidents" className="eyebrow font-sans">
           Live incidents
         </h2>
         <p className="text-muted mt-1 text-xs">

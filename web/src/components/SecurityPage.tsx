@@ -81,7 +81,7 @@ function Section({
   return (
     <section className="flex flex-col gap-4" aria-labelledby={id}>
       <div>
-        <h2 id={id} className="text-sm font-medium tracking-wide uppercase">
+        <h2 id={id} className="eyebrow font-sans">
           {heading}
         </h2>
         <p className="text-muted mt-1 max-w-3xl text-xs">{description}</p>

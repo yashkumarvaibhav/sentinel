@@ -63,7 +63,7 @@ export function DecompositionPanel({
   return (
     <section className="border-line bg-raised flex flex-col gap-4 rounded-xl border p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
-        <h2 className="text-sm font-medium tracking-wide uppercase">Decomposition</h2>
+        <h2 className="eyebrow font-sans">Decomposition</h2>
         <div className="flex items-center gap-2">
           <code className="text-muted font-mono text-[11px]">
             {service} · {signal}

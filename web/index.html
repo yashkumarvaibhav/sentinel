@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -8,8 +8,29 @@
       content="Sentinel — context-aware autonomous observability. Separates the surge the world explains from the part it cannot."
     />
     <title>Sentinel</title>
+    <!--
+      The pinned theme is applied before first paint rather than from React's
+      effect. Without this, an operator who chose light on a dark-OS machine
+      gets a dark flash on every load — and the reverse in a lit room, which is
+      worse, because this is meant to be left up on a screen. The key and the
+      values are `useTheme`'s: it stores only an explicit choice and removes
+      the key for "follow the OS", which is the same absence the stylesheet's
+      `:root:not([data-theme='light'])` reads.
+    -->
+    <script>
+      try {
+        var pinned = localStorage.getItem('sentinel.theme');
+        if (pinned === 'light' || pinned === 'dark') {
+          document.documentElement.dataset.theme = pinned;
+        }
+      } catch (error) {
+        // Storage denied still gets a working page; it just follows the OS.
+      }
+    </script>
   </head>
-  <body>
+  <!-- A command center is the brand kit's compact-density case: tighter radii
+       and restrained headings, so more evidence fits without shouting. -->
+  <body data-density="compact">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

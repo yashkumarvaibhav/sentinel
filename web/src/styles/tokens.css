@@ -1,0 +1,362 @@
+/* ============================================================================
+   BRAND KIT — canonical design tokens
+   Yash Kumar Vaibhav · single source of truth for every project
+
+   Drop this file in, import it first, and style ONLY through these variables.
+   Never hardcode a hex in component code — if a value you need is missing,
+   add it here as a token rather than inlining it.
+
+   Contents
+     1. Fonts            self-hosted Newsreader
+     2. Light theme      canonical tokens
+     3. Dark theme       manual toggle + system preference
+     4. Legacy aliases   old token names keep working
+     5. Density modes    comfortable (default) / compact
+     6. Base elements    body, headings, focus ring, reduced motion
+     7. Tailwind v4      @theme inline bridge
+   ========================================================================= */
+
+
+/* ── 1. Fonts ───────────────────────────────────────────────────────────────
+   Self-hosted. Do NOT use the Google Fonts @import — it is render-blocking,
+   leaks visitor IPs to Google, and breaks offline. Copy fonts/ alongside this
+   file and adjust the url() paths to match where you put them.             */
+
+@font-face {
+  font-family: "Newsreader";
+  src: url("./fonts/newsreader-latin-wght-normal.woff2") format("woff2-variations");
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Newsreader";
+  src: url("./fonts/newsreader-latin-wght-italic.woff2") format("woff2-variations");
+  font-weight: 200 800;
+  font-style: italic;
+  font-display: swap;
+}
+
+
+/* ── 2. Light theme (canonical) ───────────────────────────────────────────── */
+
+:root {
+  color-scheme: light;
+
+  /* Brand + accent
+     --brand #3fada8 is the FIXED identity swatch: logo, favicon, large fills,
+     marketing. It is only 2.7:1 on white, so it must never carry small text,
+     links, or focus rings.
+     --accent #277a75 is the same teal family gone deeper (hue 176 deg,
+     saturation 52% vs the brand's 47%) and clears WCAG AA: 5.1:1 on white,
+     4.7:1 on the soft grey surface. It does every interactive job. */
+  --brand: #3fada8;
+  --accent: #277a75;
+  --accent-hover: #1f615d;
+  --accent-soft: rgba(39, 122, 117, 0.12);
+  --accent-contrast: #ffffff;
+
+  /* Ink / text
+     --faint is #6f6f6f, NOT #808080 — the lighter grey is 3.95:1 on white and
+     fails AA. #6f6f6f clears 5.0:1. */
+  --ink: #333333;
+  --body: #4d4d4d;
+  --muted: #666666;
+  --faint: #6f6f6f;
+
+  /* Surfaces */
+  --page: #ffffff;
+  --raised: #ffffff;
+  --sidebar: #f5f6f6;
+  --code: #f4f6f6;
+  --hover: rgba(51, 51, 51, 0.05);
+
+  /* Lines — structure comes from hairlines, not shadows */
+  --line: rgba(51, 51, 51, 0.10);
+  --line-strong: rgba(39, 122, 117, 0.35);
+
+  /* Status / outcome
+     Teal = "you can act here". Green/amber/red = "this is the state".
+     Never blur the two roles: a primary button is teal, never green. */
+  --success: #18794d;
+  --warning: #8a4f14;
+  --danger: #8d2a2a;
+  --info: #3b6fb0;
+
+  /* Elevation — soft and rare */
+  --shadow-sm: 0 1px 2px rgba(51, 51, 51, 0.06);
+  --shadow: 0 8px 24px rgba(51, 51, 51, 0.08);
+  --shadow-lg: 0 18px 42px rgba(51, 51, 51, 0.12);
+
+  /* Type stacks */
+  --font-serif: "Newsreader", Georgia, "Times New Roman", serif;
+  --font-sans: Arial, "Helvetica Neue", "Segoe UI", Geneva, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  color: var(--ink);
+  background: var(--page);
+  font-family: var(--font-sans);
+}
+
+
+/* ── 3. Dark theme ─────────────────────────────────────────────────────────
+   Two triggers, same values: an explicit data-theme="dark" (manual choice,
+   always wins) and the system preference when no choice is stored.
+   --sidebar is DARKER than --page in dark mode: the rail recedes rather than
+   floating, which is the inverse of its light-mode relationship.
+   Dark accent #7ce4de is 11.9:1 on the dark page.                          */
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --accent: #7ce4de;
+  --accent-hover: #66dcd5;
+  --accent-soft: rgba(124, 228, 222, 0.14);
+  --accent-contrast: #0c1416;
+  --ink: #f5f8f8;
+  --body: rgba(245, 248, 248, 0.84);
+  --muted: #a7b2b3;
+  --faint: #94a3a4;
+  --page: #10191b;
+  --raised: #152325;
+  --sidebar: #0d1517;
+  --code: #152325;
+  --hover: rgba(255, 255, 255, 0.06);
+  --line: rgba(255, 255, 255, 0.10);
+  --line-strong: rgba(124, 228, 222, 0.35);
+  --success: #46c98b;
+  --warning: #e0a35a;
+  --danger: #e06b6b;
+  --info: #6ea8e0;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.55);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --accent: #7ce4de;
+    --accent-hover: #66dcd5;
+    --accent-soft: rgba(124, 228, 222, 0.14);
+    --accent-contrast: #0c1416;
+    --ink: #f5f8f8;
+    --body: rgba(245, 248, 248, 0.84);
+    --muted: #a7b2b3;
+    --faint: #94a3a4;
+    --page: #10191b;
+    --raised: #152325;
+    --sidebar: #0d1517;
+    --code: #152325;
+    --hover: rgba(255, 255, 255, 0.06);
+    --line: rgba(255, 255, 255, 0.10);
+    --line-strong: rgba(124, 228, 222, 0.35);
+    --success: #46c98b;
+    --warning: #e0a35a;
+    --danger: #e06b6b;
+    --info: #6ea8e0;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+    --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.55);
+  }
+}
+
+
+/* ── 4. Legacy aliases ─────────────────────────────────────────────────────
+   gwiz and Placement Atlas use the older long-form names. These aliases let
+   them adopt this file without renaming ~1600 var() references. They inherit
+   the theme automatically because they point at the canonical tokens.
+   NEW CODE SHOULD USE THE CANONICAL NAMES ABOVE. Delete this block once a
+   project has been migrated.                                               */
+
+:root,
+[data-theme="dark"] {
+  --text-strong: var(--ink);
+  --text-body: var(--body);
+  --text-muted: var(--muted);
+  --text-faint: var(--faint);
+  --ink-900: var(--ink);
+  --ink-800: var(--body);
+  --ink-700: var(--muted);
+  --ink-500: var(--faint);
+  --bg-page: var(--page);
+  --bg-raised: var(--raised);
+  --bg-sidebar: var(--sidebar);
+  --bg-code: var(--code);
+  --bg-hover: var(--hover);
+  --surface: var(--raised);
+  --surface-soft: var(--sidebar);
+  --border: var(--line);
+  --border-strong: var(--line-strong);
+  --iiitd-teal: var(--brand);
+}
+
+
+/* ── 5. Density modes ──────────────────────────────────────────────────────
+   COMFORTABLE (default) — landing pages, marketing, long-form reading,
+   storytelling. Generous rounding, display headings. This is CoExist Alert
+   and TradeVault.
+
+   COMPACT — dashboards, tables, dense data UI, admin. Tighter rounding,
+   restrained headings so more fits on screen without shouting. This is
+   Placement Atlas.
+
+   Set per surface, not per project. A product can render a comfortable
+   marketing page and a compact dashboard:
+       <body>                          comfortable
+       <main data-density="compact">   compact
+   Both are correct. Mixing radii WITHIN one panel is not.                  */
+
+:root {
+  --radius-sm: 10px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+
+  --h1-size: clamp(2.8rem, 4vw, 4.6rem);
+  --h1-leading: 0.96;
+  --h1-tracking: -0.04em;
+  --h2-size: 1.7rem;
+  --h2-leading: 1.2;
+  --h3-size: 1.1rem;
+
+  --pad-card: 24px;
+  --pad-control: 10px 17px;
+  --gap-section: 96px;
+}
+
+[data-density="compact"] {
+  --radius-sm: 7px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+
+  --h1-size: clamp(1.7rem, 2.6vw, 2.25rem);
+  --h1-leading: 1.14;
+  --h1-tracking: 0;
+  --h2-size: clamp(1.2rem, 1.7vw, 1.5rem);
+  --h2-leading: 1.2;
+  --h3-size: 1.05rem;
+
+  --pad-card: 16px;
+  --pad-control: 8px 13px;
+  --gap-section: 44px;
+}
+
+
+/* ── 6. Base elements ──────────────────────────────────────────────────── */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--body);
+  font-family: var(--font-sans);
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+button, input, select, textarea { font: inherit; }
+
+h1, h2, h3, h4 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-weight: 500;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+h1 {
+  font-size: var(--h1-size);
+  line-height: var(--h1-leading);
+  letter-spacing: var(--h1-tracking);
+}
+h2 { font-size: var(--h2-size); line-height: var(--h2-leading); }
+h3 { font-size: var(--h3-size); }
+
+/* Uppercase labels track WIDE and positive; display headings track TIGHT and
+   negative. This contrast is the system's typographic signature. */
+.eyebrow {
+  color: var(--faint);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
+/* Any digits that line up in a column */
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* Every interactive element gets a visible ring. Identical in all projects. */
+:where(a, button, [role="button"], input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* First focusable element on the page (WCAG 2.4.1 Bypass Blocks) */
+.skip-link {
+  position: absolute;
+  left: 0.75rem;
+  top: -3rem;
+  z-index: 60;
+  padding: 0.5rem 0.875rem;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: top 0.15s ease;
+}
+.skip-link:focus-visible { top: 0.75rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .skip-link { transition: none; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+
+/* ── 7. Tailwind v4 bridge ─────────────────────────────────────────────────
+   Only needed in Tailwind projects. `inline` makes utilities resolve the LIVE
+   custom property, so the runtime theme switch works — without it, utilities
+   bake in the light value and dark mode silently breaks.
+   Gives you: bg-page text-ink border-line font-serif rounded-md shadow-sm … */
+
+@theme inline {
+  --color-brand: var(--brand);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-contrast: var(--accent-contrast);
+  --color-ink: var(--ink);
+  --color-body: var(--body);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-page: var(--page);
+  --color-raised: var(--raised);
+  --color-sidebar: var(--sidebar);
+  --color-code: var(--code);
+  --color-hover: var(--hover);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+
+  --font-serif: var(--font-serif);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+
+  --shadow-sm: var(--shadow-sm);
+  --shadow: var(--shadow);
+  --shadow-lg: var(--shadow-lg);
+}

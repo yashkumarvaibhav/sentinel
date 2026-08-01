@@ -53,7 +53,7 @@ export function PlatformStatus() {
   return (
     <section className="bg-raised flex flex-col gap-4 rounded-xl p-5">
       <div className="flex items-baseline justify-between gap-4">
-        <h2 className="text-sm font-medium tracking-wide uppercase">Platform</h2>
+        <h2 className="eyebrow font-sans">Platform</h2>
         <span className="text-muted text-[11px] tracking-wider uppercase">Real</span>
       </div>
 

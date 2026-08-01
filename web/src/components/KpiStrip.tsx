@@ -37,7 +37,7 @@ function KpiCard({ metric, exec }: { metric: KpiMetric; exec: boolean }) {
   return (
     <article className="border-line bg-raised flex min-w-0 flex-col gap-3 rounded-lg border p-4">
       <div className="flex items-start justify-between gap-3">
-        <h3 className="text-muted text-xs font-medium tracking-wide uppercase">
+        <h3 className="eyebrow font-sans">
           {exec ? EXEC_LABELS[metric.key] : metric.label}
         </h3>
         <span
@@ -146,7 +146,7 @@ export function KpiStrip() {
   return (
     <section className="flex flex-col gap-4" aria-labelledby="reliability-kpis">
       <div>
-        <h2 id="reliability-kpis" className="text-sm font-medium tracking-wide uppercase">
+        <h2 id="reliability-kpis" className="eyebrow font-sans">
           Reliability proof
         </h2>
         <p className="text-muted mt-1 text-xs">

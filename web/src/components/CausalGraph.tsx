@@ -428,7 +428,7 @@ export function CausalGraphPanel() {
   return (
     <section className="flex flex-col gap-4" aria-labelledby="causal-chain">
       <div>
-        <h2 id="causal-chain" className="text-sm font-medium tracking-wide uppercase">
+        <h2 id="causal-chain" className="eyebrow font-sans">
           Causal chain
         </h2>
         <p className="text-muted mt-1 text-xs">
