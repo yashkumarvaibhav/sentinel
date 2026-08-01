@@ -42,7 +42,7 @@ from typing import Literal, Protocol
 
 from common.storage.models import IncidentRecord, LiveProducerCheckpoint
 from contracts import IncidentFeedItem
-from lab.captures.detection_replay import detection_replay_timeline
+from lab.captures.detection_replay import scenario_bounds
 from lab.captures.store import RuntimeCapture, load_runtime_capture
 from lab.scoring.decision_score import (
     DecisionScore,
@@ -104,19 +104,25 @@ class LiveRunScore:
     score: DecisionScore
     stored_incidents: int
     considered_incidents: int
+    # Incidents that were already open when the run began. They are graded,
+    # because they are genuinely on the operator's board and answering for the
+    # services this run asks about - but a run that starts on a dirty board is
+    # asking a harder question than one that starts clean, and the report has
+    # to say which was measured rather than leaving it to be discovered.
+    inherited_incidents: tuple[str, ...] = ()
 
 
 def run_bounds(capture: RuntimeCapture) -> RunBounds:
     """When the recorded run started and ended, from public capture data only."""
-    timeline = detection_replay_timeline(capture)
+    anchor_ts, end_ts = scenario_bounds(capture)
     manifest = capture.manifest
     return RunBounds(
         capture_id=manifest.capture_id,
         scenario_id=manifest.scenario_id,
         seed=manifest.seed,
         seed_purpose=manifest.seed_purpose,
-        anchor_ts=timeline.anchor_ts,
-        end_ts=timeline.end_ts,
+        anchor_ts=anchor_ts,
+        end_ts=end_ts,
     )
 
 
@@ -199,6 +205,11 @@ def score_live_run(
         ),
         stored_incidents=len(records),
         considered_incidents=len(judgements),
+        inherited_incidents=tuple(
+            judgement.incident_id
+            for judgement in judgements
+            if judgement.opened_offset_seconds < 0.0
+        ),
     )
 
 
@@ -210,6 +221,13 @@ async def read_live_run(
 ) -> tuple[tuple[IncidentRecord, ...], LiveProducerCheckpoint | None]:
     """Read the durable state and the position that says how far it is current."""
     records = await reader.list_incidents(limit=limit)
+    if len(records) >= limit:
+        # A full page is not a complete read. Grading it would quietly score a
+        # truncated view of the store and call the windows it never saw missed.
+        raise LiveRunScoringError(
+            f"the incident feed returned its full page of {limit} rows, so this run's "
+            "stored state may be truncated; it is not graded rather than graded partially"
+        )
     checkpoint = await reader.get_live_producer_checkpoint(producer_id)
     return records, checkpoint
 

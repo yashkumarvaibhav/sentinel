@@ -10,7 +10,7 @@ from contracts import Observation
 from ingest.normalizer import NormalizationError, RawSignal, normalize_otlp_json
 from lab.captures.store import RuntimeCapture
 
-_SIGNALS = {
+RAW_SIGNALS = {
     "otlp.raw.metrics": RawSignal.METRICS,
     "otlp.raw.logs": RawSignal.LOGS,
     "otlp.raw.traces": RawSignal.TRACES,
@@ -43,7 +43,7 @@ def replay_raw(capture: RuntimeCapture) -> RawReplay:
         key=lambda item: (item.topic, item.partition, item.offset),
     ):
         try:
-            normalized = normalize_otlp_json(_SIGNALS[record.topic], record.value)
+            normalized = normalize_otlp_json(RAW_SIGNALS[record.topic], record.value)
         except NormalizationError as exc:
             dead_letters.append(
                 f"{record.topic}:{record.partition}:{record.offset}:"

@@ -116,6 +116,7 @@ class IncidentFeedPublisher:
         calibrated_confidence: float | None = None,
         calibration_note: str | None = None,
         explained_event: str | None = None,
+        concluded_verdict_class: VerdictClass | None = None,
         action_control: ActionControlSnapshot | None = None,
         security_cohorts: tuple[SecurityCohort, ...] = (),
         protected_cohort_integrity: SecurityMeasurement | None = None,
@@ -127,6 +128,7 @@ class IncidentFeedPublisher:
             calibrated_confidence=calibrated_confidence,
             calibration_note=calibration_note,
             explained_event=explained_event,
+            concluded_verdict_class=concluded_verdict_class,
         )
         graph = build_causal_graph(
             outcome,
@@ -187,8 +189,19 @@ def build_incident_feed_item(
     calibrated_confidence: float | None = None,
     calibration_note: str | None = None,
     explained_event: str | None = None,
+    concluded_verdict_class: VerdictClass | None = None,
 ) -> IncidentFeedItem:
-    """Project one full decision outcome into the compact public card."""
+    """Project one full decision outcome into the compact public card.
+
+    ``concluded_verdict_class`` is the class the platform *did* name about this
+    incident on an earlier revision. It is used only when the current outcome
+    names none, which is what happens once every symptom closes and the
+    evidence ages out from under a resolved incident. Dropping it there means
+    an operator reviewing the day is told an incident happened and never told
+    what it was - and, measured on a live run, it turned a correctly recognised
+    attack into a card that recalled nothing. Retaining a class the platform
+    genuinely named is not inventing one; re-deriving one here would be.
+    """
     verdict = outcome.verdict
     if explained_event is not None and (
         verdict is None
@@ -246,7 +259,7 @@ def build_incident_feed_item(
         severity=incident.severity,
         services=services,
         origin_service=incident.origin_service,
-        verdict_class=verdict.verdict_class if verdict is not None else None,
+        verdict_class=(verdict.verdict_class if verdict is not None else concluded_verdict_class),
         reason=_line(outcome.decision.reason),
         evidence=evidence,
         action=IncidentActionState(

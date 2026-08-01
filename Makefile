@@ -295,12 +295,19 @@ score-decisions: ## Score decisions against the scenario answer key (CAPTURE_ROO
 		--report ../$(or $(DECISION_REPORT),docs/reports/phase-4-decision-score.md)
 
 .PHONY: score-live-run
-score-live-run: ## Score what the live producer STORED during one authored run (CAPTURE_ROOT=)
-	@test -n "$(CAPTURE_ROOT)" || { echo "CAPTURE_ROOT is required" >&2; exit 2; }
-	cd platform && PYTHONPATH=.. uv run python -m lab.scoring.live_gate \
-		--repo-root .. --capture "../$(CAPTURE_ROOT)" \
+score-live-run: ## Score what the live producer STORED during one authored run (CAPTURE_ID=)
+	@test -n "$(CAPTURE_ID)" || { echo "CAPTURE_ID is required" >&2; exit 2; }
+	$(COMPOSE) run --rm --no-deps -T \
+		--user "$(shell id -u):$(shell id -g)" \
+		--volume "$(CURDIR)/lab:/app/lab:ro" \
+		--volume "$(CURDIR)/var:/sentinel-var" \
+		--volume "$(CURDIR)/docs:/sentinel-docs" \
+		--entrypoint "" producer \
+		env PYTHONPATH=/app HOME=/tmp \
+		python -m lab.scoring.live_gate \
+		--repo-root /app --capture "/sentinel-var/captures/$(CAPTURE_ID)" \
 		$(if $(SPEND_HELD_OUT_SEED),--spend-held-out-seed) \
-		--report ../$(or $(LIVE_RUN_REPORT),docs/reports/phase-6-live-run-score.md)
+		--report "/sentinel-docs/reports/$(or $(LIVE_RUN_REPORT),phase-6-live-run-score.md)"
 
 .PHONY: score-negative-control
 score-negative-control: ## Assert no-fault captures emit zero fault-kind episodes (CAPTURE_ROOTS=)

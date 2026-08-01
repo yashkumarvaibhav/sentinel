@@ -28,9 +28,10 @@ from lab.scoring.live_score import (
 )
 from lab.scoring.metrics import MetricValue
 
-# One live run cannot plausibly have produced more incidents than this, and a
-# store holding more than this is a store whose older rows predate the run.
-STORED_INCIDENT_LIMIT = 500
+# The incident reader's own ceiling. It is not a scoring choice: the feed this
+# scorer grades is the same bounded read the product serves, and grading more
+# rows than the product will ever show would be scoring a different thing.
+STORED_INCIDENT_LIMIT = 50
 
 
 def evaluate_live_run(score: LiveRunScore, config: ScoreGateConfig) -> DecisionGateResult:
@@ -64,6 +65,8 @@ def render_live_run_report(score: LiveRunScore, gate: DecisionGateResult) -> str
         "question than a replay transcript answers, and it is the one the product puts "
         "in front of a person.",
         "- Telemetry is **REAL**; the injected context/fault/attack stimuli are **SIMULATED**.",
+        "",
+        _board_state(score),
         "",
         "## Gate",
         "",
@@ -119,6 +122,24 @@ def render_live_run_report(score: LiveRunScore, gate: DecisionGateResult) -> str
         )
         lines.append("")
     return "\n".join(lines).rstrip("\n") + "\n"
+
+
+def _board_state(score: LiveRunScore) -> str:
+    """State whether the run began on a clean board or inherited an open incident."""
+    if not score.inherited_incidents:
+        return (
+            "The board was **clean** when the run started: every graded incident was "
+            "opened by this run."
+        )
+    named = ", ".join(f"`{incident_id[:12]}`" for incident_id in score.inherited_incidents)
+    return (
+        f"⚠ The board was **not clean**: {len(score.inherited_incidents)} incident(s) "
+        f"were already open when the run began ({named}). They are graded, because they "
+        "were genuinely on the operator's board and answering for services this run asks "
+        "about - but the questions below were asked over a busier board than a clean "
+        "start would have given, and that is part of the result rather than an excuse "
+        "for it."
+    )
 
 
 def _metric(value: MetricValue) -> str:

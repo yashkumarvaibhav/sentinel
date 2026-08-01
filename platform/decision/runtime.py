@@ -31,7 +31,13 @@ from typing import Literal, Protocol
 from api.incidents import IncidentFeedPublisher, IncidentPublishResult
 from common.config import SentinelConfig
 from common.storage.models import LiveProducerCheckpoint
-from contracts import ContextWindow, Observation, SymptomEpisode, SymptomKind
+from contracts import (
+    ContextWindow,
+    Observation,
+    SymptomEpisode,
+    SymptomKind,
+    VerdictClass,
+)
 from decision.changes import ChangeFeed
 from decision.config import (
     ActionPolicyConfig,
@@ -118,6 +124,11 @@ class LiveDecisionRuntime:
         self._dependency_signal_prefix = decisions.incidents.causal.dependency_signal_prefix
         self._latest: dict[str, SymptomEpisode] = {}
         self._published_revisions: dict[str, datetime] = {}
+        # The class this producer actually named about each incident. An
+        # incident whose symptoms all close loses the evidence its verdict was
+        # computed from, and the card would otherwise stop saying what the
+        # platform concluded at exactly the moment a person goes looking.
+        self._named_classes: dict[str, VerdictClass] = {}
         # Publications by this producer in total, not by this process: a
         # restart that dropped the running count would make the durable row
         # read as though nothing had ever been published.
@@ -215,6 +226,9 @@ class LiveDecisionRuntime:
             raise LiveEvidenceError(
                 "a live incident names episodes this producer never measured: " + ", ".join(missing)
             )
+        named = outcome.verdict.verdict_class if outcome.verdict is not None else None
+        if named is not None:
+            self._named_classes[incident_id] = named
         result = await self._publisher.persist(
             outcome,
             episodes=tuple(self._latest[episode_id] for episode_id in outcome.incident.episode_ids),
@@ -223,6 +237,7 @@ class LiveDecisionRuntime:
             honesty="REAL",
             stimulus_honesty=self._stimulus_honesty,
             mode="LIVE",
+            concluded_verdict_class=self._named_classes.get(incident_id),
         )
         if result.persisted:
             self._published_revisions[incident_id] = revision
