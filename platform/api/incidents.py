@@ -10,8 +10,8 @@ from pydantic import ValidationError
 
 from api.causal_graph import build_causal_graph, causal_graph_record
 from api.incident_detail import build_incident_detail, incident_detail_record
+from api.invalidation import snapshot_invalidation
 from api.security import build_security_snapshot, security_record
-from api.stream import snapshot_invalidation
 from common.config import TopologyConfig
 from common.storage import (
     IncidentDetailRecord,

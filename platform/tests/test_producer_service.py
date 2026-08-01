@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -55,6 +57,55 @@ class _Committer:
 
     async def commit(self, record: BusRecord) -> None:
         self.committed.append(record.offset)
+
+
+# Frameworks the producer image deliberately does not install. A green local
+# gate cannot see this: every extra is present in the development venv, and the
+# first deploy is where the missing module surfaces.
+_WEB_FRAMEWORKS = ("fastapi", "uvicorn", "starlette")
+
+
+def test_the_producer_import_graph_never_reaches_a_web_framework() -> None:
+    platform_root = REPO_ROOT / "platform"
+    seen: set[str] = set()
+    queue = deque(["producer.service", "producer.__main__"])
+    violations: list[str] = []
+    while queue:
+        module = queue.popleft()
+        if module in seen:
+            continue
+        seen.add(module)
+        path = _module_path(platform_root, module)
+        if path is None:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for imported in _imports(tree):
+            if imported.split(".")[0] in _WEB_FRAMEWORKS:
+                violations.append(f"{module} -> {imported}")
+            queue.append(imported)
+
+    assert violations == []
+    assert "api.incidents" in seen, "the producer must reach the one publication seam"
+
+
+def _module_path(root: Path, module: str) -> Path | None:
+    candidate = root.joinpath(*module.split("."))
+    if candidate.with_suffix(".py").is_file():
+        return candidate.with_suffix(".py")
+    if (candidate / "__init__.py").is_file():
+        return candidate / "__init__.py"
+    return None
+
+
+def _imports(tree: ast.AST) -> list[str]:
+    found: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            found.append(node.module)
+            found.extend(f"{node.module}.{alias.name}" for alias in node.names)
+    return found
 
 
 def test_a_record_is_only_committed_after_its_windows_are_judged() -> None:

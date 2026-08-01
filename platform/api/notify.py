@@ -25,7 +25,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import suppress
 from typing import Any, Protocol
 
-from api.stream import snapshot_invalidation
+from api.invalidation import snapshot_invalidation
 from contracts import SnapshotInvalidation, SnapshotResource
 
 LOGGER = logging.getLogger(__name__)
