@@ -59,13 +59,25 @@ test.describe('the command centre', () => {
 });
 
 test.describe('the demo launcher', () => {
-  test('asks for the credential before it will fire anything', async ({ page }) => {
+  test('matches the gate this deployment actually has', async ({ page, request }) => {
+    // The interim gate is documented as inert until a secret is configured, so
+    // there are two correct renderings and which one is right is a property of
+    // *the deployment*. Asserting only the guarded one passes locally and fails
+    // in CI, which is exactly how this was first written and what the first
+    // hosted run caught.
+    //
+    // Asked of the deployment rather than inferred from this harness's own env:
+    // "the runner has no secret" and "the gateway has no secret" are two
+    // different facts, and a test that conflated them would be right by luck.
+    const guarded = (await request.get('/api/lab/runs', { failOnStatusCode: false })).status();
     await page.goto('/demo');
 
-    // With no credential in the tab, a sensitive surface must ask rather than
-    // render a launcher that would 401 on click.
-    await expect(page.getByText(/protected operator surface/i)).toBeVisible();
-    await expect(page.getByLabel("Operator credential")).toBeVisible();
+    if (guarded === 401) {
+      await expect(page.getByText(/protected operator surface/i)).toBeVisible();
+      await expect(page.getByLabel('Operator credential')).toBeVisible();
+      return;
+    }
+    await expect(page.getByRole('heading', { name: /demo launcher/i })).toBeVisible();
   });
 
   test('fires a scenario and shows it queued', async ({ page }) => {
