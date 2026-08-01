@@ -37,6 +37,8 @@ from detection.ratio_runner import IngressRatioDetectionRunner
 from detection.resource_runner import ResourceDetectionRunner
 from detection.runner import EdgeDetectionRunner
 
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
 # The reconstructed rate stream is decomposed against its expected band, so the
 # residual path is running exactly when that stream is being produced.
 RESIDUAL_PATH = "rate"
@@ -62,6 +64,27 @@ class LiveTick:
     advanced_processors: frozenset[str]
     covered_kinds: frozenset[SymptomKind]
     covered_services: frozenset[str]
+
+
+def base_tick_seconds(detector: DetectorConfig) -> int:
+    """The shortest complete tick every configured detector path divides into."""
+    return _base_tick(
+        (
+            detector.ingress_rate.tick_seconds,
+            detector.liveness.window_seconds,
+            detector.edge_degradation.advance_seconds,
+            detector.log_templates.window_seconds,
+            detector.behavioral_ratios.ingress_windows.window_seconds,
+            detector.change_point_saturation.resource_windows.advance_seconds,
+        )
+    )
+
+
+def floor_to_tick(value: datetime, *, tick_seconds: int) -> datetime:
+    """Round an arrival clock down to the tick boundary it falls inside."""
+    moment = _utc(value, name="value")
+    elapsed = (moment - _EPOCH).total_seconds()
+    return _EPOCH + timedelta(seconds=math.floor(elapsed / tick_seconds) * tick_seconds)
 
 
 def covered_symptom_kinds(processors: Sequence[MonitoredProcessor]) -> frozenset[SymptomKind]:

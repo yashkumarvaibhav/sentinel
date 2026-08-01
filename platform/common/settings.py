@@ -136,6 +136,39 @@ class Settings(BaseSettings):
         ge=30,
         le=86_400,
     )
+    live_producer_id: str = Field(
+        default="live-producer",
+        alias="SENTINEL_LIVE_PRODUCER_ID",
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+    )
+    live_producer_group_id: str = Field(
+        default="sentinel-live-producer-v1",
+        alias="SENTINEL_LIVE_PRODUCER_GROUP_ID",
+        min_length=1,
+        max_length=128,
+    )
+    # An honesty label is an operator statement about the world. A contained
+    # testbed under injected chaos is a SIMULATED stimulus over REAL telemetry;
+    # only whoever started the deployment knows which it is, so it is declared
+    # rather than inferred, and the honest default is the cautious one.
+    live_producer_stimulus_honesty: Literal["REAL", "SIMULATED"] = Field(
+        default="SIMULATED",
+        alias="SENTINEL_LIVE_PRODUCER_STIMULUS_HONESTY",
+    )
+    live_producer_buffer_capacity: int = Field(
+        default=200_000,
+        alias="SENTINEL_LIVE_PRODUCER_BUFFER_CAPACITY",
+        ge=1_000,
+        le=10_000_000,
+    )
+    live_producer_context_refresh_seconds: int = Field(
+        default=60,
+        alias="SENTINEL_LIVE_PRODUCER_CONTEXT_REFRESH_SECONDS",
+        ge=5,
+        le=3_600,
+    )
 
     @property
     def first_broker(self) -> tuple[str, int]:
