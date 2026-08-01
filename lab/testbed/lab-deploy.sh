@@ -30,8 +30,21 @@ if ! docker ps --format '{{.Names}}' | grep -qx "${COLLECTOR_CONTAINER}"; then
 	exit 1
 fi
 live_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${COLLECTOR_CONTAINER}")
-dns_ip=$(kubectl --context "${CONTEXT}" -n kube-system get cm coredns \
-	-o jsonpath='{.data.NodeHosts}' | awk -v n="${COLLECTOR_CONTAINER}" '$2 == n {print $1}')
+# k3s writes the host entries shortly after the node registers, so a cluster
+# that has just started may have none yet. Waiting for the entry to appear is
+# not the same as accepting a wrong one: a mismatch still fails immediately.
+dns_ip=""
+for _ in {1..30}; do
+	dns_ip=$(kubectl --context "${CONTEXT}" -n kube-system get cm coredns \
+		-o jsonpath='{.data.NodeHosts}' | awk -v n="${COLLECTOR_CONTAINER}" '$2 == n {print $1}')
+	[[ -n "${dns_ip}" ]] && break
+	sleep 2
+done
+if [[ -z "${dns_ip}" ]]; then
+	echo "error: cluster DNS never published ${COLLECTOR_CONTAINER}" >&2
+	echo "       the cluster may still be starting — retry, or 'make lab-destroy && make lab-up'" >&2
+	exit 1
+fi
 if [[ "${live_ip}" != "${dns_ip}" ]]; then
 	echo "error: cluster DNS has ${COLLECTOR_CONTAINER} at '${dns_ip}', it is actually at '${live_ip}'" >&2
 	echo "       the stack was recreated after the cluster — run 'make lab-destroy && make lab-up'" >&2
