@@ -32,7 +32,9 @@ from api.incidents import IncidentFeedPublisher, IncidentPublishResult
 from common.config import SentinelConfig
 from common.storage.models import LiveProducerCheckpoint
 from contracts import (
+    ActionControlSnapshot,
     ContextWindow,
+    Decision,
     Observation,
     SymptomEpisode,
     SymptomKind,
@@ -78,6 +80,12 @@ class LiveProducerCheckpointStore(Protocol):
     ) -> LiveProducerCheckpoint | None: ...
 
 
+class ActionPlanner(Protocol):
+    """Freezes a verified acting decision into one immutable, guarded plan."""
+
+    def plan(self, decision: Decision, *, ts: datetime) -> ActionControlSnapshot | None: ...
+
+
 class LiveEvidenceError(RuntimeError):
     """A judgement cannot be published because its evidence is not in hand."""
 
@@ -98,6 +106,7 @@ class LiveDecisionRuntime:
         published_baseline: int = 0,
         changes: ChangeFeed | None = None,
         envelope: DecompositionEnvelope | None = None,
+        planner: ActionPlanner | None = None,
     ) -> None:
         self._config = config
         self._publisher = publisher
@@ -122,6 +131,11 @@ class LiveDecisionRuntime:
             changes=changes,
         )
         self._dependency_signal_prefix = decisions.incidents.causal.dependency_signal_prefix
+        # Optional on purpose. A deployment that has not armed a planner keeps
+        # publishing incidents and no plans, which is the posture every
+        # environment starts in.
+        self._planner = planner
+        self._planned: set[str] = set()
         self._latest: dict[str, SymptomEpisode] = {}
         self._published_revisions: dict[str, datetime] = {}
         # The class this producer actually named about each incident. An
@@ -154,7 +168,11 @@ class LiveDecisionRuntime:
 
     @property
     def published_action_controls(self) -> int:
-        """Live judgements do not plan actions yet; this must stay zero."""
+        """How many live judgements have frozen a plan an operator can act on.
+
+        Zero when no planner is attached, which is the posture a deployment
+        keeps until it deliberately arms one.
+        """
         return self._published_action_controls
 
     async def advance(
@@ -229,6 +247,7 @@ class LiveDecisionRuntime:
         named = outcome.verdict.verdict_class if outcome.verdict is not None else None
         if named is not None:
             self._named_classes[incident_id] = named
+        control = self._freeze_plan(outcome)
         result = await self._publisher.persist(
             outcome,
             episodes=tuple(self._latest[episode_id] for episode_id in outcome.incident.episode_ids),
@@ -238,11 +257,35 @@ class LiveDecisionRuntime:
             stimulus_honesty=self._stimulus_honesty,
             mode="LIVE",
             concluded_verdict_class=self._named_classes.get(incident_id),
+            action_control=control,
         )
         if result.persisted:
             self._published_revisions[incident_id] = revision
             self._published += 1
+            if control is not None:
+                self._planned.add(incident_id)
+                self._published_action_controls += 1
         return result
+
+    def _freeze_plan(self, outcome: IncidentOutcome) -> ActionControlSnapshot | None:
+        """Freeze this incident's plan once, on the first verified acting revision.
+
+        Once, because the store refuses a revision that names different state:
+        re-publishing a control the worker has already advanced would be an
+        error rather than an update. That is the right shape - a plan is
+        immutable evidence about what was decided at a moment, not a mutable
+        intention that follows the incident around.
+
+        Verified, because a hypothesis nothing has confirmed against telemetry
+        is not something this platform is entitled to act on.
+        """
+        if self._planner is None:
+            return None
+        if outcome.incident.incident_id in self._planned:
+            return None
+        if not outcome.confirmed:
+            return None
+        return self._planner.plan(outcome.decision, ts=outcome.decision.ts)
 
     async def resume(self) -> LiveProducerCheckpoint | None:
         """The durable position this producer reached, if it has one."""

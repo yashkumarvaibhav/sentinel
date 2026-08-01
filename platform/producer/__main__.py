@@ -11,12 +11,22 @@ from pathlib import Path
 from aiokafka import AIOKafkaConsumer
 from aiokafka.structs import TopicPartition
 
+from action.actuators import (
+    FlagActuator,
+    KubernetesActuator,
+    MeshActuator,
+    SimulatedActuator,
+)
+from action.actuators.base import Actuator
+from action.config import load_action_config
+from action.planner import LiveActionPlanner
 from api.incidents import IncidentFeedPublisher
 from api.notify import PostgresInvalidationBroker
-from common.config import load_config
+from common.config import SentinelConfig, load_config
 from common.settings import settings
 from common.storage import PostgresRepository, create_postgres_pool
 from context.service import open_context_service
+from contracts import ActuatorKind
 from decision.config import (
     load_action_policy,
     load_evidence_agents,
@@ -67,6 +77,27 @@ async def _records(consumer: AIOKafkaConsumer) -> object:
         )
 
 
+def _planner(snapshot: SentinelConfig, *, config_dir: Path) -> LiveActionPlanner:
+    """Every adapter this deployment has enabled, so a rung is never substituted.
+
+    The planner refuses a rung whose adapter it was not given rather than
+    reaching for a different one, so an incomplete set here shows up as an
+    unplanned incident instead of an action nobody chose.
+    """
+    action_config = load_action_config(config_dir / "action.yml")
+    enabled = action_config.enabled_actuators()
+    actuators: list[Actuator] = []
+    if ActuatorKind.SIMULATED in enabled:
+        actuators.append(SimulatedActuator())
+    if ActuatorKind.KUBERNETES in enabled and action_config.kubernetes is not None:
+        actuators.append(KubernetesActuator(configuration=action_config.kubernetes))
+    if ActuatorKind.MESH in enabled and action_config.mesh is not None:
+        actuators.append(MeshActuator(configuration=action_config.mesh))
+    if ActuatorKind.FEATURE_FLAG in enabled and action_config.flags is not None:
+        actuators.append(FlagActuator(configuration=action_config.flags))
+    return LiveActionPlanner(config=snapshot, config_root=config_dir, actuators=actuators)
+
+
 async def run() -> None:
     """Consume the normalized bus until cancelled, judging complete windows."""
     config = settings()
@@ -103,6 +134,16 @@ async def run() -> None:
                 plan.discontinuity_seconds,
                 plan.anchor_ts.isoformat(),
             )
+        planner = (
+            _planner(snapshot, config_dir=config.config_dir)
+            if config.live_producer_plans_actions
+            else None
+        )
+        if planner is not None:
+            _LOG.info(
+                "live judgements will freeze an action plan; whether that plan reaches the "
+                "world is action.yml's dry_run, which this switch does not touch"
+            )
         async with open_context_service(calendar=snapshot.events, runtime=config) as contexts:
             runtime = LiveDecisionRuntime(
                 config=snapshot,
@@ -113,6 +154,7 @@ async def run() -> None:
                 anchor_ts=plan.anchor_ts,
                 stimulus_honesty=config.live_producer_stimulus_honesty,
                 published_baseline=plan.published_baseline,
+                planner=planner,
             )
             service = LiveProducerService(
                 runtime=runtime,

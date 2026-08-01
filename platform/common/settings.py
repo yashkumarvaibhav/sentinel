@@ -178,6 +178,16 @@ class Settings(BaseSettings):
         ge=5,
         le=3_600,
     )
+    # Whether a live judgement freezes a plan an operator can act on. Off by
+    # default and deliberately separate from `action.yml`'s `dry_run`: that
+    # decides whether an effect reaches the world, this decides whether a plan
+    # exists to be claimed at all. A deployment that has not turned this on
+    # publishes incidents and no plans, so the durable worker has nothing it
+    # could act on even by mistake.
+    live_producer_plans_actions: bool = Field(
+        default=False,
+        alias="SENTINEL_LIVE_PRODUCER_PLANS_ACTIONS",
+    )
 
     @property
     def first_broker(self) -> tuple[str, int]:

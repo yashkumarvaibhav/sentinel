@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import sys
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -94,6 +95,58 @@ def test_the_producer_import_graph_never_reaches_a_web_framework() -> None:
 
     assert violations == []
     assert "api.incidents" in seen, "the producer must reach the one publication seam"
+
+
+# Everything `deploy/producer.Dockerfile` actually installs, plus the base
+# dependencies every extra sits on. Anything outside this set is a module the
+# image does not have, however green the development venv looks.
+_PRODUCER_INSTALLED = frozenset(
+    {
+        "aiokafka",
+        "drain3",
+        "httpx",
+        "numpy",
+        "psycopg",
+        "psycopg_pool",
+        "pydantic",
+        "pydantic_settings",
+        "ruptures",
+        "yaml",
+    }
+)
+
+
+def test_the_producer_imports_nothing_its_image_does_not_install() -> None:
+    """The framework check generalised, because a web framework was not special.
+
+    `960cb66` was a deploy that died on `import fastapi`, and the lesson was
+    not about FastAPI: the producer image installs four extras and the
+    development venv installs all of them, so *any* module outside those four
+    is invisible until the container refuses to start. This walks the same
+    graph and names the whole third-party surface instead of a denylist.
+    """
+    platform_root = REPO_ROOT / "platform"
+    seen: set[str] = set()
+    queue = deque(["producer.service", "producer.__main__"])
+    third_party: set[str] = set()
+    local = {path.name for path in platform_root.iterdir() if (path / "__init__.py").is_file()}
+    while queue:
+        module = queue.popleft()
+        if module in seen:
+            continue
+        seen.add(module)
+        path = _module_path(platform_root, module)
+        if path is None:
+            root = module.split(".")[0]
+            if root not in local and root not in sys.stdlib_module_names:
+                third_party.add(root)
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        queue.extend(_imports(tree))
+
+    assert third_party <= _PRODUCER_INSTALLED, (
+        f"the producer image would fail to start on: {sorted(third_party - _PRODUCER_INSTALLED)}"
+    )
 
 
 def _module_path(root: Path, module: str) -> Path | None:

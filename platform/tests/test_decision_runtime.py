@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 from lab.scoring.decisions import load_decision_configs
 
+from action.actuators import SimulatedActuator
+from action.planner import LiveActionPlanner
 from api.incidents import IncidentFeedPublisher, IncidentPublishResult
 from common.config import SentinelConfig, load_config
 from common.storage import (
@@ -19,7 +21,16 @@ from common.storage import (
     IncidentSecurityRecord,
     LiveProducerCheckpoint,
 )
-from contracts import ActionControlSnapshot, Observation, SnapshotInvalidation, SymptomKind
+from contracts import (
+    ActionControlSnapshot,
+    Decision,
+    DecisionAction,
+    IncidentSeverity,
+    Observation,
+    SnapshotInvalidation,
+    SymptomKind,
+    VerdictClass,
+)
 from decision.runtime import LiveDecisionRuntime
 
 START = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
@@ -32,6 +43,7 @@ class _Store:
 
     revisions: dict[str, datetime] = field(default_factory=dict)
     writes: list[IncidentRecord] = field(default_factory=list)
+    controls: list[ActionControlSnapshot] = field(default_factory=list)
     checkpoints: list[LiveProducerCheckpoint] = field(default_factory=list)
 
     async def put_incident_bundle(
@@ -47,6 +59,8 @@ class _Store:
             return False
         self.revisions[record.incident_id] = record.updated_at
         self.writes.append(record)
+        if action_control is not None:
+            self.controls.append(action_control)
         return True
 
     async def put_live_producer_checkpoint(self, checkpoint: LiveProducerCheckpoint) -> bool:
@@ -58,6 +72,58 @@ class _Store:
             if checkpoint.producer_id == producer_id:
                 return checkpoint
         return None
+
+
+@dataclass
+class _RecordingPlanner:
+    """Records what the runtime asked, and always earns a plan.
+
+    Whether a judgement *earns* a plan is the planner's decision and is tested
+    against the real ladder in `test_action_planner.py`. What is under test
+    here is the runtime's own rule: ask once per incident, publish once, never
+    re-materialize.
+    """
+
+    asked: list[str] = field(default_factory=list)
+    confirmed: list[bool] = field(default_factory=list)
+
+    def plan(self, decision: Decision, *, ts: datetime) -> ActionControlSnapshot | None:
+        self.asked.append(decision.decision_id)
+        self.confirmed.append(decision.confirmed)
+        return _control_for(decision.incident_id, ts=ts)
+
+
+def _control_for(incident_id: str, *, ts: datetime) -> ActionControlSnapshot:
+    """One guarded control against the adapter that touches nothing."""
+    adapter = SimulatedActuator()
+    decision = Decision(
+        decision_id=f"decision-{incident_id}",
+        ts=ts,
+        incident_id=incident_id,
+        action=DecisionAction.ACT,
+        rule_id="rule-under-test",
+        reason="Verified evidence selected an absolute target.",
+        evidence_ts=ts,
+        severity=IncidentSeverity.HIGH,
+        confirmed=True,
+        verification_id=f"verification-{incident_id}",
+        requires_human_approval=False,
+        verdict_class=VerdictClass.OPERATIONAL_FAULT,
+        verdict_id=f"verdict-{incident_id}",
+        # Below every rung that needs a real cluster adapter, so the ladder
+        # lands on the one rung that touches nothing. Less certainty means a
+        # gentler action, which is the confidence-gated downgrade working.
+        confidence=0.5,
+        target_service="frontend",
+    )
+    planner = LiveActionPlanner(
+        config=load_config(REPO_ROOT / "config"),
+        config_root=REPO_ROOT / "config",
+        actuators=[adapter],
+    )
+    control = planner.plan(decision, ts=ts)
+    assert control is not None, "the committed ladder must offer a simulated rung"
+    return control
 
 
 @dataclass
@@ -116,13 +182,54 @@ def test_replaying_the_same_ticks_publishes_no_second_revision() -> None:
     assert len(broker.events) == invalidations
 
 
-def test_no_action_plan_is_created_from_a_live_judgement_yet() -> None:
+def test_a_producer_with_no_planner_creates_no_action_plan() -> None:
+    """The posture every deployment starts in: incidents, and nothing to claim."""
     store = _Store()
     runtime = _runtime(store, _Broker())
 
     _drive(runtime, quiet_ticks=40, surge_ticks=40)
 
     assert runtime.published_action_controls == 0
+    assert store.controls == []
+
+
+def test_an_armed_producer_freezes_one_plan_per_incident_and_never_a_second() -> None:
+    """A plan is immutable evidence about a moment, not a mutable intention.
+
+    The store refuses a revision that names different state, so re-publishing a
+    control the worker has already advanced would be an error rather than an
+    update - which is exactly why this freezes once and then stops.
+    """
+    store = _Store()
+    planner = _RecordingPlanner()
+    runtime = _runtime(store, _Broker(), planner=planner)
+
+    _drive(runtime, quiet_ticks=40, surge_ticks=40)
+
+    assert planner.asked, "an armed producer must ask about its acting judgements"
+    assert runtime.published_action_controls == len(store.controls)
+    assert store.controls, "a verified acting judgement must freeze a plan"
+    frozen = [control.incident_id for control in store.controls]
+    assert len(frozen) == len(set(frozen)), "an incident may freeze only one plan"
+    assert all(control.plan_revision == 1 for control in store.controls)
+    # The target is the decision's, which the causal collapse computed from
+    # evidence. Nothing in the planner may choose it.
+    assert all(control.plan.target_service for control in store.controls)
+    assert all(control.guard_results for control in store.controls)
+
+
+def test_an_unverified_judgement_freezes_no_plan() -> None:
+    """A hypothesis nothing confirmed against telemetry is not actionable."""
+    store = _Store()
+    planner = _RecordingPlanner()
+    runtime = _runtime(store, _Broker(), planner=planner)
+
+    _drive(runtime, quiet_ticks=40, surge_ticks=40)
+
+    assert planner.confirmed, "the planner was never consulted at all"
+    assert all(planner.confirmed), (
+        "the runtime must not ask a planner about an unconfirmed decision"
+    )
 
 
 def test_the_checkpoint_advances_only_after_the_bundle_is_durable() -> None:
@@ -154,7 +261,12 @@ def test_a_tick_that_cannot_be_stored_advances_nothing() -> None:
     assert all(item.tick_ts < START + timedelta(seconds=160) for item in store.checkpoints)
 
 
-def _runtime(store: _Store, broker: _Broker) -> LiveDecisionRuntime:
+def _runtime(
+    store: _Store,
+    broker: _Broker,
+    *,
+    planner: object | None = None,
+) -> LiveDecisionRuntime:
     config = _config()
     return LiveDecisionRuntime(
         config=config,
@@ -164,6 +276,7 @@ def _runtime(store: _Store, broker: _Broker) -> LiveDecisionRuntime:
         producer_id="test-producer",
         anchor_ts=START,
         stimulus_honesty="SIMULATED",
+        planner=planner,  # type: ignore[arg-type]
     )
 
 

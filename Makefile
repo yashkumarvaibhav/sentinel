@@ -95,6 +95,11 @@ verify-mesh: ## Run the mesh actuator against a real Envoy (needs `make lab-edge
 	$(PY) env SENTINEL_ACTION_MESH_INTEGRATION=1 \
 		pytest tests/test_action_mesh.py -k "real_envoy or dry_run"
 
+.PHONY: verify-canary
+verify-canary: ## Widen and unwind a real Envoy through the durable worker (needs `make lab-edge`)
+	$(PY) env SENTINEL_ACTION_MESH_INTEGRATION=1 \
+		pytest tests/test_action_canary_integration.py
+
 .PHONY: verify-flags
 verify-flags: ## Run the flag actuator against a real flagd (needs `make lab-flags`)
 	$(PY) env SENTINEL_ACTION_FLAGS_INTEGRATION=1 \
