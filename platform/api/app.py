@@ -53,6 +53,7 @@ from api.incidents import (
     IncidentFeedPublisher,
     IncidentFeedReader,
     incident_snapshot,
+    observation_freshness,
     unavailable_incident_snapshot,
 )
 from api.kpis import (
@@ -410,7 +411,14 @@ def create_app(
             )
         try:
             records = await reader.list_incidents(limit=bounded)
-            return incident_snapshot(records, limit=bounded)
+            # Whether these rows are current is a fact about the producer, not
+            # about the rows: a stopped producer must never read as a calm mesh.
+            freshness = observation_freshness(
+                await reader.get_live_producer_checkpoint(config.live_producer_id),
+                now=datetime.now(UTC),
+                expected_within_seconds=config.observation_expected_within_seconds,
+            )
+            return incident_snapshot(records, limit=bounded, observation=freshness)
         except IncidentFeedDataError as exc:
             response.status_code = 503
             return unavailable_incident_snapshot(limit=bounded, detail=str(exc))

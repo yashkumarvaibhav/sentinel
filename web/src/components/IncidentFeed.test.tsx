@@ -100,6 +100,13 @@ const SNAPSHOT = {
   ],
   count: 1,
   limit: 20,
+  observation: {
+    status: 'WATCHING',
+    last_judged_at: '2026-07-26T12:00:00Z',
+    age_seconds: 2,
+    expected_within_seconds: 120,
+    note: 'Live telemetry is being judged now.',
+  },
   detail: null,
 };
 
@@ -177,5 +184,84 @@ describe('IncidentFeed', () => {
       expect(screen.getByText(/no live incidents have been persisted/i)).toBeInTheDocument(),
     );
     expect(screen.getByText(/not a zero-risk claim/i)).toBeInTheDocument();
+  });
+
+  it('says plainly when nothing is being measured, so stale cards cannot read as calm', async () => {
+    const stale = {
+      ...SNAPSHOT,
+      observation: {
+        status: 'STALE' as const,
+        last_judged_at: '2026-07-26T11:00:00Z',
+        age_seconds: 3600,
+        expected_within_seconds: 120,
+        note: 'Nothing has been judged for longer than the expected interval, so everything below is the last state measured, not the current one.',
+      },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(JSON.stringify(stale), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+        ),
+      ),
+    );
+
+    render(
+      <MemoryRouter>
+        <SnapshotStreamProvider>
+          <IncidentFeed />
+        </SnapshotStreamProvider>
+      </MemoryRouter>,
+    );
+    act(() => FakeEventSource.instances[0]?.open());
+
+    const banner = await screen.findByTestId('observation');
+    expect(banner).toHaveTextContent(/not currently watching/i);
+    expect(banner).toHaveTextContent(/last state measured, not the current one/i);
+    expect(banner).toHaveTextContent(/last judged 60 min ago/i);
+    // The cards are still shown — they are the last known state, not a lie.
+    expect(await screen.findByRole('article', { name: /attack incident/i })).toBeInTheDocument();
+  });
+
+  it('a feed that has never observed anything refuses to imply safety', async () => {
+    const never = {
+      ...SNAPSHOT,
+      incidents: [],
+      count: 0,
+      observation: {
+        status: 'NEVER' as const,
+        last_judged_at: null,
+        age_seconds: null,
+        expected_within_seconds: 120,
+        note: 'No live telemetry has ever been judged here. An empty feed is not evidence that nothing is wrong.',
+      },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(JSON.stringify(never), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+        ),
+      ),
+    );
+
+    render(
+      <MemoryRouter>
+        <SnapshotStreamProvider>
+          <IncidentFeed />
+        </SnapshotStreamProvider>
+      </MemoryRouter>,
+    );
+    act(() => FakeEventSource.instances[0]?.open());
+
+    const banner = await screen.findByTestId('observation');
+    expect(banner).toHaveTextContent(/never observed/i);
+    expect(banner).toHaveTextContent(/not evidence that nothing is wrong/i);
   });
 });

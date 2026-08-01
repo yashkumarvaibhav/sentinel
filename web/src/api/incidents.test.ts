@@ -34,6 +34,13 @@ function response(item: unknown = ITEM) {
     incidents: [item],
     count: 1,
     limit: 20,
+    observation: {
+      status: 'WATCHING',
+      last_judged_at: '2026-07-26T12:00:00Z',
+      age_seconds: 2,
+      expected_within_seconds: 120,
+      note: 'Live telemetry is being judged now.',
+    },
     detail: null,
   };
 }

@@ -38,7 +38,7 @@ export type LogRefs = Identifier[];
 export type SignalName = string;
 export type TraceRefs = Identifier[];
 export type UtcDatetime = string;
-export type FiniteFloat = number;
+export type Contracts__Base__FiniteFloat__1 = number;
 export type Honesty = "REAL" | "SIMULATED";
 export type HumanText = string;
 export type Probability = number;
@@ -338,6 +338,12 @@ export type Muted = boolean;
 export type Services3 = [Identifier, ...Identifier[]];
 export type Incidents = IncidentFeedItem[];
 export type Limit = number;
+export type Contracts__Base__FiniteFloat__2 = number;
+export type Contracts__Base__FiniteFloat__3 = number;
+/**
+ * Whether the platform is currently able to see anything at all.
+ */
+export type ObservationStatus = "WATCHING" | "STALE" | "NEVER";
 export type Status2 = "ready" | "degraded";
 export type Active = boolean;
 export type EvidenceEpisodeIds = Identifier[];
@@ -454,7 +460,7 @@ export interface Observation {
   trace_refs?: TraceRefs;
   ts: UtcDatetime;
   unit?: string;
-  value: FiniteFloat;
+  value: Contracts__Base__FiniteFloat__1;
 }
 export interface Attributes {
   [k: string]: TelemetryScalar;
@@ -474,21 +480,21 @@ export interface ContextWindow {
   valid_to: UtcDatetime;
 }
 export interface ExpectedDelta {
-  [k: string]: FiniteFloat;
+  [k: string]: Contracts__Base__FiniteFloat__1;
 }
 /**
  * Full-resolution split of observed telemetry into explained and residual parts.
  */
 export interface DecompFrame {
-  band_high: FiniteFloat;
-  band_low: FiniteFloat;
+  band_high: Contracts__Base__FiniteFloat__1;
+  band_low: Contracts__Base__FiniteFloat__1;
   context_ids?: ContextIds;
-  explained_base: FiniteFloat;
-  explained_event: FiniteFloat;
+  explained_base: Contracts__Base__FiniteFloat__1;
+  explained_event: Contracts__Base__FiniteFloat__1;
   frame_id: Identifier;
   observation_id: Identifier;
-  observed: FiniteFloat;
-  residual: FiniteFloat;
+  observed: Contracts__Base__FiniteFloat__1;
+  residual: Contracts__Base__FiniteFloat__1;
   residual_score: Probability;
   service: Identifier;
   signal: SignalName;
@@ -582,13 +588,13 @@ export interface AgentAssessment {
  * which way it moved and how much of the score it contributed.
  */
 export interface EvidenceItem {
-  baseline: FiniteFloat;
+  baseline: Contracts__Base__FiniteFloat__1;
   contribution: Probability;
   direction: EvidenceDirection;
   evidence_refs?: EvidenceRefs3;
   feature: SignalName;
   note: HumanText;
-  value: FiniteFloat;
+  value: Contracts__Base__FiniteFloat__1;
 }
 /**
  * The fused, evidence-backed answer, with its differential diagnosis.
@@ -962,7 +968,7 @@ export interface ScoreHeadline {
   sample_count: SampleCount;
   status: KpiStatus;
   unit: UnitName;
-  value: FiniteFloat | null;
+  value: Contracts__Base__FiniteFloat__1 | null;
 }
 /**
  * The command centre's one typed reliability snapshot.
@@ -984,7 +990,7 @@ export interface KpiMetric {
   sample_count: SampleCount1;
   status: KpiStatus;
   unit: UnitName;
-  value: FiniteFloat | null;
+  value: Contracts__Base__FiniteFloat__1 | null;
   window: KpiWindow;
 }
 /**
@@ -1003,6 +1009,7 @@ export interface IncidentFeedResponse {
   detail?: HumanText | null;
   incidents: Incidents;
   limit: Limit;
+  observation: ObservationFreshness;
   status: Status2;
 }
 /**
@@ -1045,11 +1052,26 @@ export interface IncidentConfidence {
  * One measured value compact enough for an incident card.
  */
 export interface IncidentEvidenceValue {
-  baseline: FiniteFloat;
+  baseline: Contracts__Base__FiniteFloat__1;
   direction: EvidenceDirection;
   feature: SignalName;
   note: HumanText;
-  value: FiniteFloat;
+  value: Contracts__Base__FiniteFloat__1;
+}
+/**
+ * How recently the platform last judged live telemetry.
+ *
+ * Staleness is a property of the observation, not of any incident. An
+ * incident card can only ever be the last thing that was measured; whether
+ * that is *current* depends on whether anything has been measured since, and
+ * a feed that cannot say so invites a stopped platform to read as a calm one.
+ */
+export interface ObservationFreshness {
+  age_seconds?: Contracts__Base__FiniteFloat__2 | null;
+  expected_within_seconds: Contracts__Base__FiniteFloat__3;
+  last_judged_at?: UtcDatetime | null;
+  note: HumanText;
+  status: ObservationStatus;
 }
 /**
  * The authoritative current-incident graph or an explicit absence.
@@ -1226,14 +1248,14 @@ export interface SecuritySnapshot {
  * One scoped security measurement with evidence-window provenance.
  */
 export interface SecurityMeasurement {
-  baseline: FiniteFloat | null;
+  baseline: Contracts__Base__FiniteFloat__1 | null;
   detail: HumanText;
   evidence_refs: EvidenceRefs5;
   feature: SecurityFeature;
   scope: Identifier | null;
   status: SecurityMeasurementStatus;
   unit: SecurityMeasurementUnit | null;
-  value: FiniteFloat | null;
+  value: Contracts__Base__FiniteFloat__1 | null;
   window_count: WindowCount;
   window_end: UtcDatetime | null;
   window_start: UtcDatetime | null;

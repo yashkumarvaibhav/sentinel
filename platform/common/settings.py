@@ -163,6 +163,15 @@ class Settings(BaseSettings):
         ge=1_000,
         le=10_000_000,
     )
+    # How long the feed may go without a judged tick before it says so. This is
+    # a display honesty bound, not a detector parameter: it decides when the UI
+    # stops calling itself live, never what counts as a symptom.
+    observation_expected_within_seconds: float = Field(
+        default=120.0,
+        alias="SENTINEL_OBSERVATION_EXPECTED_WITHIN_SECONDS",
+        gt=0.0,
+        le=86_400.0,
+    )
     live_producer_context_refresh_seconds: int = Field(
         default=60,
         alias="SENTINEL_LIVE_PRODUCER_CONTEXT_REFRESH_SECONDS",

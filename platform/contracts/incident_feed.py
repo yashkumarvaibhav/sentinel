@@ -123,6 +123,43 @@ class IncidentFeedItem(ContractModel):
         return self
 
 
+class ObservationStatus(StrEnum):
+    """Whether the platform is currently able to see anything at all."""
+
+    WATCHING = "WATCHING"
+    STALE = "STALE"
+    NEVER = "NEVER"
+
+
+class ObservationFreshness(ContractModel):
+    """How recently the platform last judged live telemetry.
+
+    Staleness is a property of the observation, not of any incident. An
+    incident card can only ever be the last thing that was measured; whether
+    that is *current* depends on whether anything has been measured since, and
+    a feed that cannot say so invites a stopped platform to read as a calm one.
+    """
+
+    status: ObservationStatus
+    last_judged_at: UtcDatetime | None = None
+    age_seconds: FiniteFloat | None = Field(default=None, ge=0.0)
+    expected_within_seconds: FiniteFloat = Field(gt=0.0)
+    note: HumanText
+
+    @model_validator(mode="after")
+    def coherent_freshness(self) -> Self:
+        if self.status is ObservationStatus.NEVER:
+            if self.last_judged_at is not None or self.age_seconds is not None:
+                raise ValueError("a platform that has never judged has no last judgement")
+            return self
+        if self.last_judged_at is None or self.age_seconds is None:
+            raise ValueError("a judged platform must state when it last judged")
+        watching = self.age_seconds <= self.expected_within_seconds
+        if watching != (self.status is ObservationStatus.WATCHING):
+            raise ValueError("observation status must follow its own measured age")
+        return self
+
+
 class IncidentFeedResponse(ContractModel):
     """One bounded latest-first REST snapshot."""
 
@@ -130,6 +167,7 @@ class IncidentFeedResponse(ContractModel):
     incidents: tuple[IncidentFeedItem, ...]
     count: int = Field(ge=0)
     limit: int = Field(ge=1, le=50)
+    observation: ObservationFreshness
     detail: HumanText | None = None
 
     @model_validator(mode="after")

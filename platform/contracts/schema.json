@@ -1241,7 +1241,7 @@
         },
         "expected_delta": {
           "additionalProperties": {
-            "$ref": "#/$defs/FiniteFloat"
+            "$ref": "#/$defs/contracts___base__FiniteFloat__1"
           },
           "minProperties": 1,
           "propertyNames": {
@@ -1448,10 +1448,10 @@
       "description": "Full-resolution split of observed telemetry into explained and residual parts.",
       "properties": {
         "band_high": {
-          "$ref": "#/$defs/FiniteFloat"
+          "$ref": "#/$defs/contracts___base__FiniteFloat__1"
         },
         "band_low": {
-          "$ref": "#/$defs/FiniteFloat"
+          "$ref": "#/$defs/contracts___base__FiniteFloat__1"
         },
         "context_ids": {
           "default": [],
@@ -1462,10 +1462,10 @@
           "type": "array"
         },
         "explained_base": {
-          "$ref": "#/$defs/FiniteFloat"
+          "$ref": "#/$defs/contracts___base__FiniteFloat__1"
         },
         "explained_event": {
-          "$ref": "#/$defs/FiniteFloat"
+          "$ref": "#/$defs/contracts___base__FiniteFloat__1"
         },
         "frame_id": {
           "$ref": "#/$defs/Identifier"
@@ -1474,10 +1474,10 @@
           "$ref": "#/$defs/Identifier"
         },
         "observed": {
-          "$ref": "#/$defs/FiniteFloat"
+          "$ref": "#/$defs/contracts___base__FiniteFloat__1"
         },
         "residual": {
-          "$ref": "#/$defs/FiniteFloat"
+          "$ref": "#/$defs/contracts___base__FiniteFloat__1"
         },
         "residual_score": {
           "$ref": "#/$defs/Probability"
@@ -1544,7 +1544,7 @@
       "description": "One measured value that justifies part of an axis score.\n\nAn agent never reports a bare number: every point of score is traceable to\nan item naming the feature, what was measured, what it is compared with,\nwhich way it moved and how much of the score it contributed.",
       "properties": {
         "baseline": {
-          "$ref": "#/$defs/FiniteFloat"
+          "$ref": "#/$defs/contracts___base__FiniteFloat__1"
         },
         "contribution": {
           "$ref": "#/$defs/Probability"
@@ -1567,7 +1567,7 @@
           "$ref": "#/$defs/HumanText"
         },
         "value": {
-          "$ref": "#/$defs/FiniteFloat"
+          "$ref": "#/$defs/contracts___base__FiniteFloat__1"
         }
       },
       "required": [
@@ -1580,9 +1580,6 @@
       ],
       "title": "EvidenceItem",
       "type": "object"
-    },
-    "FiniteFloat": {
-      "type": "number"
     },
     "HumanText": {
       "maxLength": 4096,
@@ -2094,7 +2091,7 @@
       "description": "One measured value compact enough for an incident card.",
       "properties": {
         "baseline": {
-          "$ref": "#/$defs/FiniteFloat"
+          "$ref": "#/$defs/contracts___base__FiniteFloat__1"
         },
         "direction": {
           "$ref": "#/$defs/EvidenceDirection"
@@ -2106,7 +2103,7 @@
           "$ref": "#/$defs/HumanText"
         },
         "value": {
-          "$ref": "#/$defs/FiniteFloat"
+          "$ref": "#/$defs/contracts___base__FiniteFloat__1"
         }
       },
       "required": [
@@ -2259,6 +2256,9 @@
           "title": "Limit",
           "type": "integer"
         },
+        "observation": {
+          "$ref": "#/$defs/ObservationFreshness"
+        },
         "status": {
           "enum": [
             "ready",
@@ -2272,7 +2272,8 @@
         "status",
         "incidents",
         "count",
-        "limit"
+        "limit",
+        "observation"
       ],
       "title": "IncidentFeedResponse",
       "type": "object"
@@ -2454,7 +2455,7 @@
         "value": {
           "anyOf": [
             {
-              "$ref": "#/$defs/FiniteFloat"
+              "$ref": "#/$defs/contracts___base__FiniteFloat__1"
             },
             {
               "type": "null"
@@ -2628,7 +2629,7 @@
           "default": "1"
         },
         "value": {
-          "$ref": "#/$defs/FiniteFloat"
+          "$ref": "#/$defs/contracts___base__FiniteFloat__1"
         }
       },
       "required": [
@@ -2640,6 +2641,60 @@
       ],
       "title": "Observation",
       "type": "object"
+    },
+    "ObservationFreshness": {
+      "additionalProperties": false,
+      "description": "How recently the platform last judged live telemetry.\n\nStaleness is a property of the observation, not of any incident. An\nincident card can only ever be the last thing that was measured; whether\nthat is *current* depends on whether anything has been measured since, and\na feed that cannot say so invites a stopped platform to read as a calm one.",
+      "properties": {
+        "age_seconds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/contracts___base__FiniteFloat__2"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "expected_within_seconds": {
+          "$ref": "#/$defs/contracts___base__FiniteFloat__3"
+        },
+        "last_judged_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcDatetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "note": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "status": {
+          "$ref": "#/$defs/ObservationStatus"
+        }
+      },
+      "required": [
+        "status",
+        "expected_within_seconds",
+        "note"
+      ],
+      "title": "ObservationFreshness",
+      "type": "object"
+    },
+    "ObservationStatus": {
+      "description": "Whether the platform is currently able to see anything at all.",
+      "enum": [
+        "WATCHING",
+        "STALE",
+        "NEVER"
+      ],
+      "title": "ObservationStatus",
+      "type": "string"
     },
     "Probability": {
       "maximum": 1.0,
@@ -2706,7 +2761,7 @@
         "value": {
           "anyOf": [
             {
-              "$ref": "#/$defs/FiniteFloat"
+              "$ref": "#/$defs/contracts___base__FiniteFloat__1"
             },
             {
               "type": "null"
@@ -2880,7 +2935,7 @@
         "baseline": {
           "anyOf": [
             {
-              "$ref": "#/$defs/FiniteFloat"
+              "$ref": "#/$defs/contracts___base__FiniteFloat__1"
             },
             {
               "type": "null"
@@ -2926,7 +2981,7 @@
         "value": {
           "anyOf": [
             {
-              "$ref": "#/$defs/FiniteFloat"
+              "$ref": "#/$defs/contracts___base__FiniteFloat__1"
             },
             {
               "type": "null"
@@ -3700,6 +3755,17 @@
       ],
       "title": "VerificationCheck",
       "type": "object"
+    },
+    "contracts___base__FiniteFloat__1": {
+      "type": "number"
+    },
+    "contracts___base__FiniteFloat__2": {
+      "minimum": 0.0,
+      "type": "number"
+    },
+    "contracts___base__FiniteFloat__3": {
+      "exclusiveMinimum": 0.0,
+      "type": "number"
     }
   },
   "$id": "urn:sentinel:contracts:v1",

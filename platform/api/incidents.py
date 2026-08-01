@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal, Protocol
 
 from pydantic import ValidationError
@@ -18,6 +19,7 @@ from common.storage import (
     IncidentGraphRecord,
     IncidentRecord,
     IncidentSecurityRecord,
+    LiveProducerCheckpoint,
 )
 from contracts import (
     ActionControlSnapshot,
@@ -30,6 +32,8 @@ from contracts import (
     IncidentEvidenceValue,
     IncidentFeedItem,
     IncidentFeedResponse,
+    ObservationFreshness,
+    ObservationStatus,
     SecurityCohort,
     SecurityMeasurement,
     SnapshotInvalidation,
@@ -41,12 +45,19 @@ from decision import IncidentOutcome
 
 MAX_INCIDENTS = 50
 DEFAULT_INCIDENTS = 20
+# Used only when the store itself cannot be read, so no measured interval is
+# available to state. It is a display bound, never a detector parameter.
+DEFAULT_OBSERVATION_INTERVAL_SECONDS = 120.0
 
 
 class IncidentFeedReader(Protocol):
     """The bounded runtime-store read used by the gateway."""
 
     async def list_incidents(self, *, limit: int) -> tuple[IncidentRecord, ...]: ...
+
+    async def get_live_producer_checkpoint(
+        self, producer_id: str
+    ) -> LiveProducerCheckpoint | None: ...
 
 
 class IncidentFeedStore(Protocol):
@@ -263,10 +274,52 @@ def incident_record(item: IncidentFeedItem) -> IncidentRecord:
     )
 
 
+def observation_freshness(
+    checkpoint: LiveProducerCheckpoint | None,
+    *,
+    now: datetime,
+    expected_within_seconds: float,
+) -> ObservationFreshness:
+    """State plainly whether anything is currently being measured.
+
+    An incident card is always the last thing that was measured. Whether it is
+    *current* depends on whether anything has been measured since, and that is
+    a fact about the producer rather than about any incident — so it is
+    answered from the producer's own durable position, not inferred from how
+    recently a row happened to change.
+    """
+    if checkpoint is None:
+        return ObservationFreshness(
+            status=ObservationStatus.NEVER,
+            expected_within_seconds=expected_within_seconds,
+            note=(
+                "No live telemetry has ever been judged here. An empty feed is "
+                "not evidence that nothing is wrong."
+            ),
+        )
+    age = max(0.0, (now - checkpoint.tick_ts).total_seconds())
+    watching = age <= expected_within_seconds
+    return ObservationFreshness(
+        status=ObservationStatus.WATCHING if watching else ObservationStatus.STALE,
+        last_judged_at=checkpoint.tick_ts,
+        age_seconds=age,
+        expected_within_seconds=expected_within_seconds,
+        note=(
+            "Live telemetry is being judged now."
+            if watching
+            else (
+                "Nothing has been judged for longer than the expected interval, so "
+                "everything below is the last state measured, not the current one."
+            )
+        ),
+    )
+
+
 def incident_snapshot(
     records: tuple[IncidentRecord, ...],
     *,
     limit: int,
+    observation: ObservationFreshness,
 ) -> IncidentFeedResponse:
     """Strictly revalidate durable rows before exposing any of them."""
     try:
@@ -278,17 +331,35 @@ def incident_snapshot(
         incidents=incidents,
         count=len(incidents),
         limit=limit,
+        observation=observation,
         detail=None,
     )
 
 
-def unavailable_incident_snapshot(*, limit: int, detail: str) -> IncidentFeedResponse:
+def unavailable_incident_snapshot(
+    *,
+    limit: int,
+    detail: str,
+    observation: ObservationFreshness | None = None,
+) -> IncidentFeedResponse:
     """Return no partial rows when the live store cannot be trusted."""
     return IncidentFeedResponse(
         status="degraded",
         incidents=(),
         count=0,
         limit=limit,
+        observation=(
+            observation
+            if observation is not None
+            else ObservationFreshness(
+                status=ObservationStatus.NEVER,
+                expected_within_seconds=DEFAULT_OBSERVATION_INTERVAL_SECONDS,
+                note=(
+                    "The live incident store could not be read, so nothing can be "
+                    "said about what is being measured."
+                ),
+            )
+        ),
         detail=_line(detail),
     )
 

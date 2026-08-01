@@ -1,4 +1,5 @@
 import type {
+  ObservationFreshness,
   ActionStatus,
   DecisionAction,
   EvidenceDirection,
@@ -200,6 +201,50 @@ function parseItem(value: unknown): IncidentFeedItem {
   };
 }
 
+/**
+ * Whether the platform is measuring anything right now. Parsed fail-closed and
+ * re-derived rather than trusted: a payload that claims WATCHING while stating
+ * an age past its own bound is exactly the lie this field exists to prevent.
+ */
+function parseObservation(value: unknown): ObservationFreshness {
+  const body = record(value, 'observation freshness');
+  if (body.status !== 'WATCHING' && body.status !== 'STALE' && body.status !== 'NEVER') {
+    throw new Error('observation status is unknown');
+  }
+  const expected = body.expected_within_seconds;
+  if (typeof expected !== 'number' || !Number.isFinite(expected) || expected <= 0) {
+    throw new Error('observation interval must be a positive number');
+  }
+  const note = text(body.note, 'observation note');
+  if (body.status === 'NEVER') {
+    if (body.last_judged_at != null || body.age_seconds != null) {
+      throw new Error('a platform that has never judged cannot state a last judgement');
+    }
+    return {
+      status: 'NEVER',
+      last_judged_at: null,
+      age_seconds: null,
+      expected_within_seconds: expected,
+      note,
+    };
+  }
+  const age = body.age_seconds;
+  if (typeof age !== 'number' || !Number.isFinite(age) || age < 0) {
+    throw new Error('observation age must be a non-negative number');
+  }
+  const lastJudged = text(body.last_judged_at, 'observation last_judged_at');
+  if ((age <= expected) !== (body.status === 'WATCHING')) {
+    throw new Error('observation status contradicts its own measured age');
+  }
+  return {
+    status: body.status,
+    last_judged_at: lastJudged,
+    age_seconds: age,
+    expected_within_seconds: expected,
+    note,
+  };
+}
+
 export function parseIncidentFeedResponse(value: unknown): IncidentFeedResponse {
   const body = record(value, 'incident feed response');
   if (body.status !== 'ready' && body.status !== 'degraded') {
@@ -235,6 +280,7 @@ export function parseIncidentFeedResponse(value: unknown): IncidentFeedResponse 
     incidents,
     count: body.count,
     limit: body.limit,
+    observation: parseObservation(body.observation),
     detail,
   };
 }

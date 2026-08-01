@@ -94,6 +94,8 @@ from contracts.incident_feed import (
     IncidentEvidenceValue,
     IncidentFeedItem,
     IncidentFeedResponse,
+    ObservationFreshness,
+    ObservationStatus,
 )
 from contracts.kpi import (
     DETECTION_LATENCY_HEADLINE_KEY,
@@ -195,6 +197,8 @@ __all__ = [
     "KpiStatus",
     "KpiWindow",
     "Observation",
+    "ObservationFreshness",
+    "ObservationStatus",
     "ReasonSubtype",
     "RejectedAlternative",
     "RollbackVerificationStatus",

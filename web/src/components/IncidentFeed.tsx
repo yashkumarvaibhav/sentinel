@@ -2,7 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 
 import { fetchIncidents } from '@/api/incidents';
-import type { IncidentFeedItem, IncidentFeedResponse } from '@/contracts/types';
+import type {
+  IncidentFeedItem,
+  IncidentFeedResponse,
+  ObservationFreshness,
+} from '@/contracts/types';
 import { useSnapshotInvalidation } from '@/shell/useSnapshotStream';
 
 type Load =
@@ -97,6 +101,48 @@ function IncidentCard({ item }: { item: IncidentFeedItem }) {
   );
 }
 
+function formatAge(seconds: number): string {
+  if (seconds < 90) return `${Math.round(seconds)}s`;
+  if (seconds < 5400) return `${Math.round(seconds / 60)} min`;
+  return `${Math.round(seconds / 3600)} h`;
+}
+
+/**
+ * Whether anything is being measured at all. This is deliberately separate
+ * from the cards: an incident can only ever be the last thing measured, and a
+ * stopped producer must never let a stale card read as a calm mesh.
+ */
+export function ObservationBanner({ observation }: { observation: ObservationFreshness }) {
+  if (observation.status === 'WATCHING') {
+    return (
+      <p className="text-muted text-xs" data-testid="observation" role="status">
+        <span className="text-ok">●</span> {observation.note}
+        {observation.age_seconds !== null && observation.age_seconds !== undefined
+          ? ` Last judged ${formatAge(observation.age_seconds)} ago.`
+          : ''}
+      </p>
+    );
+  }
+  const never = observation.status === 'NEVER';
+  return (
+    <p
+      className="border-warn/40 bg-warn/10 text-warn rounded-lg border p-3 text-sm"
+      data-testid="observation"
+      role="status"
+    >
+      <strong className="font-semibold">
+        {never ? 'Never observed' : 'Not currently watching'}
+      </strong>{' '}
+      — {observation.note}
+      {!never && observation.age_seconds !== null && observation.age_seconds !== undefined
+        ? ` Last judged ${formatAge(observation.age_seconds)} ago; expected within ${formatAge(
+            observation.expected_within_seconds,
+          )}.`
+        : ''}
+    </p>
+  );
+}
+
 export function IncidentFeed() {
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   const inFlight = useRef<Promise<void> | null>(null);
@@ -170,6 +216,7 @@ export function IncidentFeed() {
           Live incident snapshot unavailable: {load.detail}
         </p>
       )}
+      {load.state === 'ready' && <ObservationBanner observation={load.response.observation} />}
       {load.state === 'ready' && (
         <div
           role="feed"
@@ -180,8 +227,8 @@ export function IncidentFeed() {
         >
           {load.response.incidents.length === 0 ? (
             <p className="border-line bg-sidebar text-muted rounded-lg border p-4 text-sm">
-              No live incidents have been persisted. This is not a zero-risk claim: no deployed
-              live decision producer has written a current incident.
+              No live incidents have been persisted. This is not a zero-risk claim: an empty feed
+              means nothing has been recorded, not that nothing is wrong.
             </p>
           ) : (
             load.response.incidents.map((item) => (
