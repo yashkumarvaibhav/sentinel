@@ -294,6 +294,14 @@ score-decisions: ## Score decisions against the scenario answer key (CAPTURE_ROO
 		$(foreach root,$(CAPTURE_ROOTS),--capture "../$(root)") \
 		--report ../$(or $(DECISION_REPORT),docs/reports/phase-4-decision-score.md)
 
+.PHONY: score-live-run
+score-live-run: ## Score what the live producer STORED during one authored run (CAPTURE_ROOT=)
+	@test -n "$(CAPTURE_ROOT)" || { echo "CAPTURE_ROOT is required" >&2; exit 2; }
+	cd platform && PYTHONPATH=.. uv run python -m lab.scoring.live_gate \
+		--repo-root .. --capture "../$(CAPTURE_ROOT)" \
+		$(if $(SPEND_HELD_OUT_SEED),--spend-held-out-seed) \
+		--report ../$(or $(LIVE_RUN_REPORT),docs/reports/phase-6-live-run-score.md)
+
 .PHONY: score-negative-control
 score-negative-control: ## Assert no-fault captures emit zero fault-kind episodes (CAPTURE_ROOTS=)
 	@test -n "$(CAPTURE_ROOTS)" || { echo "CAPTURE_ROOTS is required" >&2; exit 2; }

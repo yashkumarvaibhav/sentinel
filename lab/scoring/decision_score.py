@@ -49,7 +49,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from contracts import ACTING_ACTIONS, DecisionAction, Incident, VerdictClass
+from contracts import ACTING_ACTIONS, DecisionAction, VerdictClass
 from decision import IncidentOutcome
 from lab.captures import load_private_labels
 from lab.scenarios import load_profile
@@ -82,6 +82,43 @@ class LabelledWindow:
     def overlaps(self, start: float, end: float) -> bool:
         """Half-open overlap against an incident's own span."""
         return start < self.end_offset_seconds and end > self.start_offset_seconds
+
+
+@dataclass(frozen=True, slots=True)
+class Judgement:
+    """One thing the platform concluded, in the only terms grading needs.
+
+    Grading asks four questions of a judgement - when it was made, what problem
+    it was about, what class it named and whether it acted - and nothing else.
+    Stating that explicitly is what lets a replay transcript and a durable
+    incident row be graded by exactly the same rules: the two differ in where
+    the judgement was read from, never in what "handled correctly" means.
+    """
+
+    offset_seconds: float
+    incident_id: str
+    opened_offset_seconds: float
+    last_activity_offset_seconds: float
+    services: frozenset[str]
+    verdict_class: str | None
+    action: DecisionAction
+    origin_service: str | None
+    target_service: str | None
+
+    def answers(self, window: LabelledWindow) -> bool:
+        """Whether this judgement is an answer to the question that window asks.
+
+        An incident answers a window when it overlaps it in time AND touches a
+        service the window's evidence was measured on. The time test alone
+        over-attributes: a real scenario runs several incidents at once, and a
+        long-running fault on another service would otherwise be read as the
+        answer to a question it has nothing to do with.
+        """
+        overlaps = window.overlaps(
+            self.opened_offset_seconds,
+            self.last_activity_offset_seconds,
+        )
+        return overlaps and bool(self.services & set(window.services))
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,6 +239,42 @@ def resolve_windows(
     return tuple(sorted(windows, key=lambda window: (window.start_offset_seconds, window.label_id)))
 
 
+def resolve_scenario_windows(
+    scenario_id: str,
+    *,
+    scenario_root: Path,
+    labels: Mapping[str, object],
+) -> tuple[LabelledWindow, ...]:
+    """The answer key for one scenario, resolved to the offsets it measured."""
+    profile = load_profile(scenario_root / f"{scenario_id}.yml")
+    return resolve_windows(
+        labels,
+        decision_labels=profile.decision_labels,
+        residual_service=profile.telemetry.logical_service,
+    )
+
+
+def score_judgements(
+    judgements: Sequence[Judgement],
+    windows: Sequence[LabelledWindow],
+) -> tuple[tuple[WindowOutcome, ...], tuple[FalseAct, ...]]:
+    """Grade a stream of judgements against an answer key.
+
+    This is the single definition of "handled correctly" in the project. A
+    replay transcript and a durable incident row both reduce to ``Judgement``
+    before they get here, so neither can drift into its own private idea of
+    what a correct decision was.
+    """
+    combination_allowed = (
+        len({window.expectation for window in windows if window.names_a_class}) > 1
+    )
+    outcomes = tuple(
+        _score_window(window, judgements=judgements, combination_allowed=combination_allowed)
+        for window in windows
+    )
+    return outcomes, _false_acts(judgements, windows)
+
+
 def score_decisions(
     replay: DecisionReplay,
     *,
@@ -209,64 +282,71 @@ def score_decisions(
     labels: Mapping[str, object],
 ) -> DecisionScore:
     """Grade one capture's decisions against its scenario's answer key."""
-    profile = load_profile(scenario_root / f"{replay.scenario_id}.yml")
-    windows = resolve_windows(
-        labels,
-        decision_labels=profile.decision_labels,
-        residual_service=profile.telemetry.logical_service,
+    windows = resolve_scenario_windows(
+        replay.scenario_id,
+        scenario_root=scenario_root,
+        labels=labels,
     )
-    combination_allowed = (
-        len({window.expectation for window in windows if window.names_a_class}) > 1
-    )
-    outcomes = tuple(
-        _score_window(window, replay=replay, combination_allowed=combination_allowed)
-        for window in windows
-    )
+    outcomes, false_acts = score_judgements(replay_judgements(replay), windows)
     return DecisionScore(
         capture_id=replay.capture_id,
         scenario_id=replay.scenario_id,
         seed=replay.seed,
         seed_purpose=replay.seed_purpose,
         windows=outcomes,
-        false_acts=_false_acts(replay, windows),
+        false_acts=false_acts,
         decision_count=sum(len(tick.outcomes) for tick in replay.ticks),
+    )
+
+
+def replay_judgements(replay: DecisionReplay) -> tuple[Judgement, ...]:
+    """Every judgement a capture replay made, in the terms grading needs."""
+    return tuple(
+        Judgement(
+            offset_seconds=offset,
+            incident_id=outcome.incident.incident_id,
+            opened_offset_seconds=_offset(outcome.incident.opened_ts, replay.anchor_ts),
+            last_activity_offset_seconds=_offset(
+                outcome.incident.last_activity_ts, replay.anchor_ts
+            ),
+            services=frozenset(outcome.incident.services)
+            | frozenset(outcome.incident.implicated_services),
+            verdict_class=(
+                None
+                if outcome.decision.verdict_class is None
+                else outcome.decision.verdict_class.value
+            ),
+            action=outcome.decision.action,
+            origin_service=outcome.incident.origin_service,
+            target_service=outcome.decision.target_service,
+        )
+        for offset, outcome in _decisions(replay)
     )
 
 
 def _score_window(
     window: LabelledWindow,
     *,
-    replay: DecisionReplay,
+    judgements: Sequence[Judgement],
     combination_allowed: bool,
 ) -> WindowOutcome:
     surfaced = False
     acted = False
     classes: set[str] = set()
     origins: set[str] = set()
-    for offset, outcome in _decisions(replay):
-        incident = outcome.incident
-        span = (
-            _offset(incident.opened_ts, replay.anchor_ts),
-            _offset(incident.last_activity_ts, replay.anchor_ts),
-        )
-        # An incident answers a window when it overlaps it in time AND touches a
-        # service the window's evidence was measured on. The time test alone
-        # over-attributes: a real scenario runs several incidents at once, and a
-        # long-running fault on another service would otherwise be read as the
-        # answer to a question it has nothing to do with.
-        if not window.overlaps(*span) or offset < window.start_offset_seconds:
+    for judgement in judgements:
+        if judgement.offset_seconds < window.start_offset_seconds:
             continue
-        if not _touches(incident, window):
+        if not judgement.answers(window):
             continue
-        decision = outcome.decision
-        if decision.action is not DecisionAction.SUPPRESS:
+        if judgement.action is not DecisionAction.SUPPRESS:
             surfaced = True
-        if decision.action in ACTING_ACTIONS:
+        if judgement.action in ACTING_ACTIONS:
             acted = True
-        if decision.verdict_class is not None:
-            classes.add(decision.verdict_class.value)
-        if incident.origin_service is not None:
-            origins.add(incident.origin_service)
+        if judgement.verdict_class is not None:
+            classes.add(judgement.verdict_class)
+        if judgement.origin_service is not None:
+            origins.add(judgement.origin_service)
     handled = _handled_correctly(window, surfaced=surfaced, acted=acted)
     return WindowOutcome(
         window=window,
@@ -319,29 +399,23 @@ def _reason_correct(
 
 
 def _false_acts(
-    replay: DecisionReplay,
+    judgements: Sequence[Judgement],
     windows: Sequence[LabelledWindow],
 ) -> tuple[FalseAct, ...]:
     """Autonomous actions taken where the answer key says nothing was wrong."""
     faults = tuple(window for window in windows if window.names_a_class)
     found: list[FalseAct] = []
-    for offset, outcome in _decisions(replay):
-        decision = outcome.decision
-        if decision.action not in ACTING_ACTIONS:
+    for judgement in judgements:
+        if judgement.action not in ACTING_ACTIONS:
             continue
-        incident = outcome.incident
-        span = (
-            _offset(incident.opened_ts, replay.anchor_ts),
-            _offset(incident.last_activity_ts, replay.anchor_ts),
-        )
-        if any(window.overlaps(*span) and _touches(incident, window) for window in faults):
+        if any(judgement.answers(window) for window in faults):
             continue
         found.append(
             FalseAct(
-                offset_seconds=offset,
-                incident_id=incident.incident_id,
-                action=decision.action,
-                target_service=decision.target_service,
+                offset_seconds=judgement.offset_seconds,
+                incident_id=judgement.incident_id,
+                action=judgement.action,
+                target_service=judgement.target_service,
             )
         )
     return tuple(found)
@@ -352,12 +426,6 @@ def _decisions(replay: DecisionReplay) -> Iterable[tuple[float, IncidentOutcome]
         offset = _offset(tick.ts, replay.anchor_ts)
         for outcome in tick.outcomes:
             yield offset, outcome
-
-
-def _touches(incident: Incident, window: LabelledWindow) -> bool:
-    """Whether an incident is about any service this window's evidence names."""
-    named = set(incident.services) | set(incident.implicated_services)
-    return bool(named & set(window.services))
 
 
 def _label_services(labels: Mapping[str, object], *, residual_service: str) -> dict[str, str]:
