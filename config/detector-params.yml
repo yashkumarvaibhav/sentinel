@@ -119,6 +119,18 @@ liveness:
     frontend.request_rate:
       maximum_age_seconds: 120.0
       full_score_age_seconds: 300.0
+ingress_rate:
+  # A live run has no capture manifest, so the telemetry service whose server
+  # spans ARE the platform's request rate is stated here. Measured against the
+  # running testbed: the demo's edge proxy reports itself as `frontend-proxy`
+  # and is the only ingress in front of the `frontend` service.
+  tick_seconds: 2
+  unit: requests/s
+  streams:
+    - service: frontend
+      signal: request_rate
+      source_services:
+        - frontend-proxy
 edge_degradation:
   window_seconds: 12
   advance_seconds: 2

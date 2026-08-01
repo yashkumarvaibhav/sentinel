@@ -20,6 +20,7 @@ from tests.factories import (
     change_point_saturation_config,
     edge_degradation_config,
     episode_config,
+    ingress_rate_config,
     liveness_config,
     log_template_config,
 )
@@ -232,6 +233,7 @@ def _configuration() -> DetectorConfig:
         log_templates=log_template_config(),
         change_point_saturation=change_point_saturation_config(),
         liveness=liveness_config(),
+        ingress_rate=ingress_rate_config(),
         edge_degradation=edge_degradation_config(),
         episodes=episode_config(),
     )

@@ -14,6 +14,7 @@ from detection.pipeline import (
     SymptomEpisodePipeline,
     residual_symptom,
 )
+from detection.rate import IngressRateReconstructor
 from detection.ratios import BehavioralRatio, BehavioralRatioMonitor, RatioEvaluation
 from detection.runner import EdgeDetectionRunner, EdgeWindowAdvance, EdgeWindowStatus
 
@@ -31,6 +32,7 @@ __all__ = [
     "EpisodePhase",
     "EpisodeTransition",
     "EpisodeWorker",
+    "IngressRateReconstructor",
     "RatioEvaluation",
     "SymptomEpisodeMachine",
     "SymptomEpisodePipeline",

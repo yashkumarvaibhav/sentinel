@@ -20,6 +20,7 @@ CONFIG_ROOT = Path(__file__).resolve().parents[2] / "config"
 
 
 def _replace_liveness_service(document: dict[str, Any]) -> None:
+    """Rename one watched stream consistently onto a service topology never names."""
     liveness = document["liveness"]
     liveness["streams"][0]["service"] = "missing"
     liveness["drop_rules"]["missing.request_rate"] = liveness["drop_rules"].pop(
@@ -28,6 +29,9 @@ def _replace_liveness_service(document: dict[str, Any]) -> None:
     liveness["silence_rules"]["missing.request_rate"] = liveness["silence_rules"].pop(
         "frontend.request_rate"
     )
+    document["ingress_rate"]["streams"][0]["service"] = "missing"
+    floors = document["absolute_noise_floors"]
+    floors["missing.request_rate"] = floors.pop("frontend.request_rate")
 
 
 def test_committed_config_loads_with_cross_file_references_and_stable_fingerprint() -> None:

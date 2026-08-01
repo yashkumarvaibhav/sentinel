@@ -11,6 +11,8 @@ from common.config import (
     EdgeDegradationRuleConfig,
     EpisodeConfig,
     EpisodePolicyConfig,
+    IngressRateConfig,
+    IngressRateStreamConfig,
     IngressRatioWindowConfig,
     LivenessConfig,
     LivenessStreamConfig,
@@ -164,6 +166,20 @@ def liveness_config(
                 full_score_age_seconds=full_score_age_seconds,
             )
         },
+    )
+
+
+def ingress_rate_config() -> IngressRateConfig:
+    return IngressRateConfig(
+        tick_seconds=2,
+        unit="requests/s",
+        streams=(
+            IngressRateStreamConfig(
+                service="frontend",
+                signal="request_rate",
+                source_services=("frontend-proxy",),
+            ),
+        ),
     )
 
 

@@ -27,7 +27,7 @@
     "valkey-cart"
   ],
   "decision_config_fingerprint": "768c3460dcb2-078392fb04bb-82371c5b25c7-1d0c321a8781",
-  "detector_config_fingerprint": "a7c7e5181f024c4e9c6210466d760dd35b0801b82bc0c9ac111fd23903191faa",
+  "detector_config_fingerprint": "4717fe4bceca528b14c81320069e421d6891baea2b4bc8363a8585b320cea70a",
   "episode_count": 0,
   "honesty": {
     "stimulus": "SIMULATED",

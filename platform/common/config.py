@@ -402,6 +402,44 @@ class LivenessStreamConfig(ConfigModel):
     signal: Identifier
 
 
+class IngressRateStreamConfig(ConfigModel):
+    """Which real ingress services are counted into one decomposed rate stream."""
+
+    service: Identifier
+    signal: Identifier
+    source_services: tuple[Identifier, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def unique_sources(self) -> Self:
+        if len(self.source_services) != len(set(self.source_services)):
+            raise ValueError("a rate stream may name each source service only once")
+        return self
+
+
+class IngressRateConfig(ConfigModel):
+    """How live server spans are reconstructed into decomposed request rates.
+
+    A capture replay derives this from its own manifest, but a live run has no
+    manifest: the identity of the telemetry service whose ingress spans are the
+    platform's request rate is an operator fact, so it is stated here rather
+    than guessed by reversing a many-to-one detector mapping.
+    """
+
+    tick_seconds: int = Field(ge=1, le=3600)
+    unit: Identifier
+    streams: tuple[IngressRateStreamConfig, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_streams(self) -> Self:
+        keys = [f"{item.service}.{item.signal}" for item in self.streams]
+        if len(keys) != len(set(keys)):
+            raise ValueError("ingress rate streams must be unique")
+        sources = [name for item in self.streams for name in item.source_services]
+        if len(sources) != len(set(sources)):
+            raise ValueError("a source service may feed only one live rate stream")
+        return self
+
+
 class LivenessConfig(ConfigModel):
     """Configured volume-drop and telemetry-silence rules by service signal."""
 
@@ -535,6 +573,7 @@ class DetectorConfig(ConfigModel):
     log_templates: LogTemplateConfig
     change_point_saturation: ChangePointSaturationConfig
     liveness: LivenessConfig
+    ingress_rate: IngressRateConfig
     edge_degradation: EdgeDegradationConfig
     episodes: EpisodeConfig
 
@@ -546,6 +585,31 @@ class DetectorConfig(ConfigModel):
             raise ValueError("ewma_alpha must be greater than zero")
         if self.baseline_update_gate_ratio == 0.0:
             raise ValueError("baseline_update_gate_ratio must be greater than zero")
+        return self
+
+    @model_validator(mode="after")
+    def validate_live_rate_streams(self) -> Self:
+        """Every stream watched for silence must have a live producer, and vice versa.
+
+        A liveness stream with nothing producing it would report silence
+        forever, which is a fabricated symptom rather than a measured one; a
+        produced stream nobody watches would decompose into evidence no
+        detector ever confirms had stopped.
+        """
+        if self.ingress_rate.tick_seconds != self.liveness.window_seconds:
+            raise ValueError("live rate ticks must equal the configured liveness window")
+        watched = {f"{item.service}.{item.signal}" for item in self.liveness.streams}
+        produced = {f"{item.service}.{item.signal}" for item in self.ingress_rate.streams}
+        if produced != watched:
+            raise ValueError(
+                "live rate streams and liveness streams must describe the same streams: "
+                + ", ".join(sorted(produced ^ watched))
+            )
+        unconfigured = sorted(produced - set(self.absolute_noise_floors))
+        if unconfigured:
+            raise ValueError(
+                "live rate streams require a configured noise floor: " + ", ".join(unconfigured)
+            )
         return self
 
 
@@ -711,6 +775,12 @@ def _validate_references(config: SentinelConfig) -> None:
             raise ConfigLoadError(
                 "detector-params.yml: liveness stream references an unknown topology service: "
                 f"{stream.service}"
+            )
+    for rate_stream in config.detectors.ingress_rate.streams:
+        if rate_stream.service not in services:
+            raise ConfigLoadError(
+                "detector-params.yml: live rate stream references an unknown topology service: "
+                f"{rate_stream.service}"
             )
     for resource_rule in config.detectors.change_point_saturation.resource_windows.rules:
         if resource_rule.service not in services:
