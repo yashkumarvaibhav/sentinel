@@ -80,12 +80,20 @@ async def run() -> None:
         max_partition_fetch_bytes=10 * 1024 * 1024,
     )
     tick_seconds = base_tick_seconds(snapshot.detectors)
-    anchor = floor_to_tick(datetime.now(UTC), tick_seconds=tick_seconds)
     pool = create_postgres_pool(config)
     await pool.open(wait=True)
     try:
         store = PostgresRepository(pool=pool, schema=config.postgres_schema)
         broker = PostgresInvalidationBroker(pool=pool)
+        # The anchor is read before anything is built: the detector state is
+        # anchored at construction, so a producer that has run before has to
+        # start its processors on the same origin its durable position names.
+        resumed = await store.get_live_producer_checkpoint(config.live_producer_id)
+        anchor = (
+            resumed.anchor_ts
+            if resumed is not None
+            else floor_to_tick(datetime.now(UTC), tick_seconds=tick_seconds)
+        )
         async with open_context_service(calendar=snapshot.events, runtime=config) as contexts:
             runtime = LiveDecisionRuntime(
                 config=snapshot,
@@ -93,11 +101,9 @@ async def run() -> None:
                 publisher=IncidentFeedPublisher(store=store, broker=broker),
                 checkpoints=store,
                 producer_id=config.live_producer_id,
-                # Before any evidence arrives the anchor is the tick boundary
-                # this process started inside; a producer that has run before
-                # replaces it with its own durable one.
                 anchor_ts=anchor,
                 stimulus_honesty=config.live_producer_stimulus_honesty,
+                published_baseline=0 if resumed is None else resumed.published_incidents,
             )
             service = LiveProducerService(
                 runtime=runtime,
@@ -115,10 +121,12 @@ async def run() -> None:
             await consumer.start()  # type: ignore[no-untyped-call]
             try:
                 _LOG.info(
-                    "live producer ready config=%s producer=%s honesty=%s",
+                    "live producer ready config=%s producer=%s honesty=%s anchor=%s resumed=%s",
                     snapshot.fingerprint,
                     config.live_producer_id,
                     config.live_producer_stimulus_honesty,
+                    anchor.isoformat(),
+                    resumed is not None,
                 )
                 await run_forever(service, _records(consumer), asyncio.Event())
             finally:

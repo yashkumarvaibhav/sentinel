@@ -150,12 +150,14 @@ def test_an_undecodable_record_is_counted_and_stepped_over() -> None:
     assert committer.committed == [0, 1]
 
 
-def test_a_resumed_producer_continues_from_its_durable_position() -> None:
-    @dataclass(frozen=True)
-    class _Checkpoint:
-        anchor_ts: datetime
-        tick_ts: datetime
+@dataclass(frozen=True)
+class _Checkpoint:
+    anchor_ts: datetime
+    tick_ts: datetime
+    published_incidents: int = 0
 
+
+def test_a_resumed_producer_continues_from_its_durable_position() -> None:
     runtime = _Runtime(
         checkpoint=_Checkpoint(anchor_ts=START, tick_ts=START + timedelta(seconds=10))
     )
@@ -171,6 +173,24 @@ def test_a_resumed_producer_continues_from_its_durable_position() -> None:
     )
 
     assert runtime.ticks[0] == START + timedelta(seconds=12)
+
+
+def test_a_runtime_built_on_a_different_anchor_refuses_to_resume() -> None:
+    """The detector state is anchored at construction, so a mismatch is a bug.
+
+    Left unchecked it feeds the processors windows from before their own
+    origin, which is exactly what a restarted producer did on the testbed.
+    """
+    runtime = _Runtime(
+        checkpoint=_Checkpoint(
+            anchor_ts=START - timedelta(minutes=5),
+            tick_ts=START + timedelta(seconds=10),
+        )
+    )
+    service = _service(runtime, _Committer())
+
+    with pytest.raises(ValueError, match="durable anchor"):
+        asyncio.run(service.resume())
 
 
 def test_only_the_context_windows_covering_a_tick_are_offered_to_it() -> None:

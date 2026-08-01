@@ -89,6 +89,7 @@ class LiveDecisionRuntime:
         producer_id: str,
         anchor_ts: datetime,
         stimulus_honesty: Literal["REAL", "SIMULATED"],
+        published_baseline: int = 0,
         changes: ChangeFeed | None = None,
         envelope: DecompositionEnvelope | None = None,
     ) -> None:
@@ -117,6 +118,11 @@ class LiveDecisionRuntime:
         self._dependency_signal_prefix = decisions.incidents.causal.dependency_signal_prefix
         self._latest: dict[str, SymptomEpisode] = {}
         self._published_revisions: dict[str, datetime] = {}
+        # Publications by this producer in total, not by this process: a
+        # restart that dropped the running count would make the durable row
+        # read as though nothing had ever been published.
+        self._published_baseline = published_baseline
+        self._published = 0
         self._published_action_controls = 0
 
     @property
@@ -164,7 +170,7 @@ class LiveDecisionRuntime:
                 producer_id=self._producer_id,
                 anchor_ts=self.anchor_ts,
                 tick_ts=measured.ts,
-                published_incidents=len(self._published_revisions),
+                published_incidents=self._published_baseline + self._published,
             )
         )
         return tuple(published)
@@ -220,6 +226,7 @@ class LiveDecisionRuntime:
         )
         if result.persisted:
             self._published_revisions[incident_id] = revision
+            self._published += 1
         return result
 
     async def resume(self) -> LiveProducerCheckpoint | None:

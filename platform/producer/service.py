@@ -100,11 +100,22 @@ class LiveProducerService:
         )
 
     async def resume(self) -> None:
-        """Start from the position this producer durably reached, if any."""
+        """Start from the position this producer durably reached, if any.
+
+        The runtime's detector state is anchored at construction, so a resumed
+        producer whose runtime was built on a different anchor would feed its
+        processors windows from before their own origin. That is a wiring
+        mistake, and it refuses loudly rather than limping.
+        """
         checkpoint = await self._runtime.resume()
         if checkpoint is None:
             self._buffer.start_from(self._runtime.anchor_ts)
             return
+        if checkpoint.anchor_ts != self._runtime.anchor_ts:
+            raise ValueError(
+                "a resumed producer must build its runtime on the durable anchor "
+                f"{checkpoint.anchor_ts.isoformat()}, not {self._runtime.anchor_ts.isoformat()}"
+            )
         self._buffer.start_from(checkpoint.anchor_ts, closed_through=checkpoint.tick_ts)
 
     async def handle(self, record: BusRecord) -> None:
