@@ -61,6 +61,7 @@ from api.kpis import (
     load_score_proof,
     unavailable_kpi_response,
 )
+from api.notify import SnapshotNotificationListener
 from api.probes import platform_probes
 from api.security import (
     SecuritySnapshotDataError,
@@ -77,6 +78,7 @@ from common.storage import (
     ClickHouseRepository,
     IncidentDetailRecord,
     PostgresRepository,
+    create_listen_connection,
     create_postgres_pool,
 )
 from contracts import (
@@ -154,6 +156,8 @@ def create_app(
         action_runtime: ActionControlRuntime | None = None
         action_stop: asyncio.Event | None = None
         action_task: asyncio.Task[None] | None = None
+        notify_stop: asyncio.Event | None = None
+        notify_task: asyncio.Task[None] | None = None
         if incident_reader is None and probes is None:
             incident_pool = create_postgres_pool(config)
             await incident_pool.open(wait=True)
@@ -170,6 +174,17 @@ def create_app(
             app.state.incident_publisher = IncidentFeedPublisher(
                 store=incident_store,
                 broker=app.state.stream_broker,
+            )
+            # A commit made by the always-on producer happens in another
+            # process, so browsers attached here would otherwise sit on stale
+            # state until their next reconnect.
+            notify_stop = asyncio.Event()
+            notify_task = asyncio.create_task(
+                SnapshotNotificationListener(
+                    connect=lambda: create_listen_connection(config),
+                    publish=app.state.stream_broker.publish,
+                ).run(notify_stop),
+                name="sentinel-snapshot-notifications",
             )
             if config.action_worker_enabled:
                 action_runtime = build_action_runtime(
@@ -238,6 +253,11 @@ def create_app(
                     await asyncio.gather(action_task, return_exceptions=True)
             if action_runtime is not None:
                 action_runtime.close()
+            if notify_stop is not None:
+                notify_stop.set()
+            if notify_task is not None:
+                notify_task.cancel()
+                await asyncio.gather(notify_task, return_exceptions=True)
             if incident_pool is not None:
                 await incident_pool.close()
 

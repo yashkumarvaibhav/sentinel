@@ -10,9 +10,12 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from psycopg import sql
+from psycopg import AsyncConnection, sql
+from psycopg.rows import TupleRow
 
 from action.control import ActionControlTransitionError, ActionExecutionPhase
+from api.notify import PostgresInvalidationBroker, SnapshotNotificationListener
+from api.stream import snapshot_invalidation
 from audit import verify_chain
 from common.config import DetectorConfig
 from common.settings import Settings
@@ -29,6 +32,7 @@ from common.storage import (
     LiveProducerCheckpoint,
     PostgresPool,
     PostgresRepository,
+    create_listen_connection,
     create_postgres_pool,
 )
 from common.storage._clickhouse import execute as clickhouse_execute
@@ -56,6 +60,7 @@ from contracts import (
     EpisodeStatus,
     Observation,
     RollbackVerificationStatus,
+    SnapshotResource,
     Symptom,
     SymptomEpisode,
     SymptomKind,
@@ -110,6 +115,7 @@ async def _exercise_real_storage() -> None:
             await _round_trip_incident_memory(config, pool, suffix)
             await _exercise_audit_ledger(config, pool)
             await _round_trip_live_producer_checkpoint(config, pool)
+            await _cross_process_invalidation(config, pool)
         finally:
             await _drop_test_storage(config, client, pool)
             await pool.close()
@@ -1134,6 +1140,47 @@ async def _round_trip_live_producer_checkpoint(config: Settings, pool: PostgresP
     other = advanced.model_copy(update={"producer_id": "second-producer"})
     assert await repository.put_live_producer_checkpoint(other) is True
     assert await repository.get_live_producer_checkpoint("live-producer") == advanced
+
+
+async def _cross_process_invalidation(config: Settings, pool: PostgresPool) -> None:
+    """A commit in one connection reaches a listener holding a different one."""
+    channel = f"sentinel_test_invalidate_{uuid4().hex[:8]}"
+    received: list[tuple[SnapshotResource, ...]] = []
+    stop = asyncio.Event()
+    ready = asyncio.Event()
+
+    async def connect() -> AsyncConnection[TupleRow]:
+        connection = await create_listen_connection(config)
+        ready.set()
+        return connection
+
+    listener = SnapshotNotificationListener(
+        connect=connect,
+        publish=lambda event: received.append(event.resources),
+        channel=channel,
+        retry_seconds=0.1,
+    )
+    task = asyncio.create_task(listener.run(stop))
+    try:
+        await asyncio.wait_for(ready.wait(), timeout=10.0)
+        # The listener needs its LISTEN committed before the notify is sent;
+        # a notification issued earlier is genuinely not delivered.
+        await asyncio.sleep(0.5)
+        broker = PostgresInvalidationBroker(pool=pool, channel=channel)
+        broker.publish(snapshot_invalidation(SnapshotResource.INCIDENTS, SnapshotResource.SECURITY))
+        assert broker.pending == 1
+        assert await broker.drain() == 1
+        assert broker.pending == 0
+        for _ in range(100):
+            if received:
+                break
+            await asyncio.sleep(0.1)
+    finally:
+        stop.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert received == [(SnapshotResource.INCIDENTS, SnapshotResource.SECURITY)]
 
 
 async def _drop_test_storage(

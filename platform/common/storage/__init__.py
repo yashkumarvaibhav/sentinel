@@ -10,7 +10,11 @@ from common.storage.models import (
     IncidentSecurityRecord,
     LiveProducerCheckpoint,
 )
-from common.storage.pool import PostgresPool, create_postgres_pool
+from common.storage.pool import (
+    PostgresPool,
+    create_listen_connection,
+    create_postgres_pool,
+)
 from common.storage.postgres import (
     AuditLedgerRepository,
     IncidentMemoryRepository,
@@ -33,6 +37,7 @@ __all__ = [
     "NeighbourRecord",
     "PostgresPool",
     "PostgresRepository",
+    "create_listen_connection",
     "create_postgres_pool",
     "migrate_storage",
 ]
