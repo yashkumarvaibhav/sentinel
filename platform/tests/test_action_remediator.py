@@ -448,7 +448,7 @@ def test_an_action_that_harmed_nothing_is_judged_on_the_target_it_aimed_at() -> 
 
 def test_an_unmeasured_action_is_not_counted_against_the_futility_streak() -> None:
     """An action nobody measured has not failed to help."""
-    harness = _harness(slo=ScriptedSlo(unreadable=frozenset({"frontend"})))
+    harness = _harness(slo=ScriptedSlo(unreadable=frozenset({"frontend-proxy"})))
 
     run = harness.remediator.consider(_decision(), ts=TICK, settled_at=SETTLED)
 

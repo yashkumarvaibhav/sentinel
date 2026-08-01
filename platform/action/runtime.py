@@ -25,7 +25,11 @@ from action.config import load_action_config, resolve_dry_run
 from action.executor import ActionExecutor
 from action.guards import BlastRadiusGuard
 from action.orchestrator import ActionControlOrchestrator, ActionOrchestrationStore
-from action.rollback import SloSettlementVerifier, VictoriaMetricsSloReader
+from action.rollback import (
+    SloCollateralProbe,
+    SloSettlementVerifier,
+    VictoriaMetricsSloReader,
+)
 from common.config import load_config
 from contracts import ActionControlSnapshot, ActuatorKind
 
@@ -124,13 +128,13 @@ def build_action_runtime(
         base_url=victoriametrics_url,
         timeout=victoriametrics_timeout_seconds,
     )
-    settlement = SloSettlementVerifier(
-        slos=runtime_config.slos,
-        reader=VictoriaMetricsSloReader(
-            client=client,
-            window_seconds=slo_window_seconds,
-        ),
-    )
+    reader = VictoriaMetricsSloReader(client=client, window_seconds=slo_window_seconds)
+    settlement = SloSettlementVerifier(slos=runtime_config.slos, reader=reader)
+    # The same instrument decides whether a canary may widen and whether a
+    # rollback recovered anything. Two readers would let the platform widen an
+    # action on one and undo it on another, and the disagreement would look like
+    # a fault in the system rather than in the measurement.
+    collateral = SloCollateralProbe(slos=runtime_config.slos, reader=reader)
     identity = f"{worker_id}-{socket.gethostname()}"
     orchestrator = ActionControlOrchestrator(
         store=store,
@@ -140,6 +144,7 @@ def build_action_runtime(
         claim_ttl=timedelta(seconds=action_config.execution.lease_ttl_seconds),
         settlement_delay=timedelta(seconds=settlement_delay_seconds),
         settlement=settlement,
+        collateral=collateral,
         after_commit=after_commit,
     )
     return ActionControlRuntime(

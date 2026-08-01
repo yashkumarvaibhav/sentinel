@@ -117,6 +117,42 @@ def build_plan(
     )
 
 
+def rebuild_plan(
+    plan: ActionPlan,
+    *,
+    parameters: Mapping[str, ActionParameterValue],
+    estimated_blast_fraction: float,
+    ts: datetime,
+) -> ActionPlan:
+    """One plan re-dialled to different parameters, for a canary's own steps.
+
+    Deliberately derived from a plan rather than from a decision. The three
+    safety-critical facts ``build_plan`` exists to carry - the decision that
+    authorised acting, the evidence-computed target, and the approval
+    requirement - already crossed that seam once when this plan was built.
+    Synthesising a decision here to walk them across a second time would put
+    them back in the hands of the caller, which is exactly what the seam
+    prevents. So they are copied, and only what genuinely differs between two
+    shares of one effect is recomputed.
+    """
+    values = dict(parameters)
+    key = action_idempotency_key(
+        actuator=plan.actuator,
+        action_kind=plan.action_kind,
+        target_ref=plan.target_ref,
+        parameters=values,
+    )
+    return plan.model_copy(
+        update={
+            "plan_id": _plan_id(plan.decision_id, key),
+            "ts": ts,
+            "parameters": values,
+            "estimated_blast_fraction": estimated_blast_fraction,
+            "idempotency_key": key,
+        }
+    )
+
+
 def _plan_id(decision_id: str, idempotency_key: str) -> str:
     """A stable id for one decision's attempt at one effect.
 
@@ -149,6 +185,33 @@ class Actuator(ABC):
         ts: datetime,
     ) -> ActionPlan:
         """Resolve a decision and a chosen rung into one concrete effect."""
+
+    def plan_share(
+        self,
+        plan: ActionPlan,
+        *,
+        parameter: str,
+        share: int,
+        ts: datetime,
+    ) -> ActionPlan:
+        """The same effect as ``plan``, dialled to a smaller share of itself.
+
+        A canary needs the effect it is widening at each intermediate share, and
+        it needs them **without re-resolving the target**: the plan already
+        names the exact pod or workload the decision was aimed at, and looking
+        it up again would let a canary walk from one target onto another
+        between steps.
+
+        This is not a base-class convenience, which is why it refuses by
+        default. How much of the world a share disturbs is a measurement only
+        the adapter can make, and an adapter that has not stated it must not
+        have one guessed on its behalf.
+        """
+        del plan, parameter, share, ts
+        raise ActionRejectedError(
+            f"the {self.kind.value} adapter states no share of its own effect, so it cannot be "
+            "canaried; a rung that widens needs an adapter that can measure each step"
+        )
 
     @abstractmethod
     def simulate(self, plan: ActionPlan, *, ts: datetime) -> ActionOutcome:

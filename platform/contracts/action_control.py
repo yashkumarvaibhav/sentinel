@@ -226,6 +226,42 @@ class ActionRollbackVerification(ContractModel):
         return self
 
 
+class ActionCanaryStep(ContractModel):
+    """One durably recorded widening of a canaried effect.
+
+    A canary walks a dial upward - 5%, then 10%, then all of it - looking at the
+    protected signals between steps. Each share is a genuinely different state
+    of the world with its own idempotency key, so each one is recorded here as
+    it lands rather than being reconstructed afterwards from the share that
+    happened to be reached last. That is the whole point: a worker that died
+    between two steps must leave behind the exact set of effects that are
+    standing, because a revert has to unwind every one of them.
+    """
+
+    share: int = Field(ge=1, le=100)
+    plan: ActionPlan
+    outcome: ActionOutcome
+    collateral_clean: bool
+    collateral_detail: HumanText
+    harmed: tuple[Identifier, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_step(self) -> Self:
+        if self.outcome.plan_id != self.plan.plan_id:
+            raise ValueError("a canary step's outcome must belong to that step's own plan")
+        if self.outcome.idempotency_key != self.plan.idempotency_key:
+            raise ValueError("a canary step's outcome must carry that step's own effect key")
+        if self.collateral_clean and self.harmed:
+            raise ValueError("a clean collateral report cannot also name a harmed signal")
+        if not self.collateral_clean and not self.harmed:
+            # A canary that stops without naming the signal it stopped on is an
+            # outage nobody can diagnose.
+            raise ValueError("a canary step that found harm must name what was harmed")
+        if self.outcome.in_force and self.plan.reversible and self.outcome.revert_token is None:
+            raise ValueError("a reversible canary step in force must retain its revert token")
+        return self
+
+
 class ActionControlSnapshot(ContractModel):
     """Authoritative durable control state returned after every mutation."""
 
@@ -236,6 +272,7 @@ class ActionControlSnapshot(ContractModel):
     plan: ActionPlan
     guard_results: tuple[ActionGateResult, ...]
     latest_outcome: ActionOutcome | None
+    canary_progress: tuple[ActionCanaryStep, ...] = ()
     rollback_slo_before: tuple[ActionSloSample, ...] = ()
     rollback_verification: ActionRollbackVerification | None = None
     approvals: tuple[ActionApproval, ...] = ()
@@ -285,9 +322,48 @@ class ActionControlSnapshot(ContractModel):
         ):
             raise ValueError("apply can be requested only after every required approval is durable")
         self._validate_rejection()
+        self._validate_canary_progress()
         self._validate_outcome()
         self._validate_rollback_verification()
         return self
+
+    def _validate_canary_progress(self) -> None:
+        """Progress must be a real prefix of the shares the operator committed.
+
+        The shares are not free-form history. They are the ladder's own list,
+        walked in order, and a recorded step that is not the next one the rung
+        names is either a stale payload or an effect nobody authorised. Both are
+        refused here, where the claim cannot be quietly repaired downstream.
+        """
+        if not self.canary_progress:
+            return
+        if not self.rung.canary_shares:
+            raise ValueError("only a rung that names canary shares can record canary progress")
+        walked = tuple(step.share for step in self.canary_progress)
+        committed = tuple(self.rung.canary_shares)
+        if walked != committed[: len(walked)]:
+            raise ValueError(
+                "canary progress must be the committed shares walked in order, "
+                f"got {walked} against {committed}"
+            )
+        for step in self.canary_progress:
+            if step.plan.incident_id != self.incident_id:
+                raise ValueError("a canary step must belong to the control's own incident")
+            if (
+                step.plan.actuator != self.plan.actuator
+                or step.plan.action_kind != self.plan.action_kind
+                or step.plan.target_ref != self.plan.target_ref
+            ):
+                raise ValueError("a canary step must widen the control's own effect, not another")
+        # The last share equals the rung's own parameter value, so a completed
+        # canary really is the plan the control holds - which is what lets that
+        # final step's outcome be the control's outcome at all.
+        if len(walked) == len(committed):
+            final = self.canary_progress[-1]
+            if final.plan.plan_id != self.plan.plan_id:
+                raise ValueError(
+                    "a completed canary's last step must be the control's own server-held plan"
+                )
 
     def _validate_rejection(self) -> None:
         rejected = self.state is ActionControlState.REJECTED
@@ -328,12 +404,30 @@ class ActionControlSnapshot(ContractModel):
                 self.latest_outcome is None
                 or self.latest_outcome.status is not expected[self.state]
             ):
+                # A canary that stopped short never applied the control's own
+                # plan, so there is no outcome of that plan to carry - and one
+                # is not invented to fill the slot. What proves it is undone is
+                # that every share it did apply has been put back.
+                if self.state is ActionControlState.ROLLED_BACK and self._canary_fully_unwound():
+                    return
                 raise ValueError(f"{self.state.value} requires its matching verified outcome")
         elif self.state is ActionControlState.ROLLBACK_REQUESTED:
-            if self.latest_outcome is None or not self.latest_outcome.in_force:
+            # A canary that stopped part-way holds no outcome of its own - the
+            # share it reached is not the rung's own value - but the effect it
+            # applied is standing in production all the same, and that is
+            # precisely what needs undoing.
+            standing = any(step.outcome.in_force for step in self.canary_progress)
+            held = self.latest_outcome is not None and self.latest_outcome.in_force
+            if not (held or standing):
                 raise ValueError("rollback can be requested only for a server-held effect in force")
         elif self.latest_outcome is not None:
             raise ValueError(f"{self.state.value} cannot carry an action outcome")
+
+    def _canary_fully_unwound(self) -> bool:
+        """Whether a stopped canary applied shares and none of them still stands."""
+        if not self.canary_progress:
+            return False
+        return all(not step.outcome.in_force for step in self.canary_progress)
 
     def _validate_rollback_verification(self) -> None:
         if self.rollback_slo_before:

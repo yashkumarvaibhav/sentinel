@@ -19,6 +19,7 @@ from action.control import (
     ActionExecutionOperation,
     ActionExecutionPhase,
     complete_action_control,
+    complete_canary_step,
     complete_rollback_verification,
     transition_action_control,
 )
@@ -38,6 +39,7 @@ from common.config import (
     load_config,
 )
 from contracts import (
+    ActionCanaryStep,
     ActionControlIntent,
     ActionControlRequest,
     ActionControlSnapshot,
@@ -65,6 +67,8 @@ class _Store:
         self.claim: ActionExecutionClaim | None = claim
         self.dispatched = 0
         self.completed: list[ActionOutcome] = []
+        self.steps: list[ActionCanaryStep] = []
+        self.unwound: list[ActionCanaryStep] = []
 
     async def claim_action_control(
         self,
@@ -99,19 +103,33 @@ class _Store:
     async def complete_action_execution(
         self,
         claim: ActionExecutionClaim,
-        outcome: ActionOutcome,
+        outcome: ActionOutcome | None,
         *,
         ts: datetime,
         rollback_slo_before: tuple[ActionSloSample, ...] = (),
+        unwound: tuple[ActionCanaryStep, ...] = (),
     ) -> ActionControlSnapshot:
-        self.completed.append(outcome)
+        if outcome is not None:
+            self.completed.append(outcome)
+        self.unwound.extend(unwound)
         return complete_action_control(
             claim.control,
             operation=claim.operation,
             outcome=outcome,
             ts=ts,
             rollback_slo_before=rollback_slo_before,
+            unwound=unwound,
         )
+
+    async def complete_canary_step(
+        self,
+        claim: ActionExecutionClaim,
+        step: ActionCanaryStep,
+        *,
+        ts: datetime,
+    ) -> ActionControlSnapshot:
+        self.steps.append(step)
+        return complete_canary_step(claim.control, step=step, ts=ts)
 
     async def complete_rollback_verification(
         self,

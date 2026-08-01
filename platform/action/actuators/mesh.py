@@ -43,7 +43,13 @@ from datetime import datetime
 from typing import ClassVar, Literal
 from urllib.parse import quote
 
-from action.actuators.base import ActionRejectedError, Actuator, ActuatorError, build_plan
+from action.actuators.base import (
+    ActionRejectedError,
+    Actuator,
+    ActuatorError,
+    build_plan,
+    rebuild_plan,
+)
 from action.actuators.kubernetes import ClusterCommand, KubectlCommand
 from action.config import MeshConfig
 from contracts import (
@@ -126,6 +132,44 @@ class MeshActuator(Actuator):
             # and the 5.6 guard reads it with the cohort definition in hand.
             estimated_blast_fraction=percent / 100,
             honesty=self.honesty,
+            ts=ts,
+        )
+
+    def plan_share(
+        self,
+        plan: ActionPlan,
+        *,
+        parameter: str,
+        share: int,
+        ts: datetime,
+    ) -> ActionPlan:
+        """Rebuild this restraint at a smaller share, against the same edge pod.
+
+        The target is taken from the plan rather than resolved again: between
+        two canary steps the edge pod can be replaced, and a canary that
+        followed it would be widening one restraint while an untouched one
+        stood on the pod it started from.
+        """
+        if parameter != _PERCENT_PARAMETER[plan.action_kind]:
+            raise ActionRejectedError(
+                f"{plan.action_kind.value} widens on "
+                f"'{_PERCENT_PARAMETER[plan.action_kind]}', not {parameter!r}"
+            )
+        cohort = plan.parameters.get("cohort")
+        if not isinstance(cohort, str):
+            raise ActionRejectedError("a mesh plan without its cohort cannot be re-shared")
+        committed = plan.parameters.get(parameter)
+        if isinstance(committed, bool) or not isinstance(committed, int):
+            raise ActionRejectedError(f"a mesh plan without an absolute {parameter} cannot widen")
+        if not 1 <= share <= committed:
+            raise ActionRejectedError(
+                f"a canary step of {share}% is outside 1..{committed}; widening past the rung's "
+                "own value would apply an effect the operator did not authorise"
+            )
+        return rebuild_plan(
+            plan,
+            parameters={"cohort": cohort, parameter: share},
+            estimated_blast_fraction=share / 100,
             ts=ts,
         )
 

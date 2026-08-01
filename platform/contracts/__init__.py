@@ -15,6 +15,7 @@ from contracts.action import (
 )
 from contracts.action_control import (
     ActionApproval,
+    ActionCanaryStep,
     ActionControlIntent,
     ActionControlRequest,
     ActionControlResponse,
@@ -136,6 +137,7 @@ __all__ = [
     "SECURITY_FEATURE_ORDER",
     "WATCHING_ACTIONS",
     "ActionApproval",
+    "ActionCanaryStep",
     "ActionControlIntent",
     "ActionControlRequest",
     "ActionControlResponse",

@@ -214,6 +214,10 @@ export type ActionStatus = "SIMULATED" | "APPLIED" | "VERIFIED" | "REVERTED" | "
 export type ActionControlIntent = "APPROVE" | "REJECT" | "ROLLBACK";
 export type PlanRevision = number;
 export type Approvals1 = ActionApproval[];
+export type CollateralClean = boolean;
+export type Harmed = Identifier[];
+export type Share = number;
+export type CanaryProgress = ActionCanaryStep[];
 /**
  * Whether one deterministic safety gate admitted the exact plan.
  */
@@ -831,6 +835,7 @@ export interface ActionControlRequest {
  */
 export interface ActionControlSnapshot {
   approvals?: Approvals1;
+  canary_progress?: CanaryProgress;
   created_at: UtcDatetime;
   guard_results: GuardResults;
   incident_id: Identifier;
@@ -851,6 +856,25 @@ export interface ActionControlSnapshot {
 export interface ActionApproval {
   actor: Identifier;
   approved_at: UtcDatetime;
+}
+/**
+ * One durably recorded widening of a canaried effect.
+ *
+ * A canary walks a dial upward - 5%, then 10%, then all of it - looking at the
+ * protected signals between steps. Each share is a genuinely different state
+ * of the world with its own idempotency key, so each one is recorded here as
+ * it lands rather than being reconstructed afterwards from the share that
+ * happened to be reached last. That is the whole point: a worker that died
+ * between two steps must leave behind the exact set of effects that are
+ * standing, because a revert has to unwind every one of them.
+ */
+export interface ActionCanaryStep {
+  collateral_clean: CollateralClean;
+  collateral_detail: HumanText;
+  harmed?: Harmed;
+  outcome: ActionOutcome;
+  plan: ActionPlan;
+  share: Share;
 }
 /**
  * One measured deterministic guard result for the exact plan.

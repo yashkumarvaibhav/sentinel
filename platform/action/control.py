@@ -23,6 +23,7 @@ from action.ladder import RungChoice
 from contracts import (
     DESTRUCTIVE_ACTIONS,
     ActionApproval,
+    ActionCanaryStep,
     ActionControlIntent,
     ActionControlRequest,
     ActionControlSnapshot,
@@ -192,13 +193,84 @@ def _refused_gate(refusal: GuardRefusedError) -> str:
     return "action-guard-refused"
 
 
+def complete_canary_step(
+    current: ActionControlSnapshot,
+    *,
+    step: ActionCanaryStep,
+    ts: datetime,
+) -> ActionControlSnapshot:
+    """Record one widening durably and decide whether the canary may continue.
+
+    An intermediate step leaves the control exactly where it was - still
+    ``APPLY_REQUESTED``, still carrying no outcome of its own, because a share
+    that is not the rung's own value is not the effect the control holds. What
+    changes is that the step is now a durable fact, so a worker that dies here
+    leaves behind the precise set of effects that are standing.
+
+    A step that found harm ends the widening. The effect it applied is real and
+    in force, so the control goes to ``ROLLBACK_REQUESTED`` rather than to some
+    state that reads as finished: something is restraining production and the
+    platform has already decided it should not be.
+    """
+    if current.state is not ActionControlState.APPLY_REQUESTED:
+        raise ActionControlTransitionError(
+            f"a canary step cannot complete {current.state.value}; expected APPLY_REQUESTED"
+        )
+    if not current.rung.canary_shares:
+        raise ActionControlTransitionError("this rung has no shares to widen through")
+    if ts < current.updated_at or step.outcome.ts > ts:
+        raise ActionControlTransitionError("a canary step cannot move event time backwards")
+    walked = tuple(item.share for item in current.canary_progress)
+    committed = tuple(current.rung.canary_shares)
+    expected_share = committed[len(walked)] if len(walked) < len(committed) else None
+    if expected_share is None:
+        raise ActionControlTransitionError("this canary has already walked every committed share")
+    if step.share != expected_share:
+        raise ActionControlTransitionError(
+            f"the next committed share is {expected_share}%, not {step.share}%"
+        )
+    progress = (*current.canary_progress, step)
+    if not step.collateral_clean or step.outcome.status is ActionStatus.FAILED:
+        # It stopped, and whatever it managed to apply is standing.
+        state = (
+            ActionControlState.ROLLBACK_REQUESTED
+            if step.outcome.in_force
+            else ActionControlState.FAILED
+        )
+        return _revalidate(
+            current,
+            state=state,
+            canary_progress=progress,
+            latest_outcome=step.outcome if step.plan.plan_id == current.plan.plan_id else None,
+            updated_at=ts,
+        )
+    if len(progress) < len(committed):
+        return _revalidate(
+            current,
+            state=ActionControlState.APPLY_REQUESTED,
+            canary_progress=progress,
+            latest_outcome=None,
+            updated_at=ts,
+        )
+    # The last share is the rung's own value, so this step's plan IS the
+    # control's plan and its outcome is the control's outcome.
+    return _revalidate(
+        current,
+        state=_OUTCOME_STATE[step.outcome.status],
+        canary_progress=progress,
+        latest_outcome=step.outcome,
+        updated_at=ts,
+    )
+
+
 def complete_action_control(
     current: ActionControlSnapshot,
     *,
     operation: ActionExecutionOperation,
-    outcome: ActionOutcome,
+    outcome: ActionOutcome | None,
     ts: datetime,
     rollback_slo_before: tuple[ActionSloSample, ...] = (),
+    unwound: tuple[ActionCanaryStep, ...] = (),
 ) -> ActionControlSnapshot:
     """Commit an observed executor outcome against the exact claimed plan."""
     if operation is ActionExecutionOperation.VERIFY_ROLLBACK:
@@ -213,6 +285,14 @@ def complete_action_control(
     if current.state is not expected:
         raise ActionControlTransitionError(
             f"{operation.value} cannot complete {current.state.value}; expected {expected.value}"
+        )
+    if outcome is None:
+        return _complete_stopped_canary_rollback(
+            current,
+            operation=operation,
+            unwound=unwound,
+            ts=ts,
+            rollback_slo_before=rollback_slo_before,
         )
     if outcome.plan_id != current.plan.plan_id:
         raise ActionControlTransitionError(
@@ -243,21 +323,91 @@ def complete_action_control(
         raise ActionControlTransitionError(
             "only a rollback completion can attach pre-revert SLO telemetry"
         )
+    if unwound and operation is not ActionExecutionOperation.ROLLBACK:
+        raise ActionControlTransitionError("only a rollback completion can unwind canary steps")
+    progress = _unwound_progress(current, unwound)
     state = (
         ActionControlState.ROLLED_BACK
         if operation is ActionExecutionOperation.ROLLBACK
         and outcome.status is ActionStatus.REVERTED
         else _OUTCOME_STATE[outcome.status]
     )
+    if state is ActionControlState.ROLLED_BACK and any(step.outcome.in_force for step in progress):
+        # Every share the canary applied wrote a value some later restore has to
+        # put back. Calling the control rolled back while one of them is still
+        # standing would report production as untouched while it is restrained.
+        raise ActionControlTransitionError(
+            "a canary is not rolled back while any of its widened steps is still in force"
+        )
     return _revalidate(
         current,
         state=state,
         latest_outcome=outcome,
+        canary_progress=progress,
         rollback_slo_before=(
             rollback_slo_before if state is ActionControlState.ROLLED_BACK else ()
         ),
         updated_at=ts,
     )
+
+
+def _complete_stopped_canary_rollback(
+    current: ActionControlSnapshot,
+    *,
+    operation: ActionExecutionOperation,
+    unwound: tuple[ActionCanaryStep, ...],
+    ts: datetime,
+    rollback_slo_before: tuple[ActionSloSample, ...],
+) -> ActionControlSnapshot:
+    """Finish a revert of a canary that never reached the rung's own value.
+
+    There is no outcome of the control's own plan here because that plan was
+    never applied. What is proved instead is stronger and narrower: every share
+    that *was* applied has been put back, and the state says so on that basis
+    rather than on an outcome invented to fill the slot.
+    """
+    if operation is not ActionExecutionOperation.ROLLBACK:
+        raise ActionControlTransitionError(
+            f"{operation.value} must complete with an observed executor outcome"
+        )
+    if not unwound:
+        raise ActionControlTransitionError(
+            "a rollback with no outcome must name the canary shares it put back"
+        )
+    progress = _unwound_progress(current, unwound)
+    if any(step.outcome.in_force for step in progress):
+        raise ActionControlTransitionError(
+            "a canary is not rolled back while any of its widened steps is still in force"
+        )
+    if ts < current.updated_at:
+        raise ActionControlTransitionError("execution completion cannot move event time backwards")
+    return _revalidate(
+        current,
+        state=ActionControlState.ROLLED_BACK,
+        latest_outcome=None,
+        canary_progress=progress,
+        rollback_slo_before=rollback_slo_before,
+        updated_at=ts,
+    )
+
+
+def _unwound_progress(
+    current: ActionControlSnapshot,
+    unwound: tuple[ActionCanaryStep, ...],
+) -> tuple[ActionCanaryStep, ...]:
+    """Replace the recorded steps a revert has just put back, and nothing else."""
+    if not unwound:
+        return tuple(current.canary_progress)
+    replacements = {step.share: step for step in unwound}
+    if len(replacements) != len(unwound):
+        raise ActionControlTransitionError("a canary share cannot be unwound twice in one revert")
+    known = {step.share for step in current.canary_progress}
+    unknown = sorted(set(replacements) - known)
+    if unknown:
+        raise ActionControlTransitionError(
+            f"a revert cannot unwind shares this canary never applied: {unknown}"
+        )
+    return tuple(replacements.get(step.share, step) for step in current.canary_progress)
 
 
 def complete_rollback_verification(

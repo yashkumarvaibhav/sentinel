@@ -260,7 +260,13 @@ class SloCollateralProbe:
         harmed: list[str] = []
         unreadable: list[str] = []
         for slo in self.slos.slos:
-            reading = self.reader(slo.service, ts=ts)
+            # Read under the telemetry identity, report under the display one.
+            # The two are separate committed facts (the user-facing `frontend`
+            # SLO is measured on `frontend-proxy`'s spans), and reading under
+            # the display name would make every protected service unreadable -
+            # which this probe correctly refuses to widen through, so the canary
+            # would never move and the cause would look like a broken SLO.
+            reading = self.reader(slo.telemetry_service or slo.service, ts=ts)
             if reading is None:
                 unreadable.append(slo.service)
                 continue
@@ -383,8 +389,14 @@ class VerifiedRollback:
 
         The worst one is the honest anchor: a rollback's effect should be quoted
         against the service that was suffering most, not averaged into comfort.
+
+        The names arriving here are the committed *display* ones the probe
+        reports, so they are mapped back to the telemetry identity before being
+        asked for. Reading by the display name would make every recovery
+        unmeasurable on exactly the services whose two names differ.
         """
-        readings = [self._reader(service, ts=ts) for service in services]
+        telemetry = {slo.service: slo.telemetry_service or slo.service for slo in self._slos.slos}
+        readings = [self._reader(telemetry.get(service, service), ts=ts) for service in services]
         measured = [reading.availability for reading in readings if reading is not None]
         if not measured or len(measured) != len(readings):
             return None

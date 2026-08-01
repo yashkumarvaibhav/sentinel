@@ -25,7 +25,7 @@ from action import (
     load_action_config,
 )
 from action.actuators import SimulatedActuator
-from common.config import load_config
+from common.config import SloConfig, load_config
 from contracts import (
     ActionKind,
     ActionPlan,
@@ -215,6 +215,17 @@ def _suffering(service: str) -> SloReading:
     return SloReading(service=service, availability=0.90, latency_p95_ms=100.0)
 
 
+def _telemetry_names(slos: SloConfig) -> set[str]:
+    """The names a reader is actually asked for, which are not the display ones.
+
+    `slo.yml` states the user-facing service and, where they differ, the service
+    whose spans measure it: the `frontend` SLO is measured on `frontend-proxy`.
+    A fixture keyed on the display name would answer questions nobody asks and
+    make every protected service read as unobservable.
+    """
+    return {slo.telemetry_service or slo.service for slo in slos.slos}
+
+
 def _rollback(reader: ScriptedSlos) -> tuple[VerifiedRollback, SimulatedActuator, ActionExecutor]:
     configuration = load_action_config(CONFIG_DIR / "action.yml")
     adapter = SimulatedActuator()
@@ -224,7 +235,7 @@ def _rollback(reader: ScriptedSlos) -> tuple[VerifiedRollback, SimulatedActuator
 
 
 def test_an_action_that_harms_nobody_is_left_alone() -> None:
-    services = {slo.service for slo in load_config(CONFIG_DIR).slos.slos}
+    services = _telemetry_names(load_config(CONFIG_DIR).slos)
     reader = ScriptedSlos(before={service: _healthy(service) for service in services})
     rollback, adapter, executor = _rollback(reader)
     plan = _plan(adapter, 3)
@@ -237,7 +248,7 @@ def test_an_action_that_harms_nobody_is_left_alone() -> None:
 
 
 def test_collateral_triggers_a_rollback_and_the_recovery_is_measured() -> None:
-    services = {slo.service for slo in load_config(CONFIG_DIR).slos.slos}
+    services = _telemetry_names(load_config(CONFIG_DIR).slos)
     reader = ScriptedSlos(
         before={service: _healthy(service) for service in services}
         | {"checkout": _suffering("checkout")},
@@ -259,7 +270,7 @@ def test_collateral_triggers_a_rollback_and_the_recovery_is_measured() -> None:
 
 def test_a_recovery_that_could_not_be_measured_is_not_claimed() -> None:
     """An unmeasured recovery is not a smaller recovery; it is one nobody may quote."""
-    services = {slo.service for slo in load_config(CONFIG_DIR).slos.slos}
+    services = _telemetry_names(load_config(CONFIG_DIR).slos)
     reader = ScriptedSlos(
         before={service: _healthy(service) for service in services}
         | {"checkout": _suffering("checkout")},
@@ -278,7 +289,7 @@ def test_a_recovery_that_could_not_be_measured_is_not_claimed() -> None:
 def test_a_service_we_cannot_see_is_not_a_service_we_know_is_fine() -> None:
     """The probe must not report clean because the telemetry was down."""
     slos = load_config(CONFIG_DIR).slos
-    reader = ScriptedSlos(before={"frontend": _healthy("frontend")})
+    reader = ScriptedSlos(before={"frontend-proxy": _healthy("frontend-proxy")})
     probe = SloCollateralProbe(slos=slos, reader=reader)
     plan = _plan(SimulatedActuator(), 3)
 
@@ -290,10 +301,10 @@ def test_a_service_we_cannot_see_is_not_a_service_we_know_is_fine() -> None:
 
 def test_latency_past_its_target_is_collateral_just_like_availability() -> None:
     slos = load_config(CONFIG_DIR).slos
-    services = {slo.service for slo in slos.slos}
-    slow = SloReading(service="frontend", availability=0.9999, latency_p95_ms=5_000.0)
+    services = _telemetry_names(slos)
+    slow = SloReading(service="frontend-proxy", availability=0.9999, latency_p95_ms=5_000.0)
     reader = ScriptedSlos(
-        before={service: _healthy(service) for service in services} | {"frontend": slow}
+        before={service: _healthy(service) for service in services} | {"frontend-proxy": slow}
     )
 
     report = SloCollateralProbe(slos=slos, reader=reader)(_plan(SimulatedActuator(), 3), ts=TICK)
@@ -305,7 +316,7 @@ def test_the_probe_watches_the_services_slo_yml_names() -> None:
     """Collateral is by definition what happens where the action was not aimed."""
     slos = load_config(CONFIG_DIR).slos
     assert {slo.service for slo in slos.slos}, "slo.yml names no service to protect"
-    reader = ScriptedSlos(before={slo.service: _healthy(slo.service) for slo in slos.slos})
+    reader = ScriptedSlos(before={name: _healthy(name) for name in _telemetry_names(slos)})
 
     report = SloCollateralProbe(slos=slos, reader=reader)(
         _plan(SimulatedActuator(), 3, target="email"), ts=TICK

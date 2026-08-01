@@ -20,6 +20,9 @@ from action.control import (
     complete_action_control,
 )
 from action.control import (
+    complete_canary_step as apply_canary_step,
+)
+from action.control import (
     complete_rollback_verification as apply_rollback_verification,
 )
 from action.control import (
@@ -36,6 +39,7 @@ from common.storage.models import (
 )
 from common.storage.pool import PostgresPool
 from contracts import (
+    ActionCanaryStep,
     ActionControlRequest,
     ActionControlSnapshot,
     ActionOutcome,
@@ -720,10 +724,11 @@ class PostgresRepository:
     async def complete_action_execution(
         self,
         claim: ActionExecutionClaim,
-        outcome: ActionOutcome,
+        outcome: ActionOutcome | None,
         *,
         ts: datetime,
         rollback_slo_before: tuple[ActionSloSample, ...] = (),
+        unwound: tuple[ActionCanaryStep, ...] = (),
     ) -> ActionControlSnapshot:
         """Atomically commit terminal control state, audit evidence, and claim release."""
         claim_query = sql.SQL(
@@ -776,7 +781,93 @@ class PostgresRepository:
                 outcome=outcome,
                 ts=ts,
                 rollback_slo_before=rollback_slo_before,
+                unwound=unwound,
             )
+            await connection.execute(
+                update,
+                (
+                    completed.state.value,
+                    completed.updated_at,
+                    Jsonb(completed.model_dump(mode="json")),
+                    *identity,
+                ),
+            )
+            if outcome is not None:
+                await self._append_action_audit(
+                    connection,
+                    claim=claim,
+                    outcome=outcome,
+                    ts=ts,
+                )
+            else:
+                await self._append_canary_unwind_audit(
+                    connection,
+                    claim=claim,
+                    unwound=unwound,
+                    ts=ts,
+                )
+            await connection.execute(delete, identity)
+        return completed
+
+    async def complete_canary_step(
+        self,
+        claim: ActionExecutionClaim,
+        step: ActionCanaryStep,
+        *,
+        ts: datetime,
+    ) -> ActionControlSnapshot:
+        """Record one widening durably and release the claim for the next share.
+
+        The claim is released rather than held across the whole rollout, which
+        is what makes the canary restartable: whatever share was reached is a
+        committed fact before the next one is even claimed, so a worker that
+        dies mid-rollout leaves the effects that are standing written down.
+        """
+        claim_query = sql.SQL(
+            """
+            SELECT claim_id, worker_id, expires_at
+            FROM {claims}
+            WHERE incident_id = %s AND plan_revision = %s
+            FOR UPDATE
+            """
+        ).format(claims=self._action_execution_claims)
+        control_query = sql.SQL(
+            """
+            SELECT payload::text
+            FROM {controls}
+            WHERE incident_id = %s AND plan_revision = %s
+            FOR UPDATE
+            """
+        ).format(controls=self._incident_action_controls)
+        update = sql.SQL(
+            """
+            UPDATE {controls}
+            SET state = %s, updated_at = %s, payload = %s
+            WHERE incident_id = %s AND plan_revision = %s
+            """
+        ).format(controls=self._incident_action_controls)
+        delete = sql.SQL(
+            "DELETE FROM {claims} WHERE incident_id = %s AND plan_revision = %s"
+        ).format(claims=self._action_execution_claims)
+        identity = (claim.control.incident_id, claim.control.plan_revision)
+        async with self._pool.connection() as connection, connection.transaction():
+            claim_cursor = await connection.execute(claim_query, identity)
+            claim_row = await claim_cursor.fetchone()
+            if (
+                claim_row is None
+                or cast(str, claim_row[0]) != claim.claim_id
+                or cast(str, claim_row[1]) != claim.worker_id
+                or cast(datetime, claim_row[2]) <= ts
+            ):
+                raise RuntimeError("the action execution claim expired or changed before commit")
+            control_cursor = await connection.execute(control_query, identity)
+            control_row = await control_cursor.fetchone()
+            if control_row is None:
+                raise ActionControlNotFoundError(
+                    f"no action control for {identity[0]} revision {identity[1]}"
+                )
+            current = ActionControlSnapshot.model_validate_json(cast(str, control_row[0]))
+            completed = apply_canary_step(current, step=step, ts=ts)
             await connection.execute(
                 update,
                 (
@@ -789,7 +880,7 @@ class PostgresRepository:
             await self._append_action_audit(
                 connection,
                 claim=claim,
-                outcome=outcome,
+                outcome=step.outcome,
                 ts=ts,
             )
             await connection.execute(delete, identity)
@@ -901,6 +992,36 @@ class PostgresRepository:
                 "observed": list(outcome.observed),
             },
             honesty=outcome.honesty,
+        )
+
+    async def _append_canary_unwind_audit(
+        self,
+        connection: AsyncConnection[TupleRow],
+        *,
+        claim: ActionExecutionClaim,
+        unwound: tuple[ActionCanaryStep, ...],
+        ts: datetime,
+    ) -> AuditEntry:
+        """Record a revert that undid a canary the control's own plan never reached."""
+        plan = claim.control.plan
+        shares = ", ".join(f"{step.share}%" for step in unwound)
+        return await self._append_claim_audit(
+            connection,
+            claim=claim,
+            ts=ts,
+            kind=AuditEventKind.ACTION_REVERTED,
+            summary=(
+                f"reverted the {shares} canary {plan.action_kind.value} on {plan.target_ref}; "
+                "the rung's own value was never applied"
+            ),
+            body={
+                "claim_id": claim.claim_id,
+                "operation": claim.operation.value,
+                "unwound_shares": [step.share for step in unwound],
+                "outcome_ids": [step.outcome.outcome_id for step in unwound],
+                "statuses": [step.outcome.status.value for step in unwound],
+            },
+            honesty=plan.honesty,
         )
 
     async def _append_rollback_verification_audit(

@@ -18,6 +18,48 @@
       "title": "ActionApproval",
       "type": "object"
     },
+    "ActionCanaryStep": {
+      "additionalProperties": false,
+      "description": "One durably recorded widening of a canaried effect.\n\nA canary walks a dial upward - 5%, then 10%, then all of it - looking at the\nprotected signals between steps. Each share is a genuinely different state\nof the world with its own idempotency key, so each one is recorded here as\nit lands rather than being reconstructed afterwards from the share that\nhappened to be reached last. That is the whole point: a worker that died\nbetween two steps must leave behind the exact set of effects that are\nstanding, because a revert has to unwind every one of them.",
+      "properties": {
+        "collateral_clean": {
+          "title": "Collateral Clean",
+          "type": "boolean"
+        },
+        "collateral_detail": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "harmed": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "title": "Harmed",
+          "type": "array"
+        },
+        "outcome": {
+          "$ref": "#/$defs/ActionOutcome"
+        },
+        "plan": {
+          "$ref": "#/$defs/ActionPlan"
+        },
+        "share": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Share",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "share",
+        "plan",
+        "outcome",
+        "collateral_clean",
+        "collateral_detail"
+      ],
+      "title": "ActionCanaryStep",
+      "type": "object"
+    },
     "ActionControlIntent": {
       "description": "The complete mutation vocabulary exposed to a client.",
       "enum": [
@@ -104,6 +146,14 @@
             "$ref": "#/$defs/ActionApproval"
           },
           "title": "Approvals",
+          "type": "array"
+        },
+        "canary_progress": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ActionCanaryStep"
+          },
+          "title": "Canary Progress",
           "type": "array"
         },
         "created_at": {

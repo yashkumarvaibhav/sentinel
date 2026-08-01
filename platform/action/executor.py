@@ -123,6 +123,24 @@ class ActionExecutor:
         """The record of what is currently in place, keyed by effect."""
         return self._journal
 
+    def plan_share(
+        self,
+        plan: ActionPlan,
+        *,
+        parameter: str,
+        share: int,
+        ts: datetime,
+    ) -> ActionPlan:
+        """One canary step's own plan, dialled by the adapter that owns the effect.
+
+        Routed through here for the same reason every other adapter call is: the
+        orchestrator holds plans, never actuators, so which adapter carries an
+        effect stays a fact about the plan rather than something a caller keeps
+        track of.
+        """
+        actuator = self._actuator_for(plan)
+        return actuator.plan_share(plan, parameter=parameter, share=share, ts=ts)
+
     def simulate(self, plan: ActionPlan, *, ts: datetime) -> ActionOutcome:
         """Ask the adapter what would change. Never records anything as in force."""
         actuator = self._actuator_for(plan)
