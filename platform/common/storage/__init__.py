@@ -8,6 +8,7 @@ from common.storage.models import (
     IncidentGraphRecord,
     IncidentRecord,
     IncidentSecurityRecord,
+    LiveProducerCheckpoint,
 )
 from common.storage.pool import PostgresPool, create_postgres_pool
 from common.storage.postgres import (
@@ -28,6 +29,7 @@ __all__ = [
     "IncidentRecord",
     "IncidentSecurityRecord",
     "IncidentSignatureRecord",
+    "LiveProducerCheckpoint",
     "NeighbourRecord",
     "PostgresPool",
     "PostgresRepository",

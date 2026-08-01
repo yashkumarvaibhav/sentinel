@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Sequence
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Literal, Self, cast
 
 from psycopg import AsyncConnection, sql
@@ -32,6 +32,7 @@ from common.storage.models import (
     IncidentGraphRecord,
     IncidentRecord,
     IncidentSecurityRecord,
+    LiveProducerCheckpoint,
 )
 from common.storage.pool import PostgresPool
 from contracts import (
@@ -66,6 +67,7 @@ class PostgresRepository:
         self._audit_lock_key = int.from_bytes(digest[:8], "big", signed=True)
         self._audit_entries = sql.Identifier(schema, "audit_entries")
         self._symptom_episodes = sql.Identifier(schema, "symptom_episodes")
+        self._live_producer_checkpoints = sql.Identifier(schema, "live_producer_checkpoints")
 
     async def put_incident(self, record: IncidentRecord) -> bool:
         """Create or advance an incident; return whether durable state changed."""
@@ -305,6 +307,59 @@ class PostgresRepository:
             incident_id=cast(str, row[0]),
             updated_at=cast(datetime, row[1]),
             payload=cast(dict[str, JsonValue], row[2]),
+        )
+
+    async def put_live_producer_checkpoint(self, checkpoint: LiveProducerCheckpoint) -> bool:
+        """Advance one producer's durable position; an older tick never wins."""
+        query = sql.SQL(
+            """
+            INSERT INTO {table}
+                (producer_id, anchor_ts, tick_ts, published_incidents, updated_at)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (producer_id) DO UPDATE SET
+                anchor_ts = EXCLUDED.anchor_ts,
+                tick_ts = EXCLUDED.tick_ts,
+                published_incidents = EXCLUDED.published_incidents,
+                updated_at = EXCLUDED.updated_at
+            WHERE {table}.tick_ts < EXCLUDED.tick_ts
+            RETURNING producer_id
+            """
+        ).format(table=self._live_producer_checkpoints)
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                query,
+                (
+                    checkpoint.producer_id,
+                    checkpoint.anchor_ts,
+                    checkpoint.tick_ts,
+                    checkpoint.published_incidents,
+                    datetime.now(UTC),
+                ),
+            )
+            return await cursor.fetchone() is not None
+
+    async def get_live_producer_checkpoint(
+        self,
+        producer_id: str,
+    ) -> LiveProducerCheckpoint | None:
+        """Read one producer's durable position, or nothing if it has never run."""
+        query = sql.SQL(
+            """
+            SELECT producer_id, anchor_ts, tick_ts, published_incidents
+            FROM {table}
+            WHERE producer_id = %s
+            """
+        ).format(table=self._live_producer_checkpoints)
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(query, (producer_id,))
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return LiveProducerCheckpoint(
+            producer_id=cast(str, row[0]),
+            anchor_ts=cast(datetime, row[1]),
+            tick_ts=cast(datetime, row[2]),
+            published_incidents=cast(int, row[3]),
         )
 
     async def latest_security_snapshot(self) -> IncidentSecurityRecord | None:

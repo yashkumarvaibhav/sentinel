@@ -74,6 +74,26 @@ class IncidentSecurityRecord(StorageRecord):
     payload: dict[str, JsonValue]
 
 
+class LiveProducerCheckpoint(StorageRecord):
+    """How far the always-on live producer has durably judged its stream.
+
+    It advances only after a tick's bundles are committed, so a crash makes the
+    producer re-consume a tick rather than skip one; the incident store's own
+    stale-revision rule is what makes that re-consumption a no-op.
+    """
+
+    producer_id: RecordId
+    anchor_ts: UtcDatetime
+    tick_ts: UtcDatetime
+    published_incidents: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_time_order(self) -> Self:
+        if self.tick_ts < self.anchor_ts:
+            raise ValueError("a checkpoint cannot precede the anchor it is measured from")
+        return self
+
+
 class AuditRecord(StorageRecord):
     """One immutable hash-linked runtime audit entry."""
 

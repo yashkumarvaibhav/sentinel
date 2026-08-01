@@ -26,6 +26,7 @@ from common.storage import (
     IncidentRecord,
     IncidentSecurityRecord,
     IncidentSignatureRecord,
+    LiveProducerCheckpoint,
     PostgresPool,
     PostgresRepository,
     create_postgres_pool,
@@ -108,6 +109,7 @@ async def _exercise_real_storage() -> None:
             await _round_trip_postgres(config, pool, suffix)
             await _round_trip_incident_memory(config, pool, suffix)
             await _exercise_audit_ledger(config, pool)
+            await _round_trip_live_producer_checkpoint(config, pool)
         finally:
             await _drop_test_storage(config, client, pool)
             await pool.close()
@@ -1095,6 +1097,43 @@ async def _exercise_audit_ledger(config: Settings, pool: PostgresPool) -> None:
         )
     with pytest.raises(ValueError, match="must be the digest of this entry's own content"):
         await ledger.entries(limit=100)
+
+
+async def _round_trip_live_producer_checkpoint(config: Settings, pool: PostgresPool) -> None:
+    """A producer's position advances forwards only, and never invents one."""
+    repository = PostgresRepository(pool=pool, schema=config.postgres_schema)
+    anchor = datetime(2026, 7, 21, 12, 0, tzinfo=UTC)
+
+    assert await repository.get_live_producer_checkpoint("live-producer") is None
+
+    first = LiveProducerCheckpoint(
+        producer_id="live-producer",
+        anchor_ts=anchor,
+        tick_ts=anchor + timedelta(seconds=120),
+        published_incidents=1,
+    )
+    assert await repository.put_live_producer_checkpoint(first) is True
+    assert await repository.get_live_producer_checkpoint("live-producer") == first
+
+    # A replayed tick is a no-op rather than a rewind: the producer re-consumes
+    # after a crash, and the position it already reached must survive that.
+    stale = first.model_copy(
+        update={"tick_ts": anchor + timedelta(seconds=60), "published_incidents": 0}
+    )
+    assert await repository.put_live_producer_checkpoint(stale) is False
+    assert await repository.put_live_producer_checkpoint(first) is False
+    assert await repository.get_live_producer_checkpoint("live-producer") == first
+
+    advanced = first.model_copy(
+        update={"tick_ts": anchor + timedelta(seconds=180), "published_incidents": 2}
+    )
+    assert await repository.put_live_producer_checkpoint(advanced) is True
+    assert await repository.get_live_producer_checkpoint("live-producer") == advanced
+
+    # Two producers keep independent positions.
+    other = advanced.model_copy(update={"producer_id": "second-producer"})
+    assert await repository.put_live_producer_checkpoint(other) is True
+    assert await repository.get_live_producer_checkpoint("live-producer") == advanced
 
 
 async def _drop_test_storage(
