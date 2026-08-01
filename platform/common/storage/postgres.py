@@ -48,6 +48,7 @@ from contracts import (
     ActionStatus,
     AuditEntry,
     AuditEventKind,
+    LabRunSnapshot,
     SymptomEpisode,
 )
 
@@ -72,6 +73,117 @@ class PostgresRepository:
         self._audit_entries = sql.Identifier(schema, "audit_entries")
         self._symptom_episodes = sql.Identifier(schema, "symptom_episodes")
         self._live_producer_checkpoints = sql.Identifier(schema, "live_producer_checkpoints")
+        self._lab_scenario_runs = sql.Identifier(schema, "lab_scenario_runs")
+
+    async def enqueue_lab_run(self, run: LabRunSnapshot) -> bool:
+        """Record the intent to fire a scenario, if nothing else is in flight.
+
+        The refusal is the database's, not this method's: a partial unique index
+        admits exactly one unfinished run across the deployment. Two scenarios
+        overlapping would put two sets of injected faults into one stretch of
+        telemetry, and no label either of them carries would mean anything
+        afterwards.
+        """
+        query = sql.SQL(
+            """
+            INSERT INTO {table}
+                (run_id, scenario_id, mode, state, requested_at, payload)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT DO NOTHING
+            """
+        ).format(table=self._lab_scenario_runs)
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                query,
+                (
+                    run.run_id,
+                    run.scenario_id,
+                    run.mode.value,
+                    run.state.value,
+                    run.requested_at,
+                    Jsonb(run.model_dump(mode="json")),
+                ),
+            )
+            return cursor.rowcount == 1
+
+    async def claim_lab_run(
+        self,
+        *,
+        worker_id: str,
+        ts: datetime,
+        lease_seconds: int,
+    ) -> LabRunSnapshot | None:
+        """Take the queued run, or reclaim one whose worker stopped reporting."""
+        query = sql.SQL(
+            """
+            UPDATE {table}
+            SET state = 'RUNNING',
+                started_at = COALESCE(started_at, %s),
+                claimed_by = %s,
+                claim_expires_at = %s,
+                payload = jsonb_set(
+                    jsonb_set(payload, '{{state}}', '"RUNNING"'),
+                    '{{started_at}}',
+                    to_jsonb(COALESCE(started_at, %s))
+                )
+            WHERE run_id = (
+                SELECT run_id FROM {table}
+                WHERE state = 'QUEUED'
+                   OR (state = 'RUNNING' AND claim_expires_at IS NOT NULL
+                       AND claim_expires_at <= %s)
+                ORDER BY requested_at
+                FOR UPDATE SKIP LOCKED
+                LIMIT 1
+            )
+            RETURNING payload::text
+            """
+        ).format(table=self._lab_scenario_runs)
+        expires = ts + timedelta(seconds=lease_seconds)
+        async with self._pool.connection() as connection, connection.transaction():
+            cursor = await connection.execute(query, (ts, worker_id, expires, ts, ts))
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return LabRunSnapshot.model_validate_json(cast(str, row[0]))
+
+    async def complete_lab_run(self, run: LabRunSnapshot) -> bool:
+        """Write a terminal run state, releasing the one in-flight slot."""
+        if run.finished_at is None:
+            raise ValueError("a completed lab run must say when it finished")
+        query = sql.SQL(
+            """
+            UPDATE {table}
+            SET state = %s,
+                finished_at = %s,
+                claimed_by = NULL,
+                claim_expires_at = NULL,
+                payload = %s
+            WHERE run_id = %s AND state = 'RUNNING'
+            """
+        ).format(table=self._lab_scenario_runs)
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(
+                query,
+                (
+                    run.state.value,
+                    run.finished_at,
+                    Jsonb(run.model_dump(mode="json")),
+                    run.run_id,
+                ),
+            )
+            return cursor.rowcount == 1
+
+    async def list_lab_runs(self, *, limit: int) -> tuple[LabRunSnapshot, ...]:
+        """The most recently requested runs, newest first."""
+        if not 1 <= limit <= 50:
+            raise ValueError("lab run list limit must be within [1, 50]")
+        query = sql.SQL(
+            "SELECT payload::text FROM {table} ORDER BY requested_at DESC LIMIT %s"
+        ).format(table=self._lab_scenario_runs)
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(query, (limit,))
+            rows = await cursor.fetchall()
+        return tuple(LabRunSnapshot.model_validate_json(cast(str, row[0])) for row in rows)
 
     async def put_incident(self, record: IncidentRecord) -> bool:
         """Create or advance an incident; return whether durable state changed."""

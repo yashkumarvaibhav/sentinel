@@ -48,3 +48,7 @@ mlruns/
 .idea/
 .vscode/
 *.swp
+
+# Playwright keeps a trace of a failed flow; CI uploads it as an artifact.
+web/test-results/
+web/playwright-report/

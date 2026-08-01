@@ -36,5 +36,9 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     css: true,
+    // `e2e/` belongs to Playwright: those specs drive a real browser against a
+    // running stack, and jsdom has neither. Running them here would fail for
+    // reasons that say nothing about the code.
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
   },
 });

@@ -248,7 +248,7 @@ class _InvalidationCounter:
         return 0
 
 
-async def _commit_capture(
+async def commit_capture_publication(
     *,
     replay: PublicDecisionReplay,
     producer: CaptureReplayPublisher,
@@ -291,7 +291,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     runtime = Settings().model_copy(update={"config_dir": config_root})
     result, invalidations = asyncio.run(
-        _commit_capture(
+        commit_capture_publication(
             replay=replay,
             producer=CaptureReplayPublisher(
                 config=config,

@@ -62,6 +62,15 @@ from api.kpis import (
     load_score_proof,
     unavailable_kpi_response,
 )
+from api.lab import (
+    MAX_LAB_RUNS,
+    LabRunRefusedError,
+    LabRunStore,
+    build_lab_run,
+    lab_run_feed,
+    parse_lab_request,
+    unavailable_lab_feed,
+)
 from api.notify import SnapshotNotificationListener
 from api.probes import platform_probes
 from api.security import (
@@ -89,6 +98,7 @@ from contracts import (
     IncidentDetailResponse,
     IncidentFeedResponse,
     KpiResponse,
+    LabRunFeed,
     ScoreProof,
     SecurityResponse,
     SnapshotResource,
@@ -132,6 +142,7 @@ def create_app(
     incident_detail_reader: IncidentDetailReader | None = None,
     action_control_store: ActionControlStore | None = None,
     security_reader: SecuritySnapshotReader | None = None,
+    lab_run_store: LabRunStore | None = None,
 ) -> FastAPI:
     """Build the gateway application.
 
@@ -152,6 +163,7 @@ def create_app(
         app.state.incident_detail_reader = incident_detail_reader
         app.state.action_control_store = action_control_store
         app.state.security_reader = security_reader
+        app.state.lab_run_store = lab_run_store
         app.state.incident_publisher = None
         incident_pool = None
         action_runtime: ActionControlRuntime | None = None
@@ -170,6 +182,8 @@ def create_app(
             app.state.causal_graph_reader = incident_store
             app.state.incident_detail_reader = incident_store
             app.state.security_reader = incident_store
+            if lab_run_store is None:
+                app.state.lab_run_store = incident_store
             if action_control_store is None:
                 app.state.action_control_store = incident_store
             app.state.incident_publisher = IncidentFeedPublisher(
@@ -600,6 +614,61 @@ def create_app(
             return unavailable_causal_graph(
                 detail="causal graph store could not provide a snapshot"
             )
+
+    @app.get("/api/lab/runs", tags=["lab"], response_model=LabRunFeed)
+    async def lab_runs(response: Response) -> LabRunFeed:
+        """What may be fired, what has been, and whether anything can be right now."""
+        store: LabRunStore | None = getattr(app.state, "lab_run_store", None)
+        if store is None:
+            response.status_code = 503
+            return unavailable_lab_feed(detail="no lab run queue is attached to this gateway")
+        try:
+            runs = await store.list_lab_runs(limit=MAX_LAB_RUNS)
+        except Exception:
+            LOGGER.exception("lab run feed read failed")
+            response.status_code = 503
+            return unavailable_lab_feed(detail="the lab run queue could not be read")
+        return lab_run_feed(runs, runner_attached=config.lab_runner_attached)
+
+    @app.post("/api/lab/scenario", tags=["lab"], response_model=LabRunFeed)
+    async def fire_scenario(body: dict[str, Any], response: Response) -> LabRunFeed:
+        """Record the intent to fire one scenario. This endpoint executes nothing.
+
+        The gateway image carries no `lab/`, which is what keeps scenario ground
+        truth unreachable from the process that serves the public API. A queued
+        row is the whole of what happens here.
+        """
+        store: LabRunStore | None = getattr(app.state, "lab_run_store", None)
+        if store is None:
+            response.status_code = 503
+            return unavailable_lab_feed(detail="no lab run queue is attached to this gateway")
+        if not config.lab_runner_attached:
+            response.status_code = 409
+            return lab_run_feed(
+                await store.list_lab_runs(limit=MAX_LAB_RUNS),
+                runner_attached=False,
+            )
+        try:
+            requested = build_lab_run(parse_lab_request(body), ts=datetime.now(UTC))
+        except LabRunRefusedError as refusal:
+            response.status_code = 400
+            return unavailable_lab_feed(detail=str(refusal))
+        try:
+            queued = await store.enqueue_lab_run(requested)
+        except Exception:
+            LOGGER.exception("queueing a lab run failed")
+            response.status_code = 503
+            return unavailable_lab_feed(detail="the lab run queue could not accept the request")
+        if not queued:
+            # The one-in-flight index refused it, which is the answer rather
+            # than an error: something is already running.
+            response.status_code = 409
+        else:
+            app.state.stream_broker.publish(snapshot_invalidation(SnapshotResource.LAB))
+        return lab_run_feed(
+            await store.list_lab_runs(limit=MAX_LAB_RUNS),
+            runner_attached=True,
+        )
 
     @app.get(
         "/api/security",

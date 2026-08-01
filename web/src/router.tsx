@@ -13,6 +13,11 @@ async function incidentDetailRoute() {
   return { Component: module.IncidentDetailPage };
 }
 
+async function demoRoute() {
+  const module = await import('@/components/DemoPage');
+  return { Component: module.DemoPage };
+}
+
 async function securityRoute() {
   const module = await import('@/components/SecurityPage');
   return { Component: module.SecurityPage };
@@ -33,6 +38,7 @@ export const router = createBrowserRouter([
       { index: true, lazy: commandRoute },
       { path: 'command', lazy: commandRoute },
       { path: 'security', lazy: securityRoute },
+      { path: 'demo', lazy: demoRoute },
       { path: 'incidents/:incidentId', lazy: incidentDetailRoute },
       { path: '*', Component: NotFoundPage },
     ],

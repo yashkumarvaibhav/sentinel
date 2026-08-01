@@ -140,6 +140,34 @@ jobs:
       - name: The front door serves the app
         run: curl -sf -o /dev/null http://127.0.0.1:8041/
 
+      # The one gate that drives the shipped bundle through a real browser
+      # against a real gateway. Everything above it mocks at least one of those
+      # seams, so their agreement has never been checked by anything but a
+      # person looking at it.
+      #
+      # It runs here rather than in the `web` job for the same reason: there is
+      # no stack there to point at, and a suite that started its own backend
+      # would be testing a different system from the one that ships.
+      - name: Install the browser
+        working-directory: web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: The north-star flow, through a real browser
+        working-directory: web
+        env:
+          SENTINEL_E2E_BASE_URL: http://127.0.0.1:8041
+        run: npx playwright test
+
+      - name: Keep the browser trace of a failed flow
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: web/test-results/
+          retention-days: 7
+
       - name: Diagnostics on failure
         if: failure()
         run: |

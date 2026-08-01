@@ -2624,6 +2624,231 @@
       "title": "KpiWindow",
       "type": "object"
     },
+    "LabRunFeed": {
+      "additionalProperties": false,
+      "description": "The launcher's whole view: what may be fired, and what has been.",
+      "properties": {
+        "note": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "runner_attached": {
+          "title": "Runner Attached",
+          "type": "boolean"
+        },
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/LabRunSnapshot"
+          },
+          "title": "Runs",
+          "type": "array"
+        },
+        "scenarios": {
+          "items": {
+            "$ref": "#/$defs/LabScenarioOption"
+          },
+          "title": "Scenarios",
+          "type": "array"
+        },
+        "status": {
+          "$ref": "#/$defs/LabRunFeedStatus"
+        }
+      },
+      "required": [
+        "status",
+        "scenarios",
+        "runs",
+        "runner_attached",
+        "note"
+      ],
+      "title": "LabRunFeed",
+      "type": "object"
+    },
+    "LabRunFeedStatus": {
+      "description": "Whether the launcher can be used at all right now.",
+      "enum": [
+        "READY",
+        "BUSY",
+        "UNAVAILABLE"
+      ],
+      "title": "LabRunFeedStatus",
+      "type": "string"
+    },
+    "LabRunHonesty": {
+      "additionalProperties": false,
+      "description": "What was real about this run, stated rather than implied.\n\nBoth modes drive REAL telemetry through the platform; they differ in where\nthat telemetry came from and whether the faults in it were injected. A\nlauncher that showed the two identically would be inviting the audience to\nread a recording as a live system.",
+      "properties": {
+        "reproducibility": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "stimulus": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "telemetry": {
+          "$ref": "#/$defs/HumanText"
+        }
+      },
+      "required": [
+        "telemetry",
+        "stimulus",
+        "reproducibility"
+      ],
+      "title": "LabRunHonesty",
+      "type": "object"
+    },
+    "LabRunMode": {
+      "description": "How a scenario is put in front of the platform.",
+      "enum": [
+        "REPLAY",
+        "LIVE"
+      ],
+      "title": "LabRunMode",
+      "type": "string"
+    },
+    "LabRunSnapshot": {
+      "additionalProperties": false,
+      "description": "The authoritative state of one requested run.",
+      "properties": {
+        "detail": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcDatetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "honesty": {
+          "$ref": "#/$defs/LabRunHonesty"
+        },
+        "incident_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "mode": {
+          "$ref": "#/$defs/LabRunMode"
+        },
+        "requested_at": {
+          "$ref": "#/$defs/UtcDatetime"
+        },
+        "run_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "scenario_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcDatetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "state": {
+          "$ref": "#/$defs/LabRunState"
+        }
+      },
+      "required": [
+        "run_id",
+        "scenario_id",
+        "mode",
+        "state",
+        "requested_at",
+        "detail",
+        "honesty"
+      ],
+      "title": "LabRunSnapshot",
+      "type": "object"
+    },
+    "LabRunState": {
+      "description": "Durable progress of one requested scenario run.",
+      "enum": [
+        "QUEUED",
+        "RUNNING",
+        "SUCCEEDED",
+        "FAILED",
+        "REFUSED"
+      ],
+      "title": "LabRunState",
+      "type": "string"
+    },
+    "LabScenarioOption": {
+      "additionalProperties": false,
+      "description": "One scenario a client may fire, and the modes it may fire it in.",
+      "properties": {
+        "description": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "live_duration_seconds": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Live Duration Seconds"
+        },
+        "modes": {
+          "items": {
+            "$ref": "#/$defs/LabRunMode"
+          },
+          "minItems": 1,
+          "title": "Modes",
+          "type": "array"
+        },
+        "name": {
+          "$ref": "#/$defs/HumanText"
+        },
+        "scenario_id": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "name",
+        "description",
+        "modes"
+      ],
+      "title": "LabScenarioOption",
+      "type": "object"
+    },
+    "LabScenarioRequest": {
+      "additionalProperties": false,
+      "description": "Everything a client is allowed to say about a run it wants.",
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/LabRunMode"
+        },
+        "scenario_id": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "scenario_id",
+        "mode"
+      ],
+      "title": "LabScenarioRequest",
+      "type": "object"
+    },
     "Observation": {
       "additionalProperties": false,
       "description": "One event-time telemetry value, containing evidence but never answer-key data.",
@@ -3427,7 +3652,8 @@
         "incidents",
         "actions",
         "security",
-        "audit"
+        "audit",
+        "lab"
       ],
       "title": "SnapshotResource",
       "type": "string"
@@ -3884,6 +4110,12 @@
     },
     {
       "$ref": "#/$defs/IncidentFeedResponse"
+    },
+    {
+      "$ref": "#/$defs/LabRunFeed"
+    },
+    {
+      "$ref": "#/$defs/LabScenarioRequest"
     },
     {
       "$ref": "#/$defs/CausalGraphResponse"

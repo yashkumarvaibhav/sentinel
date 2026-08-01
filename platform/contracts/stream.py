@@ -30,6 +30,7 @@ class SnapshotResource(StrEnum):
     ACTIONS = "actions"
     SECURITY = "security"
     AUDIT = "audit"
+    LAB = "lab"
 
 
 class SnapshotInvalidation(ContractModel):

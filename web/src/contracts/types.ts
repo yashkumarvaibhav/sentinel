@@ -28,6 +28,8 @@ export type SentinelContract =
   | ScoreProof
   | KpiResponse
   | IncidentFeedResponse
+  | LabRunFeed
+  | LabScenarioRequest
   | CausalGraphResponse
   | IncidentDetailResponse
   | SecurityResponse;
@@ -297,7 +299,8 @@ export type Resources = [SnapshotResource, ...SnapshotResource[]];
 /**
  * Authoritative snapshots an invalidation may ask the browser to refetch.
  */
-export type SnapshotResource = "all" | "health" | "decomposition" | "incidents" | "actions" | "security" | "audit";
+export type SnapshotResource =
+  "all" | "health" | "decomposition" | "incidents" | "actions" | "security" | "audit" | "lab";
 /**
  * @minItems 1
  */
@@ -349,6 +352,26 @@ export type Contracts__Base__FiniteFloat__3 = number;
  */
 export type ObservationStatus = "WATCHING" | "STALE" | "NEVER";
 export type Status2 = "ready" | "degraded";
+export type RunnerAttached = boolean;
+/**
+ * How a scenario is put in front of the platform.
+ */
+export type LabRunMode = "REPLAY" | "LIVE";
+/**
+ * Durable progress of one requested scenario run.
+ */
+export type LabRunState = "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "REFUSED";
+export type Runs = LabRunSnapshot[];
+export type LiveDurationSeconds = number | null;
+/**
+ * @minItems 1
+ */
+export type Modes = [LabRunMode, ...LabRunMode[]];
+export type Scenarios = LabScenarioOption[];
+/**
+ * Whether the launcher can be used at all right now.
+ */
+export type LabRunFeedStatus = "READY" | "BUSY" | "UNAVAILABLE";
 export type Active = boolean;
 export type EvidenceEpisodeIds = Identifier[];
 export type Edges = CausalGraphEdge[];
@@ -1096,6 +1119,61 @@ export interface ObservationFreshness {
   last_judged_at?: UtcDatetime | null;
   note: HumanText;
   status: ObservationStatus;
+}
+/**
+ * The launcher's whole view: what may be fired, and what has been.
+ */
+export interface LabRunFeed {
+  note: HumanText;
+  runner_attached: RunnerAttached;
+  runs: Runs;
+  scenarios: Scenarios;
+  status: LabRunFeedStatus;
+}
+/**
+ * The authoritative state of one requested run.
+ */
+export interface LabRunSnapshot {
+  detail: HumanText;
+  finished_at?: UtcDatetime | null;
+  honesty: LabRunHonesty;
+  incident_id?: Identifier | null;
+  mode: LabRunMode;
+  requested_at: UtcDatetime;
+  run_id: Identifier;
+  scenario_id: Identifier;
+  started_at?: UtcDatetime | null;
+  state: LabRunState;
+}
+/**
+ * What was real about this run, stated rather than implied.
+ *
+ * Both modes drive REAL telemetry through the platform; they differ in where
+ * that telemetry came from and whether the faults in it were injected. A
+ * launcher that showed the two identically would be inviting the audience to
+ * read a recording as a live system.
+ */
+export interface LabRunHonesty {
+  reproducibility: HumanText;
+  stimulus: HumanText;
+  telemetry: HumanText;
+}
+/**
+ * One scenario a client may fire, and the modes it may fire it in.
+ */
+export interface LabScenarioOption {
+  description: HumanText;
+  live_duration_seconds?: LiveDurationSeconds;
+  modes: Modes;
+  name: HumanText;
+  scenario_id: Identifier;
+}
+/**
+ * Everything a client is allowed to say about a run it wants.
+ */
+export interface LabScenarioRequest {
+  mode: LabRunMode;
+  scenario_id: Identifier;
 }
 /**
  * The authoritative current-incident graph or an explicit absence.

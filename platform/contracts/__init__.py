@@ -108,6 +108,16 @@ from contracts.kpi import (
     ScoreHeadline,
     ScoreProof,
 )
+from contracts.lab import (
+    LabRunFeed,
+    LabRunFeedStatus,
+    LabRunHonesty,
+    LabRunMode,
+    LabRunSnapshot,
+    LabRunState,
+    LabScenarioOption,
+    LabScenarioRequest,
+)
 from contracts.security import (
     COHORT_FEATURE_ORDER,
     SECURITY_FEATURE_ORDER,
@@ -198,6 +208,14 @@ __all__ = [
     "KpiResponse",
     "KpiStatus",
     "KpiWindow",
+    "LabRunFeed",
+    "LabRunFeedStatus",
+    "LabRunHonesty",
+    "LabRunMode",
+    "LabRunSnapshot",
+    "LabRunState",
+    "LabScenarioOption",
+    "LabScenarioRequest",
     "Observation",
     "ObservationFreshness",
     "ObservationStatus",

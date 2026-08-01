@@ -85,6 +85,10 @@ services:
       SENTINEL_LIVE_PRODUCER_GROUP_ID: ${SENTINEL_LIVE_PRODUCER_GROUP_ID:-sentinel-live-producer-v1}
       SENTINEL_LIVE_PRODUCER_BUFFER_CAPACITY: ${SENTINEL_LIVE_PRODUCER_BUFFER_CAPACITY:-200000}
       SENTINEL_LIVE_PRODUCER_CONTEXT_REFRESH_SECONDS: ${SENTINEL_LIVE_PRODUCER_CONTEXT_REFRESH_SECONDS:-60}
+      # Off by default. Arming this and action.yml's dry_run are two separate
+      # decisions: this decides whether a plan exists at all, that one decides
+      # whether it reaches the world.
+      SENTINEL_LIVE_PRODUCER_PLANS_ACTIONS: ${SENTINEL_LIVE_PRODUCER_PLANS_ACTIONS:-false}
       FOOTBALL_DATA_API_KEY: ${FOOTBALL_DATA_API_KEY:-}
       FOOTBALL_DATA_BASE_URL: ${FOOTBALL_DATA_BASE_URL:-https://api.football-data.org}
       POSTGRES_HOST: postgres
@@ -118,6 +122,53 @@ services:
         limits:
           memory: 512m
 
+  # The lab-side half of the demo launcher. Never started by `make up` — it sits
+  # behind a profile and is run on demand by `make demo-runner`, because it is
+  # the one process with `lab/` mounted and it must not be reachable from the
+  # public API.
+  #
+  # Its own limit, and a much larger one, because it does different work: the
+  # producer judges a two-second window at a time, while a replay drives a whole
+  # recorded scenario through every detector path at once. Measured peak for
+  # combo_night is 3.2 GB; at the producer's 512 MB it was killed mid-replay,
+  # which is exactly the failure this separate limit exists to prevent.
+  demo-runner:
+    profiles: [demo]
+    build:
+      context: .
+      dockerfile: deploy/producer.Dockerfile
+    networks: [sentinel_net]
+    entrypoint: []
+    command: ["python", "-m", "lab.runner", "--repo-root", "/app"]
+    working_dir: /app
+    environment:
+      SENTINEL_ENV: ${SENTINEL_ENV:-dev}
+      SENTINEL_CONFIG_DIR: /app/config
+      SENTINEL_LOG_LEVEL: ${SENTINEL_LOG_LEVEL:-info}
+      PYTHONPATH: /app
+      HOME: /tmp
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-sentinel}
+      POSTGRES_USER: ${POSTGRES_USER:-sentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentinel}
+      POSTGRES_SCHEMA: ${POSTGRES_SCHEMA:-sentinel}
+      POSTGRES_DEV_SCHEMA: ${POSTGRES_DEV_SCHEMA:-sentinel_dev}
+      STORAGE_POOL_MIN_SIZE: ${STORAGE_POOL_MIN_SIZE:-1}
+      STORAGE_POOL_MAX_SIZE: ${STORAGE_POOL_MAX_SIZE:-4}
+      STORAGE_TIMEOUT_SECONDS: ${STORAGE_TIMEOUT_SECONDS:-10}
+      REDPANDA_BROKERS: redpanda:9092
+    volumes:
+      - ./lab:/app/lab:ro
+      - ./var:/app/var
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 6g
+
   gateway:
     <<: *restart
     build:
@@ -132,6 +183,10 @@ services:
       SENTINEL_CONFIG_DIR: /app/config
       SENTINEL_SCORE_PROOF_PATH: /app/reports/latest-score-proof.json
       SENTINEL_SHARED_SECRET: ${SENTINEL_SHARED_SECRET:-}
+      # Declared, not probed. The lab runner is a separate process with the repo
+      # mounted (`make demo-runner`), and a launcher that queued work nothing
+      # will claim is worse than one that says plainly it cannot fire anything.
+      SENTINEL_LAB_RUNNER_ATTACHED: ${SENTINEL_LAB_RUNNER_ATTACHED:-false}
       SENTINEL_INTERIM_OPERATOR_ID: ${SENTINEL_INTERIM_OPERATOR_ID:-interim-operator}
       SENTINEL_ACTION_WORKER_ENABLED: ${SENTINEL_ACTION_WORKER_ENABLED:-true}
       SENTINEL_ACTION_WORKER_ID: ${SENTINEL_ACTION_WORKER_ID:-gateway-action-worker}

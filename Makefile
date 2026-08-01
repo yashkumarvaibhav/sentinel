@@ -95,6 +95,10 @@ verify-mesh: ## Run the mesh actuator against a real Envoy (needs `make lab-edge
 	$(PY) env SENTINEL_ACTION_MESH_INTEGRATION=1 \
 		pytest tests/test_action_mesh.py -k "real_envoy or dry_run"
 
+.PHONY: verify-e2e
+verify-e2e: ## Drive the north-star flow through a real browser (needs `make up`)
+	$(WEB) e2e
+
 .PHONY: verify-canary
 verify-canary: ## Widen and unwind a real Envoy through the durable worker (needs `make lab-edge`)
 	$(PY) env SENTINEL_ACTION_MESH_INTEGRATION=1 \
@@ -298,6 +302,11 @@ score-decisions: ## Score decisions against the scenario answer key (CAPTURE_ROO
 		--repo-root .. \
 		$(foreach root,$(CAPTURE_ROOTS),--capture "../$(root)") \
 		--report ../$(or $(DECISION_REPORT),docs/reports/phase-4-decision-score.md)
+
+.PHONY: demo-runner
+demo-runner: ## Claim and execute queued /demo scenario runs (repo mounted; Ctrl-C to stop)
+	$(COMPOSE) --profile demo run --rm --build --no-deps \
+		--user "$(shell id -u):$(shell id -g)" demo-runner
 
 .PHONY: score-live-run
 score-live-run: ## Score what the live producer STORED during one authored run (CAPTURE_ID=)

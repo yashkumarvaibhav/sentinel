@@ -188,6 +188,14 @@ class Settings(BaseSettings):
         default=False,
         alias="SENTINEL_LIVE_PRODUCER_PLANS_ACTIONS",
     )
+    # Whether a lab-side runner is beside this gateway to claim queued scenario
+    # runs. Declared rather than probed: the runner is a separate process with
+    # the repo mounted, and a launcher that queued work nothing will claim is
+    # worse than one that says plainly it cannot fire anything.
+    lab_runner_attached: bool = Field(
+        default=False,
+        alias="SENTINEL_LAB_RUNNER_ATTACHED",
+    )
 
     @property
     def first_broker(self) -> tuple[str, int]:
