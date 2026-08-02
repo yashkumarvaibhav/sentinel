@@ -171,7 +171,7 @@ export function DemoLauncher() {
       <section aria-labelledby="demo-locked">
         {/* Same reason as the ready branch: the route owns the name. */}
         <h2 className="sr-only" id="demo-locked">
-          Operator credential
+          Launcher access
         </h2>
         <p className="text-muted mt-1 text-sm">
           Firing a scenario changes what the platform is looking at, so it needs the operator
