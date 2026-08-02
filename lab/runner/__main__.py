@@ -145,6 +145,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    # The five-second readiness probe is useful state, not five lines a minute
+    # saying HTTP 200. Capability changes are logged explicitly by _heartbeat.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     with contextlib.suppress(KeyboardInterrupt):
         asyncio.run(run(repo_root=args.repo_root.resolve(), poll_seconds=args.poll_seconds))
     return 0

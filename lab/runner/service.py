@@ -42,7 +42,11 @@ LOGGER = logging.getLogger(__name__)
 # mid-run frees the slot the same afternoon.
 DEFAULT_CLAIM_SECONDS = 3_600
 CONTROL_POLL_SECONDS = 0.5
-REPLAY_PRESENTATION_SECONDS = 60
+# combo_night's unchanged six-detector decision replay takes about nine minutes
+# on the demo host. Spread its 378 recorded frames across that work so the
+# command centre keeps moving for the verifier's real lifetime. The loop exits
+# as soon as verification does, so faster hosts never wait for presentation.
+REPLAY_PRESENTATION_SECONDS = 600
 
 
 class LabRunQueue(Protocol):
@@ -357,6 +361,8 @@ async def _replay(
                 evidence_end_at=end,
                 evidence_cursor_at=cursor,
             )
+            if communication.done():
+                break
             if step + 1 < steps:
                 await asyncio.sleep(REPLAY_PRESENTATION_SECONDS / steps)
         if not communication.done():
