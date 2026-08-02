@@ -28,14 +28,20 @@ function value(measured: number): string {
   return Number.isInteger(measured) ? measured.toLocaleString() : measured.toPrecision(3);
 }
 
-function IncidentCard({ item }: { item: IncidentFeedItem }) {
+function IncidentCard({ item, fresh }: { item: IncidentFeedItem; fresh: boolean }) {
   const verdict = item.verdict_class ?? 'UNCLASSIFIED';
   const VerdictIcon = verdictIcon(verdict);
   return (
     <article
       aria-label={`${label(verdict)} incident ${item.incident_id}`}
-      className={`border-line flex flex-col gap-4 rounded-lg border p-4 ${
-        item.muted ? 'bg-sidebar opacity-75' : 'bg-raised'
+      className={`flex flex-col gap-4 rounded-lg border p-4 transition-colors duration-500 ${
+        item.muted ? 'bg-sidebar border-line opacity-75' : 'bg-raised border-line'
+      } ${
+        // What just arrived is ringed for a few seconds. On a screen left up on
+        // a wall, the question is never "what is here" but "what changed", and
+        // a card that appears silently among seven identical ones answers the
+        // wrong one.
+        fresh ? 'ring-accent border-line-strong ring-2' : ''
       }`}
     >
       <div className="flex flex-wrap items-center gap-2">
@@ -139,8 +145,12 @@ export function ObservationBanner({ observation }: { observation: ObservationFre
   );
 }
 
+const FRESH_FOR_MS = 12_000;
+
 export function IncidentFeed({ className = '' }: { className?: string } = {}) {
   const [load, setLoad] = useState<Load>({ state: 'loading' });
+  const [fresh, setFresh] = useState<Set<string>>(() => new Set());
+  const seen = useRef<Set<string> | null>(null);
   const inFlight = useRef<Promise<void> | null>(null);
   const controller = useRef<AbortController | null>(null);
   const refetchQueued = useRef(false);
@@ -158,6 +168,27 @@ export function IncidentFeed({ className = '' }: { className?: string } = {}) {
     const request = fetchIncidents(requestController.signal)
       .then((response) => {
         if (!requestController.signal.aborted) {
+          if (response.status === 'ready') {
+            // The first read of a session is history, not news, so it seeds
+            // without highlighting - the same rule the alarm follows.
+            const ids = response.incidents.map((incident) => incident.incident_id);
+            if (seen.current === null) {
+              seen.current = new Set(ids);
+            } else {
+              const arrived = ids.filter((id) => !seen.current?.has(id));
+              for (const id of ids) seen.current.add(id);
+              if (arrived.length > 0) {
+                setFresh((current) => new Set([...current, ...arrived]));
+                window.setTimeout(() => {
+                  setFresh((current) => {
+                    const next = new Set(current);
+                    for (const id of arrived) next.delete(id);
+                    return next;
+                  });
+                }, FRESH_FOR_MS);
+              }
+            }
+          }
           setLoad(
             response.status === 'ready'
               ? { state: 'ready', response }
@@ -233,7 +264,11 @@ export function IncidentFeed({ className = '' }: { className?: string } = {}) {
             </p>
           ) : (
             load.response.incidents.map((item) => (
-              <IncidentCard item={item} key={item.incident_id} />
+              <IncidentCard
+                item={item}
+                key={item.incident_id}
+                fresh={fresh.has(item.incident_id)}
+              />
             ))
           )}
         </div>
