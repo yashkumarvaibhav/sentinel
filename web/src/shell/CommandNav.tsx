@@ -78,7 +78,7 @@ export function CommandNav({ onNavigate }: { onNavigate?: () => void }) {
                   <span
                     className={`ml-auto shrink-0 rounded-full px-2 py-0.5 text-xs font-bold tabular-nums ${
                       unresolved !== null && unresolved > 0
-                        ? 'text-danger border-danger-line border'
+                        ? `${isActive ? 'text-ink' : 'text-danger'} border-danger-line border`
                         : 'text-faint border-line border'
                     }`}
                   >

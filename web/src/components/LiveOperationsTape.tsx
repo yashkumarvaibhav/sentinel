@@ -156,6 +156,7 @@ export function LiveOperationsTape() {
       aria-label="Live operations tape"
       aria-live="off"
       className="border-line bg-sidebar overflow-x-auto rounded-lg border"
+      tabIndex={0}
     >
       <div className="flex min-w-max" data-testid="live-operations-tape">
         <TapeCell
