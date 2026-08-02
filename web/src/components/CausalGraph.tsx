@@ -136,7 +136,7 @@ function nodeLabel(node: CausalGraphNode) {
       </div>
       <div className="flex flex-wrap gap-1 text-[10px]">
         {node.is_origin && node.origin_confidence !== null && (
-          <span className="bg-accent-soft text-accent rounded px-1.5 py-0.5">
+          <span className="bg-accent-soft text-accent-hover rounded px-1.5 py-0.5">
             Origin {percent(node.origin_confidence)}
           </span>
         )}

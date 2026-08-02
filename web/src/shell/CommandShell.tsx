@@ -30,7 +30,7 @@ export function CommandShell() {
             <NavLink
               className={({ isActive }) =>
                 `min-h-11 rounded-md px-3 py-3 text-xs font-medium sm:min-h-0 sm:py-2 ${
-                  isActive ? 'bg-accent-soft text-accent' : 'text-muted hover:text-ink'
+                  isActive ? 'bg-accent-soft text-accent-hover' : 'text-muted hover:text-ink'
                 }`
               }
               end
@@ -47,7 +47,7 @@ export function CommandShell() {
             <NavLink
               className={({ isActive }) =>
                 `min-h-11 rounded-md px-3 py-3 text-xs font-medium sm:min-h-0 sm:py-2 ${
-                  isActive ? 'bg-accent-soft text-accent' : 'text-muted hover:text-ink'
+                  isActive ? 'bg-accent-soft text-accent-hover' : 'text-muted hover:text-ink'
                 }`
               }
               to="/security"
@@ -57,7 +57,7 @@ export function CommandShell() {
             <NavLink
               className={({ isActive }) =>
                 `min-h-11 rounded-md px-3 py-3 text-xs font-medium sm:min-h-0 sm:py-2 ${
-                  isActive ? 'bg-accent-soft text-accent' : 'text-muted hover:text-ink'
+                  isActive ? 'bg-accent-soft text-accent-hover' : 'text-muted hover:text-ink'
                 }`
               }
               to="/demo"
