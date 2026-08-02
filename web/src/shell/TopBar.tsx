@@ -6,16 +6,42 @@ import { useAudience } from '@/shell/useAudience';
 import { useLiveness } from '@/shell/useLiveness';
 import type { Liveness, LivenessState } from '@/shell/useLiveness';
 import { useTheme } from '@/shell/useTheme';
+import { Button } from '@/ui/Button';
+import { Chip, type ChipTone } from '@/ui/Chip';
+import {
+  Activity,
+  Briefcase,
+  LoaderCircle,
+  Monitor,
+  Moon,
+  Sun,
+  Terminal,
+  TriangleAlert,
+  WifiOff,
+  type LucideIcon,
+} from '@/ui/icons';
 
-const DOT: Record<Liveness, { className: string; label: string }> = {
-  connecting: { className: 'bg-muted', label: 'Connecting to the platform' },
-  live: { className: 'bg-ok', label: 'Live stream open, every component ready' },
-  degraded: { className: 'bg-warn', label: 'Live stream open, some component degraded' },
+/**
+ * Each connection state is a tone *and* an icon *and* the word itself. The
+ * previous version was a coloured dot with a screen-reader-only sentence, which
+ * left a sighted user who cannot separate the greens and ambers with nothing to
+ * read — the exact "colour alone" failure the house rules name as the most
+ * violated one in UI work.
+ */
+const DOT: Record<Liveness, { tone: ChipTone; icon: LucideIcon; label: string }> = {
+  connecting: { tone: 'neutral', icon: LoaderCircle, label: 'Connecting to the platform' },
+  live: { tone: 'healthy', icon: Activity, label: 'Live stream open, every component ready' },
+  degraded: {
+    tone: 'degraded',
+    icon: TriangleAlert,
+    label: 'Live stream open, some component degraded',
+  },
   reconnecting: {
-    className: 'bg-warn',
+    tone: 'degraded',
+    icon: LoaderCircle,
     label: 'Live stream disconnected; reconnecting automatically',
   },
-  down: { className: 'bg-bad', label: 'Live stream unavailable' },
+  down: { tone: 'offline', icon: WifiOff, label: 'Live stream unavailable' },
 };
 
 function ConnectionDot({ liveness }: { liveness: LivenessState }) {
@@ -34,13 +60,14 @@ function ConnectionDot({ liveness }: { liveness: LivenessState }) {
       className="flex items-center gap-2"
       title={`${detail} — SSE live; snapshots refetch after reconnect`}
     >
-      <span className={`inline-block size-2 rounded-full ${dot.className}`} aria-hidden="true" />
-      {/* The status is announced, not merely coloured: a dot is invisible to a
-          screen reader and indistinguishable to a good share of sighted users. */}
+      {/* The full sentence is announced; the chip beside it carries the same
+          fact visually as colour + icon + the state's own name. */}
       <span className="sr-only" role="status">
         {detail}
       </span>
-      <span className="text-muted hidden text-xs sm:inline">{liveness.status}</span>
+      <Chip tone={dot.tone} icon={dot.icon}>
+        {liveness.status}
+      </Chip>
     </span>
   );
 }
@@ -87,23 +114,26 @@ export function TopBar() {
         <ConnectionDot liveness={liveness} />
 
         <div className="ml-auto flex items-center gap-2">
-          <button
-            type="button"
+          {/* Both controls still report the state they are IN rather than the
+              action they offer — the inversion the house patterns warn about.
+              That is 6.11c's slice; this one only puts them on the shared
+              control vocabulary, so the fix lands in one place rather than in
+              two more ad-hoc class strings. */}
+          <Button
             onClick={toggleAudience}
             aria-pressed={audience === 'exec'}
-            className="border-line hover:bg-accent-soft min-h-11 rounded-md border px-3 text-xs font-medium sm:min-h-0 sm:py-1.5"
+            icon={audience === 'exec' ? Briefcase : Terminal}
           >
             {audience === 'exec' ? 'Exec' : 'Technical'}
-          </button>
+          </Button>
 
-          <button
-            type="button"
+          <Button
             onClick={cycleTheme}
-            className="border-line hover:bg-accent-soft min-h-11 rounded-md border px-3 text-xs font-medium sm:min-h-0 sm:py-1.5"
             aria-label={`Theme: ${preference}. Activate to change.`}
+            icon={preference === 'system' ? Monitor : preference === 'light' ? Sun : Moon}
           >
             {preference === 'system' ? 'Auto' : preference === 'light' ? 'Light' : 'Dark'}
-          </button>
+          </Button>
 
           {version && (
             <code

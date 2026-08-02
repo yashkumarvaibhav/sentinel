@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { fetchKpis } from '@/api/kpis';
 import type { KpiKey, KpiMetric, KpiResponse, ScoreHeadline } from '@/contracts/types';
 import { useAudience } from '@/shell/useAudience';
+import { Chip, HonestyChip } from '@/ui/Chip';
 
 type Load =
   | { state: 'loading' }
@@ -40,15 +41,16 @@ function KpiCard({ metric, exec }: { metric: KpiMetric; exec: boolean }) {
         <h3 className="eyebrow font-sans">
           {exec ? EXEC_LABELS[metric.key] : metric.label}
         </h3>
-        <span
-          className={
-            metric.status === 'ok'
-              ? 'bg-accent-soft text-accent rounded px-2 py-0.5 text-[10px] tracking-wider uppercase'
-              : 'border-line text-muted rounded border px-2 py-0.5 text-[10px] tracking-wider uppercase'
-          }
-        >
-          {metric.status === 'ok' ? 'Measured' : 'Insufficient'}
-        </span>
+        {/* "Measured" and "Insufficient" are the two most consequential words
+            on this screen, so neither is left to colour: each carries its own
+            icon, and the insufficient one is a dashed circle rather than an
+            error mark — an unmeasured metric is a gap in the telemetry, not a
+            fault in the platform. */}
+        {metric.status === 'ok' ? (
+          <Chip tone="healthy">Measured</Chip>
+        ) : (
+          <Chip tone="neutral">Insufficient</Chip>
+        )}
       </div>
 
       <p className={metric.status === 'ok' ? 'text-2xl font-semibold' : 'text-muted text-base'}>
@@ -105,16 +107,15 @@ function ScoreProofChip({ response }: { response: KpiResponse }) {
 
   return (
     <aside className="border-line bg-sidebar flex flex-col gap-3 rounded-lg border p-4 lg:flex-row lg:items-center">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 lg:shrink-0 lg:flex-nowrap">
         <strong className="text-xs tracking-wide uppercase">
           Held-out proof · {proof.gate_status}
         </strong>
-        <span className="border-line rounded border px-2 py-0.5 text-[10px] tracking-wider">
-          REAL
-        </span>
-        <span className="border-line rounded border px-2 py-0.5 text-[10px] tracking-wider">
-          SIMULATED
-        </span>
+        {/* Read off the proof rather than written in: `api/kpis.ts` already
+            refuses a proof whose honesty is anything else, so these two agree
+            with the guard by construction instead of by coincidence. */}
+        <HonestyChip kind={proof.telemetry_honesty} />
+        <HonestyChip kind={proof.stimulus_honesty} />
       </div>
       <p className="text-muted text-xs">
         {proofDate} · {proof.capture_ids.length} captures · latest {latestCapture}

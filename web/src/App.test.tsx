@@ -71,8 +71,14 @@ describe('App', () => {
     // This asserted `Simulated` until the hero chart replaced the illustrative
     // sketch. The label flipped because the data source did - it is a claim
     // about where the numbers come from, and it must never move ahead of them.
-    expect(screen.getAllByText('Real').length).toBeGreaterThan(0);
-    expect(screen.queryByText('Simulated')).not.toBeInTheDocument();
+    //
+    // The casing moved from `Real` to `REAL` when the honesty labels became one
+    // shared chip: this surface used title case while the score proof beside it
+    // used caps, for the same claim. The claim itself is unchanged, and the
+    // second assertion is the one carrying it - real is asserted, simulated is
+    // still refused.
+    expect(screen.getAllByText('REAL').length).toBeGreaterThan(0);
+    expect(screen.queryByText('SIMULATED')).not.toBeInTheDocument();
   });
 
   it('offers a skip link ahead of the header', () => {

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { DecompositionUnavailableError, fetchDecomposition } from '@/api/decomposition';
 import type { DecompositionWindow } from '@/api/decomposition';
 import { DecompositionChart } from '@/components/DecompositionChart';
+import { HonestyChip } from '@/ui/Chip';
 
 const LEGEND = [
   { label: 'explained base', className: 'bg-decomp-base' },
@@ -68,12 +69,7 @@ export function DecompositionPanel({
           <code className="text-muted font-mono text-[11px]">
             {service} · {signal}
           </code>
-          <span
-            className="border-line text-muted rounded border px-2 py-0.5 text-[11px] tracking-wider uppercase"
-            title="Frames are read from the platform's own store — no illustrative data is drawn here"
-          >
-            Real
-          </span>
+          <HonestyChip kind="REAL" />
         </div>
       </div>
 

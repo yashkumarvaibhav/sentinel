@@ -32,6 +32,44 @@
   --color-ok: var(--success);
   --color-warn: var(--warning);
   --color-bad: var(--danger);
+
+  /* --- derived: the kit's semantics at chip and control strengths --------
+     These are NOT new colours and must never become any. Each is a mix of a
+     kit token with transparency, which is the strength `patterns.md` draws a
+     status chip's border and a danger button's hover at. They live here
+     rather than in the copied `tokens.css` because decision #139 forbids
+     editing that file: a value derived from the kit belongs to the product,
+     a value that changes the kit belongs upstream in `~/brand-kit`. */
+  --color-success-line: color-mix(in srgb, var(--success) 40%, transparent);
+  --color-warning-line: color-mix(in srgb, var(--warning) 40%, transparent);
+  --color-danger-line: color-mix(in srgb, var(--danger) 40%, transparent);
+  --color-info-line: color-mix(in srgb, var(--info) 40%, transparent);
+  --color-danger-soft: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+/* The loading state, verbatim from `~/brand-kit/patterns.md`. It is a class
+   rather than a utility because the shimmer needs a keyframe. The kit's global
+   `prefers-reduced-motion` block already stills it, so this adds no separate
+   opt-out that could drift from the rest of the system. */
+.skeleton {
+  background: var(--sidebar);
+  border-radius: var(--radius-md);
+  position: relative;
+  overflow: hidden;
+}
+
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, var(--hover), transparent);
+  animation: sentinel-shimmer 1.4s infinite;
+}
+
+@keyframes sentinel-shimmer {
+  to {
+    transform: translateX(100%);
+  }
 }
 
 /* The command center is a dashboard, which is the kit's *compact* density
@@ -57,6 +95,14 @@
 
 .sentinel-causal-flow .react-flow__attribution {
   background: var(--raised);
+  color: var(--muted);
+}
+
+/* React Flow ships its own colour on this link, and it fails AA on our light
+   page — the one accessibility defect on the command center that belongs to a
+   dependency's markup rather than ours. Restating the token here is cheaper and
+   more honest than adding an axe exception for it. */
+.sentinel-causal-flow .react-flow__attribution a {
   color: var(--muted);
 }
 

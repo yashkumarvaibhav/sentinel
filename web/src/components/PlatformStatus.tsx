@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 
 import { fetchHealth, fetchVersion } from '@/api/platform';
 import type { HealthReport, VersionInfo } from '@/api/platform';
+import { HonestyChip } from '@/ui/Chip';
+import { CircleCheck, CircleX } from '@/ui/icons';
 
 type Load<T> = { state: 'loading' } | { state: 'ok'; data: T } | { state: 'error'; error: string };
 
@@ -37,12 +39,27 @@ function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function Dot({ ready }: { ready: boolean }) {
+/**
+ * A component's readiness, as shape first and colour second.
+ *
+ * This was a coloured dot drawing on `--color-decomp-base` / `--color-residual`
+ * — the decomposition's own tokens. Those mean "this part of the surge was
+ * explained" and "this part was not"; they are deliberately theme-independent
+ * so a screenshot of a residual means one fixed thing, and spending them on
+ * platform health blurs a domain claim into a status readout. Health belongs to
+ * the semantic set, which is what `--success` and `--danger` are for.
+ */
+function ReadyMark({ ready }: { ready: boolean }) {
+  const Icon = ready ? CircleCheck : CircleX;
   return (
-    <span
-      className={`inline-block size-2 rounded-full ${ready ? 'bg-decomp-base' : 'bg-residual'}`}
-      aria-hidden="true"
-    />
+    <>
+      <Icon
+        aria-hidden="true"
+        className={`size-3.5 shrink-0 ${ready ? 'text-success' : 'text-danger'}`}
+        strokeWidth={2.25}
+      />
+      <span className="sr-only">{ready ? 'ready' : 'not ready'}</span>
+    </>
   );
 }
 
@@ -54,14 +71,14 @@ export function PlatformStatus() {
     <section className="bg-raised flex flex-col gap-4 rounded-xl p-5">
       <div className="flex items-baseline justify-between gap-4">
         <h2 className="eyebrow font-sans">Platform</h2>
-        <span className="text-muted text-[11px] tracking-wider uppercase">Real</span>
+        <HonestyChip kind="REAL" />
       </div>
 
       {health.state === 'loading' && <p className="text-muted text-sm">Checking…</p>}
 
       {health.state === 'error' && (
         <p className="text-sm">
-          <span className="text-residual">Gateway unreachable</span>
+          <span className="text-danger">Gateway unreachable</span>
           <span className="text-muted"> — {health.error}</span>
         </p>
       )}
@@ -76,8 +93,8 @@ export function PlatformStatus() {
           <ul className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
             {health.data.components.map((component) => (
               <li key={component.name} className="flex items-center gap-2">
-                <Dot ready={component.ready} />
-                <span className={component.ready ? '' : 'text-residual'}>{component.name}</span>
+                <ReadyMark ready={component.ready} />
+                <span className={component.ready ? '' : 'text-danger'}>{component.name}</span>
                 <span className="text-muted ml-auto tabular-nums">
                   {Math.round(component.latency_ms)} ms
                 </span>

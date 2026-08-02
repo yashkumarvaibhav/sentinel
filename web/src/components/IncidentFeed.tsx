@@ -8,6 +8,8 @@ import type {
   ObservationFreshness,
 } from '@/contracts/types';
 import { useSnapshotInvalidation } from '@/shell/useSnapshotStream';
+import { HonestyChip } from '@/ui/Chip';
+import { verdictIcon } from '@/ui/verdict';
 
 type Load =
   | { state: 'loading' }
@@ -34,6 +36,7 @@ function timeAgo(timestamp: string): string {
 
 function IncidentCard({ item }: { item: IncidentFeedItem }) {
   const verdict = item.verdict_class ?? 'UNCLASSIFIED';
+  const VerdictIcon = verdictIcon(verdict);
   return (
     <article
       aria-label={`${label(verdict)} incident ${item.incident_id}`}
@@ -42,12 +45,11 @@ function IncidentCard({ item }: { item: IncidentFeedItem }) {
       }`}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <strong className="bg-accent-soft text-accent rounded px-2 py-1 text-xs tracking-wide uppercase">
+        <strong className="bg-accent-soft text-accent-hover inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs tracking-wide uppercase">
+          <VerdictIcon aria-hidden="true" className="size-3.5 shrink-0" strokeWidth={2.25} />
           {label(verdict)}
         </strong>
-        <span className="border-line rounded border px-2 py-1 text-[10px] tracking-wider">
-          {item.honesty}
-        </span>
+        <HonestyChip kind={item.honesty} />
         <span className="text-muted text-xs">{label(item.severity)}</span>
         <span className="text-muted ml-auto text-xs">{timeAgo(item.updated_at)} UTC</span>
       </div>
