@@ -40,7 +40,10 @@ export interface DecompositionPanelProps {
  */
 export function DecompositionPanel({
   service = 'frontend',
-  signal = 'ingress.requests',
+  // What the platform actually stores. The panel asked for
+  // `ingress.requests` - the raw span signal the rate is derived FROM - and so
+  // read an empty window forever while the frames sat under `request_rate`.
+  signal = 'request_rate',
   className = '',
 }: DecompositionPanelProps) {
   const [load, setLoad] = useState<Load>({ state: 'loading' });

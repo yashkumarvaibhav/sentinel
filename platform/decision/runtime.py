@@ -48,7 +48,7 @@ from decision.config import (
     VerdictRulesConfig,
 )
 from decision.pipeline import DecisionPipeline, IncidentOutcome
-from detection.decompose import DecompositionEnvelope
+from detection.decompose import DecompositionEnvelope, DecompositionSink
 from detection.live import LiveDetectionProcessors
 
 LOGGER = logging.getLogger(__name__)
@@ -107,9 +107,18 @@ class LiveDecisionRuntime:
         changes: ChangeFeed | None = None,
         envelope: DecompositionEnvelope | None = None,
         planner: ActionPlanner | None = None,
+        frames: DecompositionSink | None = None,
     ) -> None:
         self._config = config
         self._publisher = publisher
+        # Every tick already computes its decomposition frames - the processors
+        # derive the rate streams, decompose them against the same context
+        # windows the judgement uses, and hand them back. Nothing ever wrote
+        # them down, so the chart the command centre leads with had no rows to
+        # draw on any path. Persisting here keeps the frame a reader inspects
+        # identical to the one the decision was taken against; computing them a
+        # second time somewhere else would not.
+        self._frames = frames
         self._checkpoints = checkpoints
         self._producer_id = producer_id
         # An honesty label is an operator statement about the world, not
@@ -188,6 +197,14 @@ class LiveDecisionRuntime:
             tick_ts=tick_ts,
             contexts=contexts,
         )
+        if self._frames is not None and measured.frames:
+            try:
+                await self._frames.write_decomp_frames(measured.frames)
+            except Exception:
+                # A frame that cannot be stored is a lost picture. An incident
+                # that goes unjudged because a chart's store was unreachable
+                # would be a lost decision, and those are not the same loss.
+                LOGGER.exception("decomposition frames could not be persisted")
         published: list[IncidentPublishResult] = []
         for moment, revisions in _by_event_time(measured.episodes):
             for outcome in self._judge(moment, revisions=revisions):

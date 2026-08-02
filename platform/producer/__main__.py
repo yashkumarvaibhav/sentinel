@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
+import httpx
 from aiokafka import AIOKafkaConsumer
 from aiokafka.structs import TopicPartition
 
@@ -24,7 +25,11 @@ from api.incidents import IncidentFeedPublisher
 from api.notify import PostgresInvalidationBroker
 from common.config import SentinelConfig, load_config
 from common.settings import settings
-from common.storage import PostgresRepository, create_postgres_pool
+from common.storage import (
+    ClickHouseRepository,
+    PostgresRepository,
+    create_postgres_pool,
+)
 from context.service import open_context_service
 from contracts import ActuatorKind
 from decision.config import (
@@ -144,7 +149,16 @@ async def run() -> None:
                 "live judgements will freeze an action plan; whether that plan reaches the "
                 "world is action.yml's dry_run, which this switch does not touch"
             )
-        async with open_context_service(calendar=snapshot.events, runtime=config) as contexts:
+        # The decomposition frames the command centre draws its hero chart
+        # from. Every tick already computed them and nothing wrote them down.
+        async with (
+            httpx.AsyncClient(
+                base_url=config.clickhouse_url,
+                auth=(config.clickhouse_user, config.clickhouse_password.get_secret_value()),
+                timeout=config.storage_timeout_seconds,
+            ) as clickhouse,
+            open_context_service(calendar=snapshot.events, runtime=config) as contexts,
+        ):
             runtime = LiveDecisionRuntime(
                 config=snapshot,
                 decisions=decisions,
@@ -155,6 +169,7 @@ async def run() -> None:
                 stimulus_honesty=config.live_producer_stimulus_honesty,
                 published_baseline=plan.published_baseline,
                 planner=planner,
+                frames=ClickHouseRepository(client=clickhouse, database=config.clickhouse_database),
             )
             service = LiveProducerService(
                 runtime=runtime,
