@@ -220,12 +220,12 @@ describe('TopBar', () => {
     });
   });
 
-  // The theme control stopped being a three-state cycle behind one button and
-  // became a menu (decision #142). The behaviour these assert is unchanged and
-  // still asserted in full - every preference is reachable, and `system` writes
-  // no attribute - but a cycle has no "pick dark directly", so the shape of the
-  // interaction moved with the control.
-  it('reaches every theme directly, without cycling past the others', async () => {
+  // The theme control is the house recipe's two-state icon toggle (decision
+  // #143 supersedes #142). The behaviour asserted is the same one the cycle and
+  // then the menu asserted: both explicit themes are reachable and the choice
+  // is what lands on the root element. What changed is that `system` is now
+  // where you START rather than a stop you can cycle back to.
+  it('offers the theme you are not in, and applies it', async () => {
     vi.stubGlobal('fetch', respond(READY));
     const user = userEvent.setup();
 
@@ -233,62 +233,31 @@ describe('TopBar', () => {
     act(() => FakeEventSource.instances[0]?.open());
     await screen.findByText('abc123d');
 
-    // `system` writes no attribute at all: a user who has never chosen should
-    // keep following their OS when it changes at sunset.
+    // Nothing stored yet, so the page is following the OS - which jsdom
+    // reports as light - and the control therefore offers dark.
     expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
+    const toDark = screen.getByRole('button', { name: 'Switch to dark theme' });
 
-    await user.click(screen.getByRole('button', { name: /theme/i }));
-    // One click from `system`, where the old cycle needed two.
-    await user.click(screen.getByRole('menuitemradio', { name: /dark/i }));
+    await user.click(toDark);
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
 
-    await user.click(screen.getByRole('button', { name: /theme/i }));
-    await user.click(screen.getByRole('menuitemradio', { name: /light/i }));
+    // Having applied dark, it must now offer light rather than re-offering dark.
+    await user.click(screen.getByRole('button', { name: 'Switch to light theme' }));
     expect(document.documentElement.getAttribute('data-theme')).toBe('light');
-
-    await user.click(screen.getByRole('button', { name: /theme/i }));
-    await user.click(screen.getByRole('menuitemradio', { name: /system/i }));
-    expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
   });
 
-  it('marks the theme it is currently on, so nothing has to be inferred', async () => {
+  it('names the action it offers, never the state it is in', async () => {
     vi.stubGlobal('fetch', respond(READY));
-    const user = userEvent.setup();
-
-    renderTopBar();
-    act(() => FakeEventSource.instances[0]?.open());
-    // Settle the build-stamp fetch before asserting, so its resolution does not
-    // land as an un-acted update after the test body has finished.
-    await screen.findByText('abc123d');
-
-    await user.click(screen.getByRole('button', { name: /theme/i }));
-
-    expect(screen.getByRole('menuitemradio', { name: /system/i })).toHaveAttribute(
-      'aria-checked',
-      'true',
-    );
-    expect(screen.getByRole('menuitemradio', { name: /dark/i })).toHaveAttribute(
-      'aria-checked',
-      'false',
-    );
-  });
-
-  it('closes the theme menu on Escape and returns focus to its trigger', async () => {
-    vi.stubGlobal('fetch', respond(READY));
-    const user = userEvent.setup();
 
     renderTopBar();
     act(() => FakeEventSource.instances[0]?.open());
     await screen.findByText('abc123d');
-    const trigger = screen.getByRole('button', { name: /theme/i });
 
-    await user.click(trigger);
-    expect(screen.getByRole('menu')).toBeInTheDocument();
-
-    await user.keyboard('{Escape}');
-
-    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
-    expect(trigger).toHaveFocus();
+    // The inversion this whole slice exists to fix: a control captioned with
+    // the state you are already in reads as the state you are about to get.
+    expect(screen.queryByRole('button', { name: /^Light$/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Dark$/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /switch to/i })).toBeInTheDocument();
   });
 
   it('shows both audiences at once and marks the selected one', async () => {

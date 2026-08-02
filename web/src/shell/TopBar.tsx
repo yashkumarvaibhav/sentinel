@@ -6,7 +6,8 @@ import { useAudience } from '@/shell/useAudience';
 import type { Audience } from '@/shell/useAudience';
 import { useLiveness } from '@/shell/useLiveness';
 import type { Liveness, LivenessState } from '@/shell/useLiveness';
-import { ThemeMenu } from '@/shell/ThemeMenu';
+import { ThemeToggle } from '@/shell/ThemeToggle';
+import { BrandMark } from '@/ui/BrandMark';
 import { Chip, type ChipTone } from '@/ui/Chip';
 import { SegmentedControl, type SegmentedOption } from '@/ui/SegmentedControl';
 import {
@@ -110,8 +111,18 @@ export function TopBar() {
   return (
     <header className="border-line bg-raised sticky top-0 z-10 border-b">
       <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 sm:px-6">
-        <a href="/command" className="text-base font-semibold tracking-tight">
-          Sentinel
+        {/* The wordmark lockup, at the proportions the other products in this
+            family ship: a 36px marked box, a 28px mark inside it, and the name
+            in Newsreader at weight 500. The kit calls this pairing the most
+            recognisable piece of the identity — Sentinel previously rendered
+            its name in the same sans as its buttons, with no mark at all. */}
+        <a href="/command" className="flex min-w-0 items-center gap-2.5">
+          <span className="border-line bg-raised flex size-9 shrink-0 items-center justify-center rounded-sm border">
+            <BrandMark className="size-7" />
+          </span>
+          <span className="text-ink truncate font-serif text-xl font-medium tracking-tight">
+            Sentinel
+          </span>
         </a>
 
         <ConnectionDot liveness={liveness} />
@@ -127,7 +138,7 @@ export function TopBar() {
             options={AUDIENCE_OPTIONS}
           />
 
-          <ThemeMenu />
+          <ThemeToggle />
 
           {version && (
             <code

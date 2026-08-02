@@ -24,12 +24,43 @@ function readStored(): ThemePreference {
  * The stylesheet reads the same absence — `:root:not([data-theme='light'])`
  * inside the dark media query — so the CSS and this hook agree by construction.
  */
+/** What the page is actually showing right now, with `system` resolved. */
+export type ResolvedTheme = 'light' | 'dark';
+
+function readSystem(): ResolvedTheme {
+  try {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  } catch {
+    return 'light';
+  }
+}
+
 export function useTheme(): {
   preference: ThemePreference;
+  resolved: ResolvedTheme;
   setPreference: (next: ThemePreference) => void;
+  toggle: () => void;
   cycle: () => void;
 } {
   const [preference, setPreferenceState] = useState<ThemePreference>(readStored);
+  const [system, setSystem] = useState<ResolvedTheme>(readSystem);
+
+  // While the preference is `system`, the OS flipping at sunset must move the
+  // page with it - and must also move the toggle's icon, or the control starts
+  // offering the theme you are already looking at.
+  useEffect(() => {
+    let query: MediaQueryList;
+    try {
+      query = window.matchMedia('(prefers-color-scheme: dark)');
+    } catch {
+      return;
+    }
+    const onChange = () => setSystem(query.matches ? 'dark' : 'light');
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
+
+  const resolved: ResolvedTheme = preference === 'system' ? system : preference;
 
   useEffect(() => {
     const root = document.documentElement;
@@ -53,11 +84,24 @@ export function useTheme(): {
     }
   }, []);
 
+  /**
+   * Flip to the opposite of what is on screen.
+   *
+   * Deliberately resolves `system` first rather than treating it as a third
+   * stop: a user who has never chosen sees the theme their OS picked, and the
+   * one thing they can want from a toggle is the other one. `system` therefore
+   * survives as the state you start in rather than one you cycle back to
+   * (BUILD_STATE decision #143, superseding #142).
+   */
+  const toggle = useCallback(() => {
+    setPreference(resolved === 'dark' ? 'light' : 'dark');
+  }, [resolved, setPreference]);
+
   const cycle = useCallback(() => {
     setPreference(
       preference === 'system' ? 'light' : preference === 'light' ? 'dark' : 'system',
     );
   }, [preference, setPreference]);
 
-  return { preference, setPreference, cycle };
+  return { preference, resolved, setPreference, toggle, cycle };
 }
