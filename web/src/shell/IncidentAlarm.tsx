@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 
+import { fetchScenarioActivity } from '@/api/activity';
 import { fetchIncidents } from '@/api/incidents';
 import type { IncidentFeedItem, ObservationFreshness } from '@/contracts/types';
 import { playHooter } from '@/shell/hooter';
@@ -9,7 +10,7 @@ import { useSound } from '@/shell/useSound';
 import { ShieldAlert, TriangleAlert } from '@/ui/icons';
 import { verdictIcon } from '@/ui/verdict';
 
-const INCIDENT_RESOURCES = ['incidents'] as const;
+const INCIDENT_RESOURCES = ['incidents', 'lab'] as const;
 
 /**
  * What is loud enough to interrupt someone.
@@ -47,6 +48,7 @@ function alarmSignature(item: IncidentFeedItem): string | null {
 
 type AlarmEvent =
   | { kind: 'incident'; incident: IncidentFeedItem }
+  | { kind: 'replay'; incident: IncidentFeedItem }
   | { kind: 'observation'; observation: ObservationFreshness };
 
 /**
@@ -61,28 +63,43 @@ export function IncidentAlarm() {
   const { enabled } = useSound();
   const [alarm, setAlarm] = useState<AlarmEvent | null>(null);
   const seen = useRef<Map<string, string | null> | null>(null);
+  const seenReplay = useRef<string | null | undefined>(undefined);
   const observation = useRef<ObservationFreshness['status'] | null>(null);
   const soundEnabled = useRef(enabled);
   soundEnabled.current = enabled;
 
   const check = useCallback((): Promise<void> => {
     const controller = new AbortController();
-    return fetchIncidents(controller.signal, 20)
-      .then((response) => {
+    return Promise.all([
+      fetchIncidents(controller.signal, 20),
+      fetchScenarioActivity(controller.signal),
+    ])
+      .then(([response, activity]) => {
         if (response.status !== 'ready') return;
         const alarming = response.incidents.filter(isAlarming);
         const conclusions = new Map(
           response.incidents.map((item) => [item.incident_id, alarmSignature(item)]),
         );
+        const replayIncident = activity.in_flight ? (activity.replay_incident ?? null) : null;
+        const replayConclusion = replayIncident === null ? null : alarmSignature(replayIncident);
+        const replaySignature =
+          activity.run_id === null || replayConclusion === null
+            ? null
+            : `${activity.run_id}:${replayIncident?.incident_id}:${replayConclusion}`;
 
         if (seen.current === null) {
           // First read of the session: remember, do not announce.
           seen.current = conclusions;
+          seenReplay.current = replaySignature;
           observation.current = response.observation.status;
           // Historical incidents stay silent, but a producer that is not
           // watching *now* is current platform state and must remain visible.
           if (response.observation.status !== 'WATCHING') {
             setAlarm({ kind: 'observation', observation: response.observation });
+          } else if (replayIncident !== null && replaySignature !== null) {
+            // Unlike an old incident row, this is current run state. Keep it
+            // visible after a refresh, but do not claim a fresh audio edge.
+            setAlarm({ kind: 'replay', incident: replayIncident });
           }
           return;
         }
@@ -95,6 +112,20 @@ export function IncidentAlarm() {
         ) {
           setAlarm({ kind: 'observation', observation: response.observation });
           if (soundEnabled.current) playHooter();
+        }
+
+        const freshReplay =
+          replayIncident !== null &&
+          replaySignature !== null &&
+          replaySignature !== seenReplay.current;
+        // Once reached, a transient projection-read failure must not re-arm
+        // the same run on the next poll. A future run has a different run id
+        // in its signature and will still alarm exactly once.
+        if (replaySignature !== null) seenReplay.current = replaySignature;
+        if (freshReplay) {
+          setAlarm({ kind: 'replay', incident: replayIncident });
+          if (soundEnabled.current) playHooter();
+          return;
         }
 
         const fresh = alarming.find(
@@ -126,7 +157,8 @@ export function IncidentAlarm() {
 
   if (alarm === null) return null;
 
-  const incident = alarm.kind === 'incident' ? alarm.incident : null;
+  const incident = alarm.kind === 'observation' ? null : alarm.incident;
+  const replayed = alarm.kind === 'replay';
   const staleObservation = alarm.kind === 'observation' ? alarm.observation : null;
   const verdict = incident?.verdict_class ?? 'UNCLASSIFIED';
   const VerdictIcon = verdict === 'ATTACK' ? ShieldAlert : verdictIcon(verdict);
@@ -160,6 +192,7 @@ export function IncidentAlarm() {
               className="mr-1.5 inline size-4"
               strokeWidth={2.25}
             />
+            {replayed && 'Replay reached '}
             {incident.verdict_class === null
               ? 'Unclassified incident'
               : incident.verdict_class.replaceAll('_', ' ').toLowerCase()}

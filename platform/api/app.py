@@ -8,6 +8,7 @@ healthy.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
@@ -74,6 +75,7 @@ from api.lab import (
     lab_runner_readiness,
     parse_lab_control_request,
     parse_lab_request,
+    replay_incident_source,
     scenario_activity,
     unavailable_lab_feed,
 )
@@ -102,6 +104,7 @@ from contracts import (
     ActionControlResponse,
     CausalGraphResponse,
     IncidentDetailResponse,
+    IncidentFeedItem,
     IncidentFeedResponse,
     KpiResponse,
     LabRunFeed,
@@ -652,7 +655,24 @@ def create_app(
         except Exception:
             LOGGER.exception("scenario activity read failed")
             return ScenarioActivity(in_flight=False, note="The lab run queue could not be read.")
-        return scenario_activity(runs)
+        activity = scenario_activity(runs)
+        incident_id = replay_incident_source(runs, activity=activity)
+        reader: IncidentFeedReader | None = getattr(app.state, "incident_reader", None)
+        if incident_id is None or reader is None or activity.evidence_cursor_at is None:
+            return activity
+        try:
+            record = await reader.get_incident(incident_id)
+            if record is None:
+                return activity
+            incident = IncidentFeedItem.model_validate_json(json.dumps(record.payload))
+            if incident.updated_at <= activity.evidence_cursor_at:
+                return activity.model_copy(update={"replay_incident": incident})
+        except Exception:
+            # The activity clock remains useful if its optional replay alarm
+            # projection cannot be read. The incident endpoint owns the louder
+            # store-health error for the same public record.
+            LOGGER.exception("replay incident projection read failed")
+        return activity
 
     @app.get("/api/lab/runs", tags=["lab"], response_model=LabRunFeed)
     async def lab_runs(response: Response) -> LabRunFeed:

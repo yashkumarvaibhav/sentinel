@@ -1,3 +1,5 @@
+import type { IncidentFeedItem } from '@/contracts/types';
+
 export interface ScenarioActivity {
   in_flight: boolean;
   run_id: string | null;
@@ -9,6 +11,7 @@ export interface ScenarioActivity {
   evidence_end_at: string | null;
   evidence_cursor_at: string | null;
   progress: number | null;
+  replay_incident: IncidentFeedItem | null;
   note: string;
 }
 

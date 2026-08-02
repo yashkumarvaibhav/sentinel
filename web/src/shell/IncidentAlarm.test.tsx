@@ -2,6 +2,8 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { ScenarioActivity } from '@/api/activity';
+import type { IncidentFeedItem } from '@/contracts/types';
 import { IncidentAlarm } from '@/shell/IncidentAlarm';
 import { SnapshotStreamProvider } from '@/shell/SnapshotStream';
 
@@ -46,7 +48,7 @@ class FakeEventSource {
   }
 }
 
-function incident(id: string, over: Record<string, unknown> = {}) {
+function incident(id: string, over: Record<string, unknown> = {}): IncidentFeedItem {
   return {
     incident_id: id,
     opened_at: '2026-08-02T02:58:00Z',
@@ -85,6 +87,20 @@ function snapshot(incidents: ReturnType<typeof incident>[]) {
 }
 
 let body = snapshot([incident('incident-1')]);
+let activityBody: ScenarioActivity = {
+  in_flight: false,
+  run_id: null,
+  scenario_id: null,
+  mode: null,
+  state: null,
+  started_at: null,
+  evidence_start_at: null,
+  evidence_end_at: null,
+  evidence_cursor_at: null,
+  progress: null,
+  replay_incident: null,
+  note: 'No scenario is running.',
+};
 
 beforeEach(() => {
   FakeEventSource.instances = [];
@@ -92,9 +108,14 @@ beforeEach(() => {
   window.localStorage.clear();
   window.localStorage.setItem('sentinel.sound', 'on');
   playHooter.mockClear();
+  activityBody = { ...activityBody, in_flight: false, run_id: null, replay_incident: null };
   vi.stubGlobal(
     'fetch',
-    vi.fn(() => Promise.resolve(new Response(JSON.stringify(body), { status: 200 }))),
+    vi.fn((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      const responseBody = url.includes('/api/activity') ? activityBody : body;
+      return Promise.resolve(new Response(JSON.stringify(responseBody), { status: 200 }));
+    }),
   );
 });
 
@@ -150,7 +171,7 @@ describe('IncidentAlarm', () => {
 
     // An alarm that fires for everything teaches an operator to ignore alarms,
     // which costs more than the alarm was worth.
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(4));
     expect(playHooter).not.toHaveBeenCalled();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
@@ -215,7 +236,7 @@ describe('IncidentAlarm', () => {
     body = snapshot([incident('incident-1', { updated_at: '2026-08-02T03:00:10Z' })]);
     act(() => FakeEventSource.instances[0]?.emit());
 
-    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(4));
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(playHooter).not.toHaveBeenCalled();
   });
@@ -255,6 +276,31 @@ describe('IncidentAlarm', () => {
     act(() => FakeEventSource.instances[0]?.emit());
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/live judgement stopped/i));
+    expect(playHooter).toHaveBeenCalledTimes(1);
+  });
+
+  it('sounds once when a new replay run crosses a verified attack conclusion', async () => {
+    body = snapshot([incident('incident-1')]);
+    activityBody = {
+      ...activityBody,
+      in_flight: true,
+      run_id: 'run-replay-1',
+      scenario_id: 'combo_night',
+      mode: 'REPLAY',
+      state: 'RUNNING',
+      replay_incident: null,
+    };
+    renderAlarm();
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+
+    activityBody = { ...activityBody, replay_incident: incident('incident-1') };
+    act(() => FakeEventSource.instances[0]?.emit());
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/replay reached attack/i));
+    expect(playHooter).toHaveBeenCalledTimes(1);
+
+    act(() => FakeEventSource.instances[0]?.emit());
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(6));
     expect(playHooter).toHaveBeenCalledTimes(1);
   });
 

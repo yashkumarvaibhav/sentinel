@@ -53,6 +53,8 @@ DEFAULT_OBSERVATION_INTERVAL_SECONDS = 120.0
 class IncidentFeedReader(Protocol):
     """The bounded runtime-store read used by the gateway."""
 
+    async def get_incident(self, incident_id: str) -> IncidentRecord | None: ...
+
     async def list_incidents(self, *, limit: int) -> tuple[IncidentRecord, ...]: ...
 
     async def get_live_producer_checkpoint(

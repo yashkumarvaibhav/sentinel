@@ -24,9 +24,11 @@ from api.lab import (
     lab_run_feed,
     parse_lab_control_request,
     parse_lab_request,
+    replay_incident_source,
     scenario_activity,
 )
 from common.settings import Settings
+from common.storage import IncidentRecord, LiveProducerCheckpoint
 from contracts import (
     LabRunControl,
     LabRunControlRequest,
@@ -81,7 +83,28 @@ class _Queue:
         return None
 
 
-def _client(*, queue: _Queue | None = None, runner: bool = True) -> TestClient:
+class _IncidentReader:
+    def __init__(self, record: IncidentRecord) -> None:
+        self.record = record
+
+    async def get_incident(self, incident_id: str) -> IncidentRecord | None:
+        return self.record if self.record.incident_id == incident_id else None
+
+    async def list_incidents(self, *, limit: int) -> tuple[IncidentRecord, ...]:
+        del limit
+        return (self.record,)
+
+    async def get_live_producer_checkpoint(self, producer_id: str) -> LiveProducerCheckpoint | None:
+        del producer_id
+        return None
+
+
+def _client(
+    *,
+    queue: _Queue | None = None,
+    runner: bool = True,
+    incident_reader: _IncidentReader | None = None,
+) -> TestClient:
     settings = Settings().model_copy(
         update={"config_dir": REPO_ROOT / "config", "lab_runner_attached": runner}
     )
@@ -97,6 +120,7 @@ def _client(*, queue: _Queue | None = None, runner: bool = True) -> TestClient:
         settings,
         probes={},
         lab_run_store=store,
+        incident_reader=incident_reader,
     )
     return TestClient(app)
 
@@ -474,6 +498,124 @@ def test_activity_keeps_the_latest_completed_replay_window_visible() -> None:
     assert activity.progress == 1.0
 
 
+def test_an_identical_verified_replay_can_stage_its_incident_at_event_time() -> None:
+    """A rerun is new operator activity even though incident identity is stable."""
+    end = TS + timedelta(minutes=10)
+    verified = build_lab_run(
+        LabScenarioRequest(scenario_id="combo_night", mode=LabRunMode.REPLAY), ts=TS
+    ).model_copy(
+        update={
+            "state": LabRunState.SUCCEEDED,
+            "started_at": TS,
+            "finished_at": end,
+            "incident_id": "verified-attack",
+            "evidence_start_at": TS,
+            "evidence_end_at": end,
+            "evidence_cursor_at": end,
+            "progress": 1.0,
+        }
+    )
+    requested = datetime.now(UTC)
+    running = build_lab_run(
+        LabScenarioRequest(scenario_id="combo_night", mode=LabRunMode.REPLAY), ts=requested
+    ).model_copy(
+        update={
+            "state": LabRunState.RUNNING,
+            "started_at": requested,
+            "evidence_start_at": TS,
+            "evidence_end_at": end,
+            "evidence_cursor_at": TS + timedelta(minutes=4),
+            "progress": 0.4,
+        }
+    )
+    activity = scenario_activity((running, verified), now=requested)
+
+    assert replay_incident_source((running, verified), activity=activity) == "verified-attack"
+
+    different_capture = verified.model_copy(
+        update={
+            "evidence_start_at": TS - timedelta(days=1),
+            "evidence_end_at": end - timedelta(days=1),
+            "evidence_cursor_at": end - timedelta(days=1),
+        }
+    )
+    assert replay_incident_source((running, different_capture), activity=activity) is None
+
+
+def test_activity_reveals_the_verified_incident_only_when_replay_reaches_it() -> None:
+    end = TS + timedelta(minutes=10)
+    alert_at = TS + timedelta(minutes=4)
+    verified = build_lab_run(
+        LabScenarioRequest(scenario_id="combo_night", mode=LabRunMode.REPLAY), ts=TS
+    ).model_copy(
+        update={
+            "state": LabRunState.SUCCEEDED,
+            "started_at": TS,
+            "finished_at": end,
+            "incident_id": "verified-attack",
+            "evidence_start_at": TS,
+            "evidence_end_at": end,
+            "evidence_cursor_at": end,
+            "progress": 1.0,
+        }
+    )
+    requested = datetime.now(UTC)
+    running = build_lab_run(
+        LabScenarioRequest(scenario_id="combo_night", mode=LabRunMode.REPLAY), ts=requested
+    ).model_copy(
+        update={
+            "state": LabRunState.RUNNING,
+            "started_at": requested,
+            "evidence_start_at": TS,
+            "evidence_end_at": end,
+            "evidence_cursor_at": alert_at - timedelta(seconds=1),
+            "progress": 0.39,
+        }
+    )
+    queue = _Queue([running, verified])
+    record = IncidentRecord(
+        incident_id="verified-attack",
+        state="OPEN",
+        created_at=TS + timedelta(minutes=1),
+        updated_at=alert_at,
+        payload={
+            "incident_id": "verified-attack",
+            "opened_at": (TS + timedelta(minutes=1)).isoformat(),
+            "updated_at": alert_at.isoformat(),
+            "state": "OPEN",
+            "severity": "LOW",
+            "services": ["frontend"],
+            "origin_service": "frontend",
+            "verdict_class": "ATTACK",
+            "reason": "Recorded evidence confirms hostile behavior.",
+            "evidence": [],
+            "action": {
+                "decision_action": "AUTO_CONTAIN_THEN_ESCALATE",
+                "effect_status": None,
+                "detail": "Containment authorized and escalation requested.",
+            },
+            "confidence": {
+                "status": "insufficient",
+                "value": None,
+                "note": "Runtime confidence is not calibrated.",
+            },
+            "muted": False,
+            "explanation": None,
+            "honesty": "REAL",
+        },
+    )
+
+    with _client(queue=queue, incident_reader=_IncidentReader(record)) as client:
+        assert client.get("/api/activity").json()["replay_incident"] is None
+        queue.runs[0] = running.model_copy(
+            update={"evidence_cursor_at": alert_at + timedelta(seconds=1), "progress": 0.41}
+        )
+        reached = client.get("/api/activity").json()["replay_incident"]
+
+    assert reached["incident_id"] == "verified-attack"
+    assert reached["verdict_class"] == "ATTACK"
+
+
 def test_activity_says_nothing_is_running_when_nothing_is() -> None:
     assert not scenario_activity(()).in_flight
 
@@ -507,5 +649,6 @@ def test_activity_never_leaks_the_scenario_catalogue() -> None:
         "evidence_end_at",
         "evidence_cursor_at",
         "progress",
+        "replay_incident",
         "note",
     }

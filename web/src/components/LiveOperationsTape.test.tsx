@@ -26,6 +26,7 @@ const ACTIVITY = {
   evidence_end_at: null,
   evidence_cursor_at: null,
   progress: 0.42,
+  replay_incident: null,
   note: 'Driving the testbed.',
 };
 

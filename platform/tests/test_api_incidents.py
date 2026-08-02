@@ -80,6 +80,9 @@ class _Reader:
         self.limits.append(limit)
         return self.records[:limit]
 
+    async def get_incident(self, incident_id: str) -> IncidentRecord | None:
+        return next((record for record in self.records if record.incident_id == incident_id), None)
+
     async def get_live_producer_checkpoint(self, producer_id: str) -> LiveProducerCheckpoint | None:
         return self.checkpoint
 

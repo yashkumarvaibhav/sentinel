@@ -22,6 +22,7 @@ from typing import Protocol
 from pydantic import BaseModel, ValidationError
 
 from contracts import (
+    IncidentFeedItem,
     LabRunControl,
     LabRunControlRequest,
     LabRunFeed,
@@ -221,7 +222,47 @@ class ScenarioActivity(BaseModel):
     evidence_end_at: datetime | None = None
     evidence_cursor_at: datetime | None = None
     progress: float | None = None
+    # Stable incident identity is intentionally reused across exact replays.
+    # This is the verified public incident whose decision time the current run
+    # has crossed, so the console can announce the run-scoped event without
+    # cloning or retimestamping the durable incident.
+    replay_incident: IncidentFeedItem | None = None
     note: str
+
+
+def replay_incident_source(
+    runs: tuple[LabRunSnapshot, ...],
+    *,
+    activity: ScenarioActivity,
+) -> str | None:
+    """Find a verified identical replay whose incident can stage this run.
+
+    Capture bounds are the identity check. A prior result from another capture
+    or scenario is not a preview of this one, and the first replay after a new
+    capture therefore stays unannounced until it verifies that capture.
+    """
+    if (
+        not activity.in_flight
+        or activity.mode != LabRunMode.REPLAY.value
+        or activity.run_id is None
+        or activity.scenario_id is None
+        or activity.evidence_start_at is None
+        or activity.evidence_end_at is None
+    ):
+        return None
+    for run in runs:
+        if run.run_id == activity.run_id:
+            continue
+        if (
+            run.mode is LabRunMode.REPLAY
+            and run.state is LabRunState.SUCCEEDED
+            and run.scenario_id == activity.scenario_id
+            and run.incident_id is not None
+            and run.evidence_start_at == activity.evidence_start_at
+            and run.evidence_end_at == activity.evidence_end_at
+        ):
+            return run.incident_id
+    return None
 
 
 def scenario_activity(

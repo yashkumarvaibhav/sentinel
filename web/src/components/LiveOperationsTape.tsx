@@ -148,6 +148,7 @@ export function LiveOperationsTape() {
     (left, right) => right.latency_ms - left.latency_ms,
   )[0];
   const activity = snapshot.activity;
+  const replayIncident = activity.in_flight ? (activity.replay_incident ?? null) : null;
   const progress = activity.progress === null ? null : Math.round(activity.progress * 100);
   const stale = snapshot.incidents.observation.status !== 'WATCHING';
 
@@ -169,6 +170,22 @@ export function LiveOperationsTape() {
           }
           tone={activity.in_flight ? 'active' : 'normal'}
         />
+        {activity.in_flight && activity.mode === 'REPLAY' && (
+          <TapeCell
+            label="Replay conclusion"
+            value={
+              replayIncident?.verdict_class === null || replayIncident === null
+                ? 'Pending'
+                : replayIncident.verdict_class.replaceAll('_', ' ').toLowerCase()
+            }
+            detail={
+              replayIncident === null
+                ? 'No actionable conclusion at this evidence time'
+                : `${replayIncident.origin_service ?? 'unknown origin'} · ${replayIncident.action.decision_action.toLowerCase().replaceAll('_', ' ')}`
+            }
+            tone={replayIncident === null ? 'normal' : 'warning'}
+          />
+        )}
         <TapeCell
           label="Active incidents"
           value={active.length.toLocaleString()}
