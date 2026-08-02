@@ -3,23 +3,27 @@ import { useEffect, useState } from 'react';
 import { fetchVersion } from '@/api/platform';
 import type { VersionInfo } from '@/api/platform';
 import { useAudience } from '@/shell/useAudience';
+import type { Audience } from '@/shell/useAudience';
 import { useLiveness } from '@/shell/useLiveness';
 import type { Liveness, LivenessState } from '@/shell/useLiveness';
-import { useTheme } from '@/shell/useTheme';
-import { Button } from '@/ui/Button';
+import { ThemeMenu } from '@/shell/ThemeMenu';
 import { Chip, type ChipTone } from '@/ui/Chip';
+import { SegmentedControl, type SegmentedOption } from '@/ui/SegmentedControl';
 import {
   Activity,
   Briefcase,
   LoaderCircle,
-  Monitor,
-  Moon,
-  Sun,
   Terminal,
   TriangleAlert,
   WifiOff,
   type LucideIcon,
 } from '@/ui/icons';
+
+/** Named once so the control and its screen-reader wording cannot drift apart. */
+const AUDIENCE_OPTIONS: SegmentedOption<Audience>[] = [
+  { value: 'exec', label: 'Exec', icon: Briefcase, description: 'Exec view: plain language, decision-critical only' },
+  { value: 'technical', label: 'Technical', icon: Terminal, description: 'Technical view: scores, evidence and residuals' },
+];
 
 /**
  * Each connection state is a tone *and* an icon *and* the word itself. The
@@ -101,8 +105,7 @@ function useBuildStamp(): VersionInfo | null {
 export function TopBar() {
   const liveness = useLiveness();
   const version = useBuildStamp();
-  const { audience, toggle: toggleAudience } = useAudience();
-  const { preference, cycle: cycleTheme } = useTheme();
+  const { audience, setAudience } = useAudience();
 
   return (
     <header className="border-line bg-raised sticky top-0 z-10 border-b">
@@ -113,27 +116,18 @@ export function TopBar() {
 
         <ConnectionDot liveness={liveness} />
 
-        <div className="ml-auto flex items-center gap-2">
-          {/* Both controls still report the state they are IN rather than the
-              action they offer — the inversion the house patterns warn about.
-              That is 6.11c's slice; this one only puts them on the shared
-              control vocabulary, so the fix lands in one place rather than in
-              two more ad-hoc class strings. */}
-          <Button
-            onClick={toggleAudience}
-            aria-pressed={audience === 'exec'}
-            icon={audience === 'exec' ? Briefcase : Terminal}
-          >
-            {audience === 'exec' ? 'Exec' : 'Technical'}
-          </Button>
+        <div className="ml-auto flex items-center gap-3">
+          {/* Both options visible, the current one marked, and the group named.
+              A single button captioned with the audience you are already in
+              reads as "click for this", which is the opposite of what it did. */}
+          <SegmentedControl
+            label="View"
+            value={audience}
+            onChange={setAudience}
+            options={AUDIENCE_OPTIONS}
+          />
 
-          <Button
-            onClick={cycleTheme}
-            aria-label={`Theme: ${preference}. Activate to change.`}
-            icon={preference === 'system' ? Monitor : preference === 'light' ? Sun : Moon}
-          >
-            {preference === 'system' ? 'Auto' : preference === 'light' ? 'Light' : 'Dark'}
-          </Button>
+          <ThemeMenu />
 
           {version && (
             <code

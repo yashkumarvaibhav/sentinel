@@ -220,40 +220,111 @@ describe('TopBar', () => {
     });
   });
 
-  it('cycles the theme through system, light and dark', async () => {
+  // The theme control stopped being a three-state cycle behind one button and
+  // became a menu (decision #142). The behaviour these assert is unchanged and
+  // still asserted in full - every preference is reachable, and `system` writes
+  // no attribute - but a cycle has no "pick dark directly", so the shape of the
+  // interaction moved with the control.
+  it('reaches every theme directly, without cycling past the others', async () => {
     vi.stubGlobal('fetch', respond(READY));
     const user = userEvent.setup();
 
     renderTopBar();
     act(() => FakeEventSource.instances[0]?.open());
-    const toggle = screen.getByRole('button', { name: /theme/i });
+    await screen.findByText('abc123d');
 
     // `system` writes no attribute at all: a user who has never chosen should
     // keep following their OS when it changes at sunset.
     expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
 
-    await user.click(toggle);
-    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
-
-    await user.click(toggle);
+    await user.click(screen.getByRole('button', { name: /theme/i }));
+    // One click from `system`, where the old cycle needed two.
+    await user.click(screen.getByRole('menuitemradio', { name: /dark/i }));
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
 
-    await user.click(toggle);
+    await user.click(screen.getByRole('button', { name: /theme/i }));
+    await user.click(screen.getByRole('menuitemradio', { name: /light/i }));
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+
+    await user.click(screen.getByRole('button', { name: /theme/i }));
+    await user.click(screen.getByRole('menuitemradio', { name: /system/i }));
     expect(document.documentElement.hasAttribute('data-theme')).toBe(false);
   });
 
-  it('toggles the audience and says which one is pressed', async () => {
+  it('marks the theme it is currently on, so nothing has to be inferred', async () => {
     vi.stubGlobal('fetch', respond(READY));
     const user = userEvent.setup();
 
     renderTopBar();
     act(() => FakeEventSource.instances[0]?.open());
-    const toggle = screen.getByRole('button', { name: 'Technical' });
-    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    // Settle the build-stamp fetch before asserting, so its resolution does not
+    // land as an un-acted update after the test body has finished.
+    await screen.findByText('abc123d');
 
-    await user.click(toggle);
+    await user.click(screen.getByRole('button', { name: /theme/i }));
 
-    const pressed = screen.getByRole('button', { name: 'Exec' });
-    expect(pressed).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('menuitemradio', { name: /system/i })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    expect(screen.getByRole('menuitemradio', { name: /dark/i })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+  });
+
+  it('closes the theme menu on Escape and returns focus to its trigger', async () => {
+    vi.stubGlobal('fetch', respond(READY));
+    const user = userEvent.setup();
+
+    renderTopBar();
+    act(() => FakeEventSource.instances[0]?.open());
+    await screen.findByText('abc123d');
+    const trigger = screen.getByRole('button', { name: /theme/i });
+
+    await user.click(trigger);
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it('shows both audiences at once and marks the selected one', async () => {
+    vi.stubGlobal('fetch', respond(READY));
+    const user = userEvent.setup();
+
+    renderTopBar();
+    act(() => FakeEventSource.instances[0]?.open());
+    await screen.findByText('abc123d');
+
+    // Both options are on screen, which is the whole point: a single button
+    // captioned with the audience you are already in reads as "click for this".
+    const technical = screen.getByRole('radio', { name: /technical view/i });
+    const exec = screen.getByRole('radio', { name: /exec view/i });
+    expect(technical).toHaveAttribute('aria-checked', 'true');
+    expect(exec).toHaveAttribute('aria-checked', 'false');
+
+    await user.click(exec);
+
+    expect(screen.getByRole('radio', { name: /exec view/i })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    expect(screen.getByRole('radio', { name: /technical view/i })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+  });
+
+  it('names the audience group, because two jargon words alone are not a label', async () => {
+    vi.stubGlobal('fetch', respond(READY));
+
+    renderTopBar();
+    act(() => FakeEventSource.instances[0]?.open());
+    await screen.findByText('abc123d');
+
+    expect(screen.getByRole('radiogroup', { name: 'View' })).toBeInTheDocument();
   });
 });
