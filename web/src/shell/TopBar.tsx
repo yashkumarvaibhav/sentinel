@@ -1,17 +1,16 @@
 import { useEffect, useState, type RefObject } from 'react';
-import { Link } from 'react-router';
 
 import { fetchVersion } from '@/api/platform';
 import type { VersionInfo } from '@/api/platform';
 import { useLiveness } from '@/shell/useLiveness';
 import type { Liveness, LivenessState } from '@/shell/useLiveness';
+import { FireScenarioDialog } from '@/shell/FireScenarioDialog';
 import { SearchPalette } from '@/shell/SearchPalette';
 import { SoundToggle } from '@/shell/SoundToggle';
 import { ThemeToggle } from '@/shell/ThemeToggle';
 import { BrandMark } from '@/ui/BrandMark';
-import { BUTTON_BASE, BUTTON_VARIANT } from '@/ui/buttonStyles';
 import { Chip, type ChipTone } from '@/ui/Chip';
-import { Activity, LoaderCircle, TriangleAlert, WifiOff, Zap, type LucideIcon } from '@/ui/icons';
+import { Activity, LoaderCircle, TriangleAlert, WifiOff, type LucideIcon } from '@/ui/icons';
 
 /**
  * Each connection state is a tone *and* an icon *and* the word itself. The
@@ -147,13 +146,10 @@ export function TopBar({
         <div className="ml-auto flex items-center gap-2 sm:gap-3">
           {/* The one teal-filled control on the screen. Teal means "you can
               act here", and until now the product's own signal for that was
-              entirely unused — every control was a ghost button. Firing a
-              scenario is the action this console is for. */}
-          <Link to="/demo" className={`${BUTTON_BASE} ${BUTTON_VARIANT.primary} shrink-0`}>
-            <Zap aria-hidden="true" className="size-4 shrink-0" strokeWidth={2} />
-            <span className="hidden sm:inline">Fire a scenario</span>
-            <span className="sm:hidden">Fire</span>
-          </Link>
+              entirely unused — every control was a ghost button. It opens the
+              launcher in place rather than navigating away from the screen the
+              scenario is meant to be watched on. */}
+          <FireScenarioDialog />
 
           <SoundToggle />
 

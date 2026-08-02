@@ -197,8 +197,10 @@ export function DemoLauncher() {
   return (
     <section aria-labelledby="demo-heading" className="space-y-6">
       <header>
-        <h2 className="text-ink text-lg font-semibold" id="demo-heading">
-          Demo launcher
+        {/* The route supplies the `h1`; repeating it here printed the name
+            twice under itself. What this header is actually for is the note. */}
+        <h2 className="sr-only" id="demo-heading">
+          Scenarios
         </h2>
         <p
           aria-live="polite"

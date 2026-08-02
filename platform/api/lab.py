@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from pydantic import ValidationError
@@ -34,6 +34,54 @@ from contracts import (
 
 # How many past runs the launcher shows. A demo surface is a short history.
 MAX_LAB_RUNS = 20
+
+# How long a run may sit in a non-terminal state before the launcher stops
+# treating it as in flight.
+#
+# The lease exists so two scenarios cannot inject faults into one stretch of
+# telemetry (decision #135). But a QUEUED row only becomes RUNNING when a
+# runner claims it, and nothing obliges a runner to exist - stop the
+# ``demo`` profile, or let it die mid-run, and the row stays non-terminal
+# forever. The launcher then reports "already running" about a run that is
+# not running, and refuses every future scenario on the strength of it.
+#
+# That is worse than a stuck button: it is the surface stating something
+# untrue about the platform's own state, which is the one thing this project
+# does not do. So a run past these bounds is reported as ABANDONED - named,
+# with its age - and stops holding the lease.
+#
+# The bounds are generous on purpose. A replay of the longest committed
+# scenario runs in minutes, and a live run takes the wall-clock time its
+# profile states; being slow must never be mistaken for being dead.
+UNCLAIMED_AFTER = timedelta(minutes=15)
+RUNNING_AFTER = timedelta(hours=2)
+
+
+def _abandoned(run: LabRunSnapshot, *, now: datetime) -> bool:
+    """Whether a non-terminal run has aged out of being believable."""
+    if run.state is LabRunState.QUEUED:
+        bound = UNCLAIMED_AFTER
+    elif run.state is LabRunState.RUNNING:
+        bound = RUNNING_AFTER
+    else:
+        return False
+    requested = run.requested_at
+    if requested.tzinfo is None:
+        requested = requested.replace(tzinfo=UTC)
+    return now - requested > bound
+
+
+def _describe_age(delta: timedelta) -> str:
+    """A coarse age. The exact seconds do not change what an operator does."""
+    hours = int(delta.total_seconds() // 3600)
+    if hours >= 24:
+        days = hours // 24
+        return f"{days} day{'s' if days != 1 else ''}"
+    if hours >= 1:
+        return f"{hours} hour{'s' if hours != 1 else ''}"
+    minutes = max(int(delta.total_seconds() // 60), 1)
+    return f"{minutes} minute{'s' if minutes != 1 else ''}"
+
 
 REPLAY_HONESTY = LabRunHonesty(
     telemetry="REAL — recorded from the testbed, replayed byte for byte.",
@@ -138,9 +186,44 @@ def lab_run_feed(
     runs: tuple[LabRunSnapshot, ...],
     *,
     runner_attached: bool,
+    now: datetime | None = None,
 ) -> LabRunFeed:
     """The launcher's whole view, including why it may not be usable."""
-    in_flight = [run for run in runs if run.state in {LabRunState.QUEUED, LabRunState.RUNNING}]
+    moment = now if now is not None else datetime.now(UTC)
+    non_terminal = [run for run in runs if run.state in {LabRunState.QUEUED, LabRunState.RUNNING}]
+    abandoned = [run for run in non_terminal if _abandoned(run, now=moment)]
+    in_flight = [run for run in non_terminal if run not in abandoned]
+
+    if abandoned and not in_flight and runner_attached:
+        stalest = min(
+            abandoned,
+            key=lambda run: (
+                run.requested_at.replace(tzinfo=UTC)
+                if run.requested_at.tzinfo is None
+                else run.requested_at
+            ),
+        )
+        requested = stalest.requested_at
+        if requested.tzinfo is None:
+            requested = requested.replace(tzinfo=UTC)
+        age = _describe_age(moment - requested)
+        verb = (
+            "was never claimed by a runner"
+            if stalest.state is LabRunState.QUEUED
+            else "stopped reporting"
+        )
+        return LabRunFeed(
+            status=LabRunFeedStatus.READY,
+            scenarios=SCENARIOS,
+            runs=runs,
+            runner_attached=runner_attached,
+            note=(
+                f"{stalest.scenario_id} {verb} and has been {stalest.state.value.lower()} "
+                f"for {age}, so it is treated as abandoned rather than running. "
+                "Firing a scenario is safe; its telemetry was never produced."
+            ),
+        )
+
     if not runner_attached:
         status = LabRunFeedStatus.UNAVAILABLE
         note = (

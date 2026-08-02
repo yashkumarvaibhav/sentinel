@@ -166,9 +166,9 @@ export function SearchPalette() {
             role="dialog"
             aria-modal="true"
             aria-label="Search the console"
-            className="border-line bg-raised shadow-lg relative flex w-full max-w-xl flex-col overflow-hidden rounded-lg border"
+            className="border-line bg-raised shadow-lg relative flex w-full max-w-xl flex-col rounded-lg border"
           >
-            <div className="border-line flex items-center gap-2 border-b px-3">
+            <div className="border-line flex items-center gap-2 border-b px-3 py-1">
               <Search aria-hidden="true" className="text-faint size-4 shrink-0" strokeWidth={2} />
               <input
                 ref={inputRef}
@@ -183,11 +183,11 @@ export function SearchPalette() {
                 aria-label="Search the console"
                 aria-controls="search-hits"
                 aria-activedescendant={hits[cursor] ? `hit-${hits[cursor].id}` : undefined}
-                className="text-ink min-h-11 w-full bg-transparent text-sm outline-none"
+                className="text-ink min-h-11 w-full min-w-0 bg-transparent text-sm outline-none"
               />
             </div>
 
-            <ul id="search-hits" role="listbox" aria-label="Results" className="max-h-80 overflow-y-auto p-1">
+            <ul id="search-hits" role="listbox" aria-label="Results" className="max-h-80 overflow-y-auto overflow-x-hidden p-1">
               {hits.length === 0 ? (
                 <li className="text-muted px-3 py-4 text-sm">
                   Nothing matches “{query}”. Incidents are searched by id, service and reason.

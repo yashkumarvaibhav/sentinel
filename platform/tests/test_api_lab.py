@@ -155,10 +155,69 @@ def test_a_launcher_with_a_run_in_flight_is_busy_and_says_why() -> None:
         LabScenarioRequest(scenario_id="combo_night", mode=LabRunMode.LIVE), ts=TS
     ).model_copy(update={"state": LabRunState.RUNNING, "started_at": TS})
 
-    feed = lab_run_feed((running,), runner_attached=True)
+    # The clock is passed explicitly now that age decides whether a
+    # non-terminal run is believed. A minute in, this one plainly is.
+    feed = lab_run_feed((running,), runner_attached=True, now=TS + timedelta(minutes=1))
 
     assert feed.status is LabRunFeedStatus.BUSY
     assert "two sets of injected faults" in feed.note
+
+
+def test_a_queued_run_no_runner_ever_claimed_stops_holding_the_lease() -> None:
+    """A run nothing claimed must not be reported as running.
+
+    The lease stops two scenarios overlapping (decision #135), but a QUEUED row
+    only becomes RUNNING when a runner claims it, and nothing obliges a runner
+    to exist. Stop the demo profile and the row stays non-terminal forever - so
+    the launcher refused every future scenario on the strength of a run that
+    was not running. Observed live: a row QUEUED for 9h49m.
+    """
+    stuck = build_lab_run(
+        LabScenarioRequest(scenario_id="combo_night", mode=LabRunMode.REPLAY), ts=TS
+    )
+
+    feed = lab_run_feed((stuck,), runner_attached=True, now=TS + timedelta(hours=9))
+
+    assert feed.status is LabRunFeedStatus.READY, "an abandoned run must not block the launcher"
+    assert "never claimed" in feed.note
+    assert "9 hours" in feed.note
+    # It must not claim the telemetry exists either.
+    assert "never produced" in feed.note
+
+
+def test_a_slow_run_is_not_mistaken_for_a_dead_one() -> None:
+    """Being slow is not being dead.
+
+    A live run takes the wall-clock time its profile states, so the bound has
+    to be generous enough that a legitimately long run still holds its lease.
+    """
+    running = build_lab_run(
+        LabScenarioRequest(scenario_id="combo_night", mode=LabRunMode.LIVE), ts=TS
+    ).model_copy(update={"state": LabRunState.RUNNING, "started_at": TS})
+
+    feed = lab_run_feed((running,), runner_attached=True, now=TS + timedelta(minutes=45))
+
+    assert feed.status is LabRunFeedStatus.BUSY
+
+
+def test_an_abandoned_run_beside_a_live_one_still_yields_to_the_live_one() -> None:
+    """One stale row must not unlock the launcher while something is genuinely running."""
+    stuck = build_lab_run(
+        LabScenarioRequest(scenario_id="combo_night", mode=LabRunMode.REPLAY), ts=TS
+    )
+    fresh = build_lab_run(
+        LabScenarioRequest(scenario_id="attack_day", mode=LabRunMode.LIVE),
+        ts=TS + timedelta(hours=8, minutes=59),
+    ).model_copy(
+        update={
+            "state": LabRunState.RUNNING,
+            "started_at": TS + timedelta(hours=8, minutes=59),
+        }
+    )
+
+    feed = lab_run_feed((stuck, fresh), runner_attached=True, now=TS + timedelta(hours=9))
+
+    assert feed.status is LabRunFeedStatus.BUSY
 
 
 # --- the endpoint itself -----------------------------------------------------

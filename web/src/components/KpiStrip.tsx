@@ -4,6 +4,7 @@ import { fetchKpis } from '@/api/kpis';
 import type { KpiKey, KpiMetric, KpiResponse, ScoreHeadline } from '@/contracts/types';
 import { useAudience } from '@/shell/useAudience';
 import { Chip, HonestyChip } from '@/ui/Chip';
+import { InfoPopover } from '@/ui/InfoPopover';
 import { SkeletonText } from '@/ui/Skeleton';
 
 type Load =
@@ -39,9 +40,27 @@ function KpiCard({ metric, exec }: { metric: KpiMetric; exec: boolean }) {
   return (
     <article className="border-line bg-raised flex min-w-0 flex-col gap-3 rounded-lg border p-4">
       <div className="flex items-start justify-between gap-3">
-        <h3 className="eyebrow font-sans">
-          {exec ? EXEC_LABELS[metric.key] : metric.label}
-        </h3>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <h3 className="eyebrow font-sans truncate">
+            {exec ? EXEC_LABELS[metric.key] : metric.label}
+          </h3>
+          {/* The definition, the window and the provenance are what make this
+              number checkable — but they are read once and then never again,
+              while the number is read every day. They move behind the `i` so
+              the tile shows the measurement rather than the paragraph. */}
+          <InfoPopover label={`How ${exec ? EXEC_LABELS[metric.key] : metric.label} is measured`}>
+            <span className="block">{metric.definition}</span>
+            <span className="text-faint mt-2 block">
+              Window: {metric.window.description}
+            </span>
+            <span className="text-faint mt-1 block">
+              Samples: {metric.sample_count.toLocaleString()}
+            </span>
+            <span className="text-faint mt-1 block break-words">
+              Source: {metric.provenance}
+            </span>
+          </InfoPopover>
+        </div>
         {/* "Measured" and "Insufficient" are the two most consequential words
             on this screen, so neither is left to colour: each carries its own
             icon, and the insufficient one is a dashed circle rather than an
@@ -58,26 +77,14 @@ function KpiCard({ metric, exec }: { metric: KpiMetric; exec: boolean }) {
         {formatValue(metric)}
       </p>
 
-      <p className="text-body text-xs leading-5">
-        {exec ? execSummary(metric) : metric.definition}
-      </p>
+      {/* Exec mode keeps one plain sentence; the technical reading of it is
+          the same fact with its machinery, and that lives behind the `i`. */}
+      {exec && <p className="text-body text-xs leading-5">{execSummary(metric)}</p>}
 
-      <dl className="border-line text-muted mt-auto grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 border-t pt-3 text-[11px]">
-        <dt>Window</dt>
-        <dd className="text-right">{metric.window.description}</dd>
-        <dt>Samples</dt>
-        <dd className="text-right">
-          {metric.sample_count.toLocaleString()} {metric.sample_count === 1 ? 'sample' : 'samples'}
-        </dd>
-        {!exec && (
-          <>
-            <dt>Source</dt>
-            <dd className="truncate text-right" title={metric.provenance}>
-              {metric.provenance}
-            </dd>
-          </>
-        )}
-      </dl>
+      <p className="text-faint mt-auto text-[11px] tabular-nums">
+        {metric.sample_count.toLocaleString()}{' '}
+        {metric.sample_count === 1 ? 'sample' : 'samples'} · {metric.window.description}
+      </p>
     </article>
   );
 }
