@@ -1245,6 +1245,43 @@ async def _round_trip_lab_runs(config: Settings, pool: PostgresPool, suffix: str
     )
     assert stopped is not None and stopped.state is LabRunState.STOPPED
 
+    third = queued.model_copy(
+        update={
+            "run_id": f"run-stop-after-progress-{suffix}",
+            "requested_at": ts + timedelta(seconds=8),
+        }
+    )
+    assert await repository.enqueue_lab_run(third) is True
+    third_claim = await repository.claim_lab_run(
+        worker_id="storage-runner",
+        ts=ts + timedelta(seconds=9),
+        lease_seconds=60,
+    )
+    assert third_claim is not None
+    assert (
+        await repository.update_lab_run_progress(
+            run_id=third.run_id,
+            progress=0.5,
+            detail="Half of the recorded evidence was visible before stop.",
+            evidence_start_at=ts,
+            evidence_end_at=evidence_end,
+            evidence_cursor_at=ts + timedelta(minutes=5),
+        )
+        is not None
+    )
+    stopped_after_progress = third_claim.model_copy(
+        update={
+            "state": LabRunState.STOPPED,
+            "finished_at": ts + timedelta(seconds=10),
+            "detail": "Stopped after cleanup.",
+        }
+    )
+    assert await repository.complete_lab_run(stopped_after_progress) is True
+    stored_stop = await repository.get_lab_run(third.run_id)
+    assert stored_stop is not None and stored_stop.state is LabRunState.STOPPED
+    assert stored_stop.progress is None
+    assert stored_stop.evidence_cursor_at is None
+
 
 async def _cross_process_invalidation(config: Settings, pool: PostgresPool) -> None:
     """A commit in one connection reaches a listener holding a different one."""

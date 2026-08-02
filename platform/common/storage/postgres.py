@@ -179,15 +179,19 @@ class PostgresRepository:
                 return False
             current = LabRunSnapshot.model_validate_json(cast(str, row[0]))
             # Progress is written by the isolated child while the parent owns
-            # the terminal transition. Preserve the child's capture window so
-            # a completed replay remains visible instead of snapping back to
-            # an empty wall-clock window as soon as it succeeds.
+            # the final transition. Preserve it only while paused or after a
+            # successful replay. STOPPED/FAILED explicitly cannot carry
+            # progress; retaining the child payload there makes every later
+            # run-list read fail strict contract validation.
+            preserve_progress = run.state in {LabRunState.PAUSED, LabRunState.SUCCEEDED}
             completed = run.model_copy(
                 update={
-                    "evidence_start_at": current.evidence_start_at,
-                    "evidence_end_at": current.evidence_end_at,
-                    "evidence_cursor_at": current.evidence_cursor_at,
-                    "progress": current.progress,
+                    "evidence_start_at": (current.evidence_start_at if preserve_progress else None),
+                    "evidence_end_at": current.evidence_end_at if preserve_progress else None,
+                    "evidence_cursor_at": (
+                        current.evidence_cursor_at if preserve_progress else None
+                    ),
+                    "progress": current.progress if preserve_progress else None,
                 }
             )
             cursor = await connection.execute(
