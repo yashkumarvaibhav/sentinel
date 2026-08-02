@@ -249,7 +249,13 @@ export function IncidentFeed({ className = '' }: { className?: string } = {}) {
         </p>
       )}
       {load.state === 'ready' && <ObservationBanner observation={load.response.observation} />}
-      {load.state === 'ready' && (
+      {load.state === 'ready' && load.response.incidents.length === 0 && (
+        <p className="border-line bg-sidebar text-muted rounded-lg border p-4 text-sm">
+          No live incidents have been persisted. This is not a zero-risk claim: an empty feed
+          means nothing has been recorded, not that nothing is wrong.
+        </p>
+      )}
+      {load.state === 'ready' && load.response.incidents.length > 0 && (
         <div
           role="feed"
           aria-live="polite"
@@ -257,20 +263,13 @@ export function IncidentFeed({ className = '' }: { className?: string } = {}) {
           aria-label="Latest live incidents"
           className="grid max-h-[42rem] gap-3 overflow-y-auto pr-1"
         >
-          {load.response.incidents.length === 0 ? (
-            <p className="border-line bg-sidebar text-muted rounded-lg border p-4 text-sm">
-              No live incidents have been persisted. This is not a zero-risk claim: an empty feed
-              means nothing has been recorded, not that nothing is wrong.
-            </p>
-          ) : (
-            load.response.incidents.map((item) => (
-              <IncidentCard
-                item={item}
-                key={item.incident_id}
-                fresh={fresh.has(item.incident_id)}
-              />
-            ))
-          )}
+          {load.response.incidents.map((item) => (
+            <IncidentCard
+              item={item}
+              key={item.incident_id}
+              fresh={fresh.has(item.incident_id)}
+            />
+          ))}
         </div>
       )}
     </section>

@@ -184,6 +184,7 @@ describe('IncidentFeed', () => {
       expect(screen.getByText(/no live incidents have been persisted/i)).toBeInTheDocument(),
     );
     expect(screen.getByText(/not a zero-risk claim/i)).toBeInTheDocument();
+    expect(screen.queryByRole('feed')).not.toBeInTheDocument();
   });
 
   it('says plainly when nothing is being measured, so stale cards cannot read as calm', async () => {
