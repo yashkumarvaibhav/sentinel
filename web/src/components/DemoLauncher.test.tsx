@@ -155,6 +155,22 @@ describe('the demo launcher', () => {
     render(ui());
 
     expect(await screen.findByText(/needs the operator credential/i)).toBeInTheDocument();
+    // Nothing has been offered yet, so there is nothing to have been refused.
+    expect(screen.queryByText(/refused/i)).not.toBeInTheDocument();
+  });
+
+  it('says a credential was refused rather than re-showing a blank prompt', async () => {
+    // The bug this pins: a wrong key produced the same screen as no key at all,
+    // so entering one and being rejected looked exactly like nothing happening.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(answer({}, 401));
+
+    render(ui());
+    await screen.findByText(/needs the operator credential/i);
+
+    await userEvent.type(await screen.findByLabelText('Operator credential'), 'wrong-key');
+    await userEvent.click(screen.getByRole('button', { name: /unlock/i }));
+
+    expect(await screen.findByText(/that credential was refused/i)).toBeInTheDocument();
   });
 
   it('shows a succeeded run as a link to the incident it produced', async () => {

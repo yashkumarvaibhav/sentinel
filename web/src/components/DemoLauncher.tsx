@@ -10,7 +10,7 @@ const LAB_RESOURCES = ['lab'] as const;
 
 type Load =
   | { state: 'loading' }
-  | { state: 'locked'; detail?: string }
+  | { state: 'locked'; detail?: string | undefined }
   | { state: 'ready'; feed: LabRunFeed }
   | { state: 'error'; detail: string };
 
@@ -31,6 +31,45 @@ function StateChip({ run }: { run: LabRunSnapshot }) {
   );
 }
 
+/** How long a queued run may wait before the silence is worth explaining. */
+const UNCLAIMED_GRACE_MS = 45_000;
+
+/**
+ * Why a queued run appears to do nothing.
+ *
+ * `SENTINEL_LAB_RUNNER_ATTACHED` is *declared*, not probed — the runner is a
+ * separate process with the repo mounted, so the gateway cannot see it. Set it
+ * true with no runner beside the stack and every fired scenario queues against
+ * nothing, which is precisely the outcome the setting's own comment warns
+ * about. The lease's staleness bound eventually reports it, but fifteen minutes
+ * of an unexplained "QUEUED" is fifteen minutes of looking broken.
+ *
+ * So the wait itself is named as soon as it is longer than a claim should take,
+ * along with the one command that fixes it.
+ */
+function UnclaimedNotice({ run }: { run: LabRunSnapshot }) {
+  const [now, setNow] = useState(() => Date.now());
+  const queued = run.state === 'QUEUED';
+
+  useEffect(() => {
+    if (!queued) return;
+    const timer = setInterval(() => setNow(Date.now()), 5_000);
+    return () => clearInterval(timer);
+  }, [queued]);
+
+  if (!queued) return null;
+  const waited = now - new Date(run.requested_at).getTime();
+  if (waited < UNCLAIMED_GRACE_MS) return null;
+
+  return (
+    <p className="text-warn mt-1 text-xs" role="status">
+      No runner has claimed this in {Math.max(Math.round(waited / 1000), 1)}s. The gateway is
+      told a runner is attached rather than checking for one, so this queues against nothing
+      until a runner is started beside the stack with <code className="font-mono">make demo-runner</code>.
+    </p>
+  );
+}
+
 function Run({ run }: { run: LabRunSnapshot }) {
   return (
     <li className="border-line border-t py-3 first:border-t-0">
@@ -43,6 +82,7 @@ function Run({ run }: { run: LabRunSnapshot }) {
         </span>
       </div>
       <p className="text-muted mt-1 text-xs">{run.detail}</p>
+      <UnclaimedNotice run={run} />
       {run.incident_id !== null && (
         <a
           className="text-accent mt-1 inline-block text-xs underline"
@@ -128,7 +168,16 @@ export function DemoLauncher() {
     } catch (error) {
       if (controller.signal.aborted) return;
       if (error instanceof LabCredentialRequiredError) {
-        setLoad({ state: 'locked' });
+        // A credential that was offered and refused is a different state from
+        // one never given. Rendering both as a blank prompt is why a wrong key
+        // looked like nothing happening at all.
+        setLoad({
+          state: 'locked',
+          detail:
+            credential === null
+              ? undefined
+              : 'That credential was refused. Check it and try again — it is never stored, so a reload clears it.',
+        });
         return;
       }
       setLoad({ state: 'error', detail: (error as Error).message });
@@ -152,7 +201,13 @@ export function DemoLauncher() {
         setLoad({ state: 'ready', feed });
       } catch (error) {
         if (error instanceof LabCredentialRequiredError) {
-          setLoad({ state: 'locked' });
+          setLoad({
+            state: 'locked',
+            detail:
+              credential === null
+                ? undefined
+                : 'That credential was refused, so nothing was fired.',
+          });
         } else {
           setLoad({ state: 'error', detail: (error as Error).message });
         }
@@ -179,7 +234,7 @@ export function DemoLauncher() {
         </p>
         <OperatorCredentialPrompt
           buttonLabel="Unlock the launcher"
-          detail={undefined}
+          detail={load.detail}
           title="Protected operator surface"
         />
       </section>
