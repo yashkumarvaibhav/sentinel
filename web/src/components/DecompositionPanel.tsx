@@ -4,6 +4,7 @@ import { DecompositionUnavailableError, fetchDecomposition } from '@/api/decompo
 import type { DecompositionWindow } from '@/api/decomposition';
 import { DecompositionChart } from '@/components/DecompositionChart';
 import { HonestyChip } from '@/ui/Chip';
+import { Skeleton, SkeletonText } from '@/ui/Skeleton';
 
 const LEGEND = [
   { label: 'explained base', className: 'bg-decomp-base' },
@@ -20,6 +21,7 @@ type Load =
 export interface DecompositionPanelProps {
   service?: string;
   signal?: string;
+  className?: string;
 }
 
 /**
@@ -39,6 +41,7 @@ export interface DecompositionPanelProps {
 export function DecompositionPanel({
   service = 'frontend',
   signal = 'ingress.requests',
+  className = '',
 }: DecompositionPanelProps) {
   const [load, setLoad] = useState<Load>({ state: 'loading' });
 
@@ -62,9 +65,11 @@ export function DecompositionPanel({
   const empty = load.state === 'ok' && load.window.count === 0;
 
   return (
-    <section className="border-line bg-raised flex flex-col gap-4 rounded-xl border p-5">
+    <section
+      className={`border-line bg-raised flex min-w-0 flex-col gap-4 rounded-lg border p-5 ${className}`}
+    >
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
-        <h2 className="eyebrow font-sans">Decomposition</h2>
+        <h2 className="font-serif text-base">Decomposition</h2>
         <div className="flex items-center gap-2">
           <code className="text-muted font-mono text-[11px]">
             {service} · {signal}
@@ -73,7 +78,12 @@ export function DecompositionPanel({
         </div>
       </div>
 
-      {load.state === 'loading' && <p className="text-muted text-sm">Reading the window…</p>}
+      {load.state === 'loading' && (
+        <div className="flex flex-col gap-3">
+          <Skeleton className="h-48 w-full" />
+          <SkeletonText lines={1} label="Reading the decomposition window…" />
+        </div>
+      )}
 
       {load.state === 'unavailable' && (
         <p className="text-warn text-sm" role="status">

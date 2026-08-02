@@ -59,7 +59,7 @@ function Section({
   return (
     <section className="flex flex-col gap-4" aria-labelledby={id}>
       <div>
-        <h2 id={id} className="eyebrow font-sans">
+        <h2 id={id} className="font-serif text-base">
           {heading}
         </h2>
         <p className="text-muted mt-1 max-w-3xl text-xs">{description}</p>
@@ -207,7 +207,7 @@ function Proof({ detail }: { detail: IncidentDetail }) {
     <article className="flex flex-col gap-10">
       <header className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="bg-accent-soft text-accent-hover rounded px-2 py-1 font-medium tracking-wide uppercase">
+          <span className="bg-accent-soft text-ink rounded px-2 py-1 font-medium tracking-wide uppercase">
             {title(verdict)}
           </span>
           <span className="border-line rounded border px-2 py-1">
@@ -319,7 +319,7 @@ function Proof({ detail }: { detail: IncidentDetail }) {
                     className="border-line bg-raised grid gap-3 rounded-lg border p-4 sm:grid-cols-[auto_1fr]"
                     key={`${evidence.assessment_id}-${evidence.feature}`}
                   >
-                    <span className="bg-accent-soft text-accent-hover flex size-8 items-center justify-center rounded-full text-xs font-semibold">
+                    <span className="bg-accent-soft text-ink flex size-8 items-center justify-center rounded-full text-xs font-semibold">
                       {index + 1}
                     </span>
                     <div>

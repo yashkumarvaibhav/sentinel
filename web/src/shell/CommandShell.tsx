@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Link, Outlet } from 'react-router';
 
+import { AudienceBar } from '@/shell/AudienceBar';
 import { CommandNav } from '@/shell/CommandNav';
 import { ConnectionBanner } from '@/shell/ConnectionBanner';
 import { IncidentAlarm } from '@/shell/IncidentAlarm';
@@ -85,7 +86,7 @@ export function CommandShell() {
           Skip to content
         </a>
 
-        <aside className="border-line bg-sidebar sticky top-0 hidden h-screen w-60 shrink-0 overflow-y-auto border-r lg:block">
+        <aside className="border-line bg-sidebar sticky top-0 hidden h-screen w-64 shrink-0 overflow-y-auto border-r lg:block">
           <div className="border-line border-b px-4 py-4">
             <BrandBlock />
             <p className="text-muted mt-2 text-xs">Context-aware observability console</p>
@@ -96,6 +97,7 @@ export function CommandShell() {
         <div className="flex min-w-0 flex-1 flex-col">
           <TopBar onOpenNav={() => setDrawerOpen(true)} navOpen={drawerOpen} openNavRef={openButtonRef} />
 
+          <AudienceBar />
           <ConnectionBanner />
           <IncidentAlarm />
 

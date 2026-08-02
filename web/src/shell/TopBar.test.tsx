@@ -1,5 +1,6 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { HealthReport } from '@/api/platform';
@@ -77,9 +78,11 @@ const DEGRADED: HealthReport = { status: 'degraded', degraded: ['loki'], compone
 
 function renderTopBar() {
   return render(
-    <SnapshotStreamProvider>
-      <TopBar />
-    </SnapshotStreamProvider>,
+    <MemoryRouter>
+      <SnapshotStreamProvider>
+        <TopBar />
+      </SnapshotStreamProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -260,40 +263,4 @@ describe('TopBar', () => {
     expect(screen.getByRole('button', { name: /switch to/i })).toBeInTheDocument();
   });
 
-  it('shows both audiences at once and marks the selected one', async () => {
-    vi.stubGlobal('fetch', respond(READY));
-    const user = userEvent.setup();
-
-    renderTopBar();
-    act(() => FakeEventSource.instances[0]?.open());
-    await screen.findByText('abc123d');
-
-    // Both options are on screen, which is the whole point: a single button
-    // captioned with the audience you are already in reads as "click for this".
-    const technical = screen.getByRole('radio', { name: /technical view/i });
-    const exec = screen.getByRole('radio', { name: /exec view/i });
-    expect(technical).toHaveAttribute('aria-checked', 'true');
-    expect(exec).toHaveAttribute('aria-checked', 'false');
-
-    await user.click(exec);
-
-    expect(screen.getByRole('radio', { name: /exec view/i })).toHaveAttribute(
-      'aria-checked',
-      'true',
-    );
-    expect(screen.getByRole('radio', { name: /technical view/i })).toHaveAttribute(
-      'aria-checked',
-      'false',
-    );
-  });
-
-  it('names the audience group, because two jargon words alone are not a label', async () => {
-    vi.stubGlobal('fetch', respond(READY));
-
-    renderTopBar();
-    act(() => FakeEventSource.instances[0]?.open());
-    await screen.findByText('abc123d');
-
-    expect(screen.getByRole('radiogroup', { name: 'View' })).toBeInTheDocument();
-  });
 });

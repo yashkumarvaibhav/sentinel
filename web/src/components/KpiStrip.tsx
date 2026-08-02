@@ -4,6 +4,7 @@ import { fetchKpis } from '@/api/kpis';
 import type { KpiKey, KpiMetric, KpiResponse, ScoreHeadline } from '@/contracts/types';
 import { useAudience } from '@/shell/useAudience';
 import { Chip, HonestyChip } from '@/ui/Chip';
+import { SkeletonText } from '@/ui/Skeleton';
 
 type Load =
   | { state: 'loading' }
@@ -147,7 +148,7 @@ export function KpiStrip() {
   return (
     <section className="flex flex-col gap-4" aria-labelledby="reliability-kpis">
       <div>
-        <h2 id="reliability-kpis" className="eyebrow font-sans">
+        <h2 id="reliability-kpis" className="font-serif text-base">
           Reliability proof
         </h2>
         <p className="text-muted mt-1 text-xs">
@@ -156,9 +157,16 @@ export function KpiStrip() {
       </div>
 
       {load.state === 'loading' && (
-        <p className="text-muted text-sm" role="status">
-          Reading reliability evidence…
-        </p>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((index) => (
+            <div key={index} className="border-line bg-raised rounded-lg border p-4">
+              <SkeletonText
+                lines={4}
+                label={index === 0 ? 'Reading reliability evidence…' : ''}
+              />
+            </div>
+          ))}
+        </div>
       )}
       {load.state === 'error' && (
         <p className="text-bad text-sm" role="alert">

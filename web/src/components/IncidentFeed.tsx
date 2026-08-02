@@ -10,6 +10,7 @@ import type {
 import { useSnapshotInvalidation } from '@/shell/useSnapshotStream';
 import { HonestyChip } from '@/ui/Chip';
 import { RelativeTime } from '@/ui/RelativeTime';
+import { SkeletonText } from '@/ui/Skeleton';
 import { verdictIcon } from '@/ui/verdict';
 
 type Load =
@@ -38,7 +39,7 @@ function IncidentCard({ item }: { item: IncidentFeedItem }) {
       }`}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <strong className="bg-accent-soft text-accent-hover inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs tracking-wide uppercase">
+        <strong className="bg-accent-soft text-ink inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs tracking-wide uppercase">
           <VerdictIcon aria-hidden="true" className="size-3.5 shrink-0" strokeWidth={2.25} />
           {label(verdict)}
         </strong>
@@ -138,7 +139,7 @@ export function ObservationBanner({ observation }: { observation: ObservationFre
   );
 }
 
-export function IncidentFeed() {
+export function IncidentFeed({ className = '' }: { className?: string } = {}) {
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   const inFlight = useRef<Promise<void> | null>(null);
   const controller = useRef<AbortController | null>(null);
@@ -191,20 +192,25 @@ export function IncidentFeed() {
   }, [refetch]);
 
   return (
-    <section className="flex flex-col gap-4" aria-labelledby="live-incidents">
-      <div>
-        <h2 id="live-incidents" className="eyebrow font-sans">
+    <section className={`flex min-w-0 flex-col gap-3 ${className}`} aria-labelledby="live-incidents">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 id="live-incidents" className="font-serif text-base">
           Live incidents
         </h2>
-        <p className="text-muted mt-1 text-xs">
-          Latest durable decisions. Stream events only ask this view to reread the REST snapshot.
-        </p>
+        {/* A count that moves is the cheapest signal that this is a live view
+            and not a report someone generated earlier. */}
+        {load.state === 'ready' && (
+          <span className="text-faint text-xs tabular-nums">
+            {load.response.incidents.length} recorded
+          </span>
+        )}
       </div>
 
       {load.state === 'loading' && (
-        <p className="text-muted text-sm" role="status">
-          Reading live incidents…
-        </p>
+        <div className="grid gap-3">
+          <SkeletonText lines={4} label="Reading live incidents…" />
+          <SkeletonText lines={4} label="" />
+        </div>
       )}
       {load.state === 'error' && (
         <p className="text-bad text-sm" role="alert">
@@ -218,7 +224,7 @@ export function IncidentFeed() {
           aria-live="polite"
           aria-busy="false"
           aria-label="Latest live incidents"
-          className="grid gap-3"
+          className="grid max-h-[42rem] gap-3 overflow-y-auto pr-1"
         >
           {load.response.incidents.length === 0 ? (
             <p className="border-line bg-sidebar text-muted rounded-lg border p-4 text-sm">

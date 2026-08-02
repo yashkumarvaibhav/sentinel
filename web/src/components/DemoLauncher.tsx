@@ -24,7 +24,7 @@ function StateChip({ run }: { run: LabRunSnapshot }) {
     run.state === 'SUCCEEDED'
       ? 'bg-good-soft text-good'
       : run.state === 'RUNNING' || run.state === 'QUEUED'
-        ? 'bg-accent-soft text-accent-hover'
+        ? 'bg-accent-soft text-ink'
         : 'bg-bad-soft text-bad';
   return (
     <span className={`rounded px-2 py-0.5 text-[0.7rem] font-semibold ${tone}`}>{run.state}</span>

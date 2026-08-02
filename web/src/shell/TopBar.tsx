@@ -1,31 +1,17 @@
 import { useEffect, useState, type RefObject } from 'react';
+import { Link } from 'react-router';
 
 import { fetchVersion } from '@/api/platform';
 import type { VersionInfo } from '@/api/platform';
-import { useAudience } from '@/shell/useAudience';
-import type { Audience } from '@/shell/useAudience';
 import { useLiveness } from '@/shell/useLiveness';
 import type { Liveness, LivenessState } from '@/shell/useLiveness';
+import { SearchPalette } from '@/shell/SearchPalette';
 import { SoundToggle } from '@/shell/SoundToggle';
 import { ThemeToggle } from '@/shell/ThemeToggle';
 import { BrandMark } from '@/ui/BrandMark';
+import { BUTTON_BASE, BUTTON_VARIANT } from '@/ui/buttonStyles';
 import { Chip, type ChipTone } from '@/ui/Chip';
-import { SegmentedControl, type SegmentedOption } from '@/ui/SegmentedControl';
-import {
-  Activity,
-  Briefcase,
-  LoaderCircle,
-  Terminal,
-  TriangleAlert,
-  WifiOff,
-  type LucideIcon,
-} from '@/ui/icons';
-
-/** Named once so the control and its screen-reader wording cannot drift apart. */
-const AUDIENCE_OPTIONS: SegmentedOption<Audience>[] = [
-  { value: 'exec', label: 'Exec', icon: Briefcase, description: 'Exec view: plain language, decision-critical only' },
-  { value: 'technical', label: 'Technical', icon: Terminal, description: 'Technical view: scores, evidence and residuals' },
-];
+import { Activity, LoaderCircle, TriangleAlert, WifiOff, Zap, type LucideIcon } from '@/ui/icons';
 
 /**
  * Each connection state is a tone *and* an icon *and* the word itself. The
@@ -115,7 +101,6 @@ export function TopBar({
 } = {}) {
   const liveness = useLiveness();
   const version = useBuildStamp();
-  const { audience, setAudience } = useAudience();
 
   return (
     <header className="border-line bg-page sticky top-0 z-30 border-b">
@@ -155,18 +140,20 @@ export function TopBar({
           </span>
         </a>
 
+        <SearchPalette />
+
         <ConnectionDot liveness={liveness} />
 
         <div className="ml-auto flex items-center gap-2 sm:gap-3">
-          {/* Both options visible, the current one marked, and the group named.
-              A single button captioned with the audience you are already in
-              reads as "click for this", which is the opposite of what it did. */}
-          <SegmentedControl
-            label="View"
-            value={audience}
-            onChange={setAudience}
-            options={AUDIENCE_OPTIONS}
-          />
+          {/* The one teal-filled control on the screen. Teal means "you can
+              act here", and until now the product's own signal for that was
+              entirely unused — every control was a ghost button. Firing a
+              scenario is the action this console is for. */}
+          <Link to="/demo" className={`${BUTTON_BASE} ${BUTTON_VARIANT.primary} shrink-0`}>
+            <Zap aria-hidden="true" className="size-4 shrink-0" strokeWidth={2} />
+            <span className="hidden sm:inline">Fire a scenario</span>
+            <span className="sm:hidden">Fire</span>
+          </Link>
 
           <SoundToggle />
 

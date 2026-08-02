@@ -20,6 +20,7 @@ import type {
   CausalGraphResponse,
 } from '@/contracts/types';
 import { useSnapshotInvalidation } from '@/shell/useSnapshotStream';
+import { Skeleton } from '@/ui/Skeleton';
 
 type Load =
   | { state: 'loading' }
@@ -136,7 +137,7 @@ function nodeLabel(node: CausalGraphNode) {
       </div>
       <div className="flex flex-wrap gap-1 text-[10px]">
         {node.is_origin && node.origin_confidence !== null && (
-          <span className="bg-accent-soft text-accent-hover rounded px-1.5 py-0.5">
+          <span className="bg-accent-soft text-ink rounded px-1.5 py-0.5">
             Origin {percent(node.origin_confidence)}
           </span>
         )}
@@ -376,7 +377,7 @@ export function CausalGraphView({ graph }: { graph: CausalGraph }) {
   );
 }
 
-export function CausalGraphPanel() {
+export function CausalGraphPanel({ className = '' }: { className?: string } = {}) {
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   const inFlight = useRef<Promise<void> | null>(null);
   const controller = useRef<AbortController | null>(null);
@@ -426,9 +427,9 @@ export function CausalGraphPanel() {
   }, [refetch]);
 
   return (
-    <section className="flex flex-col gap-4" aria-labelledby="causal-chain">
+    <section className={`flex min-w-0 flex-col gap-4 ${className}`} aria-labelledby="causal-chain">
       <div>
-        <h2 id="causal-chain" className="eyebrow font-sans">
+        <h2 id="causal-chain" className="font-serif text-base">
           Causal chain
         </h2>
         <p className="text-muted mt-1 text-xs">
@@ -436,11 +437,7 @@ export function CausalGraphPanel() {
           evidence.
         </p>
       </div>
-      {load.state === 'loading' && (
-        <p className="text-muted text-sm" role="status">
-          Reading the current causal graph…
-        </p>
-      )}
+      {load.state === 'loading' && <Skeleton className="h-72 w-full" />}
       {load.state === 'error' && (
         <p className="text-bad text-sm" role="alert">
           Causal graph unavailable: {load.detail}

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { fetchHealth, fetchVersion } from '@/api/platform';
 import type { HealthReport, VersionInfo } from '@/api/platform';
 import { HonestyChip } from '@/ui/Chip';
+import { SkeletonText } from '@/ui/Skeleton';
 import { CircleCheck, CircleX } from '@/ui/icons';
 
 type Load<T> = { state: 'loading' } | { state: 'ok'; data: T } | { state: 'error'; error: string };
@@ -64,17 +65,21 @@ function ReadyMark({ ready }: { ready: boolean }) {
 }
 
 /** Which parts of our own pipeline are up, and which commit is serving. */
-export function PlatformStatus() {
+export function PlatformStatus({ className = '' }: { className?: string } = {}) {
   const { health, version } = useMeta();
 
   return (
-    <section className="bg-raised flex flex-col gap-4 rounded-xl p-5">
+    <section
+      className={`border-line bg-raised flex min-w-0 flex-col gap-4 rounded-lg border p-5 ${className}`}
+    >
       <div className="flex items-baseline justify-between gap-4">
-        <h2 className="eyebrow font-sans">Platform</h2>
+        <h2 className="font-serif text-base">Platform</h2>
         <HonestyChip kind="REAL" />
       </div>
 
-      {health.state === 'loading' && <p className="text-muted text-sm">Checking…</p>}
+      {health.state === 'loading' && (
+        <SkeletonText lines={4} label="Checking every plane…" />
+      )}
 
       {health.state === 'error' && (
         <p className="text-sm">

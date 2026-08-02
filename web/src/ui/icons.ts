@@ -38,7 +38,10 @@ export {
   Layers,
   // Navigation
   LayoutGrid,
+  Search,
+  Zap,
   // Controls
+  ArrowLeftRight,
   Volume2,
   VolumeX,
   Sun,
