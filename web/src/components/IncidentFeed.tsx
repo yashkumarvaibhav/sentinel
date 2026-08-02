@@ -9,6 +9,7 @@ import type {
 } from '@/contracts/types';
 import { useSnapshotInvalidation } from '@/shell/useSnapshotStream';
 import { HonestyChip } from '@/ui/Chip';
+import { RelativeTime } from '@/ui/RelativeTime';
 import { verdictIcon } from '@/ui/verdict';
 
 type Load =
@@ -24,14 +25,6 @@ function label(value: string): string {
 
 function value(measured: number): string {
   return Number.isInteger(measured) ? measured.toLocaleString() : measured.toPrecision(3);
-}
-
-function timeAgo(timestamp: string): string {
-  return new Intl.DateTimeFormat('en', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    timeZone: 'UTC',
-  }).format(new Date(timestamp));
 }
 
 function IncidentCard({ item }: { item: IncidentFeedItem }) {
@@ -51,7 +44,7 @@ function IncidentCard({ item }: { item: IncidentFeedItem }) {
         </strong>
         <HonestyChip kind={item.honesty} />
         <span className="text-muted text-xs">{label(item.severity)}</span>
-        <span className="text-muted ml-auto text-xs">{timeAgo(item.updated_at)} UTC</span>
+        <RelativeTime iso={item.updated_at} className="text-muted ml-auto text-xs" />
       </div>
 
       <div>

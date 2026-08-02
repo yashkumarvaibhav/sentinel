@@ -39,6 +39,8 @@ export {
   // Navigation
   LayoutGrid,
   // Controls
+  Volume2,
+  VolumeX,
   Sun,
   Moon,
   Monitor,

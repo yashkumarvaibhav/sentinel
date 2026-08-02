@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Link, Outlet } from 'react-router';
 
 import { CommandNav } from '@/shell/CommandNav';
+import { ConnectionBanner } from '@/shell/ConnectionBanner';
+import { IncidentAlarm } from '@/shell/IncidentAlarm';
 import { TopBar } from '@/shell/TopBar';
 import { SnapshotStreamProvider } from '@/shell/SnapshotStream';
 import { BrandMark } from '@/ui/BrandMark';
@@ -93,6 +95,9 @@ export function CommandShell() {
 
         <div className="flex min-w-0 flex-1 flex-col">
           <TopBar onOpenNav={() => setDrawerOpen(true)} navOpen={drawerOpen} openNavRef={openButtonRef} />
+
+          <ConnectionBanner />
+          <IncidentAlarm />
 
           {/* `overflow-x-clip` rather than `hidden`: sticky positioning inside
               still works, and the page body stops scrolling sideways when a

@@ -6,6 +6,7 @@ import { useAudience } from '@/shell/useAudience';
 import type { Audience } from '@/shell/useAudience';
 import { useLiveness } from '@/shell/useLiveness';
 import type { Liveness, LivenessState } from '@/shell/useLiveness';
+import { SoundToggle } from '@/shell/SoundToggle';
 import { ThemeToggle } from '@/shell/ThemeToggle';
 import { BrandMark } from '@/ui/BrandMark';
 import { Chip, type ChipTone } from '@/ui/Chip';
@@ -166,6 +167,8 @@ export function TopBar({
             onChange={setAudience}
             options={AUDIENCE_OPTIONS}
           />
+
+          <SoundToggle />
 
           <ThemeToggle />
 

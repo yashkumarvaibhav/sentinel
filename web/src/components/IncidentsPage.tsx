@@ -6,6 +6,7 @@ import type { IncidentFeedItem, IncidentFeedResponse } from '@/contracts/types';
 import { ObservationBanner } from '@/components/IncidentFeed';
 import { useSnapshotInvalidation } from '@/shell/useSnapshotStream';
 import { Chip, HonestyChip } from '@/ui/Chip';
+import { RelativeTime } from '@/ui/RelativeTime';
 import { SkeletonText } from '@/ui/Skeleton';
 import { verdictIcon } from '@/ui/verdict';
 
@@ -263,12 +264,7 @@ export function IncidentsPage() {
                           <HonestyChip kind={item.honesty} />
                         </td>
                         <td className="border-line text-muted border-b px-3 py-2 tabular-nums whitespace-nowrap">
-                          {new Intl.DateTimeFormat('en', {
-                            dateStyle: 'medium',
-                            timeStyle: 'short',
-                            timeZone: 'UTC',
-                          }).format(new Date(item.updated_at))}{' '}
-                          UTC
+                          <RelativeTime iso={item.updated_at} />
                         </td>
                       </tr>
                     );
