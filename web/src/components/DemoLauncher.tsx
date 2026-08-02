@@ -169,8 +169,9 @@ export function DemoLauncher() {
   if (load.state === 'locked') {
     return (
       <section aria-labelledby="demo-locked">
-        <h2 className="text-ink text-lg font-semibold" id="demo-locked">
-          Demo launcher
+        {/* Same reason as the ready branch: the route owns the name. */}
+        <h2 className="sr-only" id="demo-locked">
+          Operator credential
         </h2>
         <p className="text-muted mt-1 text-sm">
           Firing a scenario changes what the platform is looking at, so it needs the operator
