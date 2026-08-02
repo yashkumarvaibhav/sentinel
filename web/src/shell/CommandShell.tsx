@@ -12,10 +12,10 @@ import { BrandMark } from '@/ui/BrandMark';
 function BrandBlock() {
   return (
     <Link to="/command" className="flex min-w-0 items-center gap-2.5">
-      <span className="border-line bg-raised flex size-9 shrink-0 items-center justify-center rounded-sm border">
-        <BrandMark className="size-7" />
+      <span className="border-line bg-raised flex size-10 shrink-0 items-center justify-center rounded-sm border">
+        <BrandMark className="size-8" />
       </span>
-      <span className="text-ink truncate font-serif text-xl font-medium tracking-tight">
+      <span className="text-ink truncate font-serif text-2xl font-medium tracking-tight">
         Sentinel
       </span>
     </Link>
@@ -87,7 +87,7 @@ export function CommandShell() {
         </a>
 
         <aside className="border-line bg-sidebar sticky top-0 hidden h-screen w-64 shrink-0 overflow-y-auto border-r lg:block">
-          <div className="border-line border-b px-4 py-4">
+          <div className="border-line border-b px-5 py-5">
             <BrandBlock />
             <p className="text-muted mt-2 text-xs">Context-aware observability console</p>
           </div>

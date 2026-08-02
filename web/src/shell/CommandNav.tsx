@@ -22,7 +22,7 @@ interface NavItem {
  */
 const ITEMS: NavItem[] = [
   { to: '/command', label: 'Command', icon: LayoutGrid, hint: 'Decomposition and feed', end: true },
-  { to: '/incidents', label: 'Incidents', icon: Activity, hint: 'Every durable decision' },
+  { to: '/incidents', label: 'Incidents', icon: Activity, hint: 'Durable decisions' },
   { to: '/security', label: 'Security', icon: ShieldAlert, hint: 'Attack evidence' },
   { to: '/demo', label: 'Demo', icon: FlaskConical, hint: 'Fire a scenario' },
 ];
@@ -42,7 +42,7 @@ export function CommandNav({ onNavigate }: { onNavigate?: () => void }) {
             {...(item.end === true ? { end: true } : {})}
             {...(onNavigate ? { onClick: onNavigate } : {})}
             className={({ isActive }) =>
-              `flex min-h-11 items-center gap-2.5 rounded-md border px-3 py-2 text-sm transition-colors ${
+              `flex min-h-11 items-center gap-3 rounded-md border px-3 py-2 text-sm transition-colors ${
                 isActive
                   ? 'border-line-strong bg-accent-soft font-semibold text-ink'
                   : 'text-body border-transparent hover:bg-hover hover:text-ink'
@@ -51,7 +51,11 @@ export function CommandNav({ onNavigate }: { onNavigate?: () => void }) {
           >
             {({ isActive }) => (
               <>
-                <Icon aria-hidden="true" className="size-[18px] shrink-0" strokeWidth={2} />
+                <Icon
+                  aria-hidden="true"
+                  className={`size-[18px] shrink-0 ${isActive ? 'text-accent' : ''}`}
+                  strokeWidth={2}
+                />
                 <span className="flex min-w-0 flex-col">
                   <span className="truncate">{item.label}</span>
                   {/* On the active pill the fill is accent-soft, where

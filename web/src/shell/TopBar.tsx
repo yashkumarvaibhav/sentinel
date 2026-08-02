@@ -132,10 +132,10 @@ export function TopBar({
         {/* The wordmark rides in the rail on desktop; here it is the mobile
             fallback, at the same proportions the family ships everywhere. */}
         <a href="/command" className="flex min-w-0 items-center gap-2.5 lg:hidden">
-          <span className="border-line bg-raised flex size-9 shrink-0 items-center justify-center rounded-sm border">
-            <BrandMark className="size-7" />
+          <span className="border-line bg-raised flex size-10 shrink-0 items-center justify-center rounded-sm border">
+            <BrandMark className="size-8" />
           </span>
-          <span className="text-ink hidden truncate font-serif text-xl font-medium tracking-tight sm:inline">
+          <span className="text-ink hidden truncate font-serif text-2xl font-medium tracking-tight sm:inline">
             Sentinel
           </span>
         </a>
