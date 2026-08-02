@@ -19,7 +19,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from contracts import (
     LabRunFeed,
@@ -179,6 +179,55 @@ def build_lab_run(request: LabScenarioRequest, *, ts: datetime) -> LabRunSnapsho
             "The runner claims it; this endpoint never executes one."
         ),
         honesty=REPLAY_HONESTY if request.mode is LabRunMode.REPLAY else LIVE_HONESTY,
+    )
+
+
+class ScenarioActivity(BaseModel):
+    """Whether a scenario is being executed right now, for the public console.
+
+    The rest of ``/api/lab`` is gated because firing is mutating and the
+    catalogue is close to scenario ground truth. *That a run is in flight* is
+    neither: it is a fact about the platform's own state, and the command
+    centre looks broken without it — during a replay nothing is written until
+    the run ends, so a screen that cannot see the run shows a still page for
+    minutes and gives an operator no reason to believe anything is happening.
+
+    Deliberately narrow: no scenario list, no seeds, no detail that would let a
+    reader infer what was injected. An id, a mode, a state and a start time.
+    """
+
+    in_flight: bool
+    scenario_id: str | None = None
+    mode: str | None = None
+    state: str | None = None
+    started_at: datetime | None = None
+    note: str
+
+
+def scenario_activity(
+    runs: tuple[LabRunSnapshot, ...],
+    *,
+    now: datetime | None = None,
+) -> ScenarioActivity:
+    """The in-flight run, if one is genuinely in flight."""
+    moment = now if now is not None else datetime.now(UTC)
+    live = [
+        run
+        for run in runs
+        if run.state in {LabRunState.QUEUED, LabRunState.RUNNING}
+        and not _abandoned(run, now=moment)
+    ]
+    if not live:
+        return ScenarioActivity(in_flight=False, note="No scenario is running.")
+    run = live[0]
+    started = run.started_at if run.started_at is not None else run.requested_at
+    return ScenarioActivity(
+        in_flight=True,
+        scenario_id=run.scenario_id,
+        mode=run.mode.value,
+        state=run.state.value,
+        started_at=started,
+        note=(f"{run.scenario_id} is {run.state.value.lower()} in {run.mode.value.lower()} mode."),
     )
 
 

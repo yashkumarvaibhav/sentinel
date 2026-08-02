@@ -66,9 +66,11 @@ from api.lab import (
     MAX_LAB_RUNS,
     LabRunRefusedError,
     LabRunStore,
+    ScenarioActivity,
     build_lab_run,
     lab_run_feed,
     parse_lab_request,
+    scenario_activity,
     unavailable_lab_feed,
 )
 from api.notify import SnapshotNotificationListener
@@ -614,6 +616,24 @@ def create_app(
             return unavailable_causal_graph(
                 detail="causal graph store could not provide a snapshot"
             )
+
+    @app.get("/api/activity", tags=["meta"], response_model=ScenarioActivity)
+    async def scenario_activity_endpoint() -> ScenarioActivity:
+        """Whether a scenario is executing, for the public command centre.
+
+        Outside ``/api/lab`` on purpose: this is the platform reporting its own
+        state, not the launcher. Without it the console cannot tell a quiet
+        platform from one mid-replay, which is most of why it reads as static.
+        """
+        store: LabRunStore | None = getattr(app.state, "lab_run_store", None)
+        if store is None:
+            return ScenarioActivity(in_flight=False, note="No lab run queue is attached.")
+        try:
+            runs = await store.list_lab_runs(limit=MAX_LAB_RUNS)
+        except Exception:
+            LOGGER.exception("scenario activity read failed")
+            return ScenarioActivity(in_flight=False, note="The lab run queue could not be read.")
+        return scenario_activity(runs)
 
     @app.get("/api/lab/runs", tags=["lab"], response_model=LabRunFeed)
     async def lab_runs(response: Response) -> LabRunFeed:

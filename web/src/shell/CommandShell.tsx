@@ -5,6 +5,7 @@ import { AudienceBar } from '@/shell/AudienceBar';
 import { CommandNav } from '@/shell/CommandNav';
 import { ConnectionBanner } from '@/shell/ConnectionBanner';
 import { IncidentAlarm } from '@/shell/IncidentAlarm';
+import { ScenarioActivityBar } from '@/shell/ScenarioActivityBar';
 import { TopBar } from '@/shell/TopBar';
 import { SnapshotStreamProvider } from '@/shell/SnapshotStream';
 import { BrandMark } from '@/ui/BrandMark';
@@ -98,6 +99,7 @@ export function CommandShell() {
           <TopBar onOpenNav={() => setDrawerOpen(true)} navOpen={drawerOpen} openNavRef={openButtonRef} />
 
           <AudienceBar />
+          <ScenarioActivityBar />
           <ConnectionBanner />
           <IncidentAlarm />
 

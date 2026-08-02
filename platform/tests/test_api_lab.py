@@ -22,6 +22,7 @@ from api.lab import (
     build_lab_run,
     lab_run_feed,
     parse_lab_request,
+    scenario_activity,
 )
 from common.settings import Settings
 from contracts import (
@@ -349,3 +350,47 @@ def test_a_finished_run_cannot_claim_to_still_be_going() -> None:
         run.model_copy(update={"finished_at": TS + timedelta(seconds=1)}).model_validate(
             run.model_copy(update={"finished_at": TS + timedelta(seconds=1)}).model_dump()
         )
+
+
+def test_activity_reports_a_run_in_flight_so_the_console_is_not_blind_to_it() -> None:
+    """A replay writes nothing until it ends.
+
+    For the minutes it runs there is genuinely nothing new to render, and a
+    console that cannot see the run cannot tell that from a platform doing
+    nothing — which is most of why it reads as a static page mid-scenario.
+    """
+    running = build_lab_run(
+        LabScenarioRequest(scenario_id="combo_night", mode=LabRunMode.REPLAY), ts=TS
+    ).model_copy(update={"state": LabRunState.RUNNING, "started_at": TS})
+
+    activity = scenario_activity((running,), now=TS + timedelta(minutes=2))
+
+    assert activity.in_flight
+    assert activity.scenario_id == "combo_night"
+    assert activity.mode == "REPLAY"
+    assert activity.started_at == TS
+
+
+def test_activity_says_nothing_is_running_when_nothing_is() -> None:
+    assert not scenario_activity(()).in_flight
+
+
+def test_activity_does_not_report_an_abandoned_run_as_in_flight() -> None:
+    """The same staleness rule the lease uses, or the console would show a
+    clock counting up for a run nothing is executing."""
+    stuck = build_lab_run(
+        LabScenarioRequest(scenario_id="combo_night", mode=LabRunMode.REPLAY), ts=TS
+    )
+
+    assert not scenario_activity((stuck,), now=TS + timedelta(hours=9)).in_flight
+
+
+def test_activity_never_leaks_the_scenario_catalogue() -> None:
+    """It is public, so it carries state and nothing that approaches ground truth."""
+    running = build_lab_run(
+        LabScenarioRequest(scenario_id="combo_night", mode=LabRunMode.LIVE), ts=TS
+    ).model_copy(update={"state": LabRunState.RUNNING, "started_at": TS})
+
+    fields = set(scenario_activity((running,), now=TS).model_dump().keys())
+
+    assert fields == {"in_flight", "scenario_id", "mode", "state", "started_at", "note"}
