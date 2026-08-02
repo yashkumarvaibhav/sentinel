@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 import subprocess
 import time
@@ -15,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
 
+import httpx
 import yaml
 
 from lab.scenarios import ScenarioArtifacts, schedule_payload
@@ -978,24 +980,7 @@ def _wait_until(target: datetime) -> None:
 
 def _preflight(repo_root: Path) -> None:
     _run(["kubectl", "--context", _CONTEXT, "get", "namespace", _NAMESPACE])
-    _run(
-        [
-            "docker",
-            "compose",
-            "--project-name",
-            "sentinel",
-            "--project-directory",
-            str(repo_root),
-            "-f",
-            str(repo_root / "deploy" / "docker-compose.yml"),
-            "exec",
-            "-T",
-            "clickhouse",
-            "clickhouse-client",
-            "--query",
-            "SELECT 1",
-        ]
-    )
+    _clickhouse_query(repo_root=repo_root, query="SELECT 1")
 
 
 def _wait_for_spans(
@@ -1123,29 +1108,77 @@ def _query_spans(*, repo_root: Path, user_agent: str) -> tuple[datetime, ...]:
         ORDER BY ts_us, observation_id
         FORMAT JSONEachRow
     """
-    output = _run(
-        [
-            "docker",
-            "compose",
-            "--project-name",
-            "sentinel",
-            "--project-directory",
-            str(repo_root),
-            "-f",
-            str(repo_root / "deploy" / "docker-compose.yml"),
-            "exec",
-            "-T",
-            "clickhouse",
-            "clickhouse-client",
-            f"--param_user_agent={user_agent}",
-            "--query",
-            query,
-        ]
+    output = _clickhouse_query(
+        repo_root=repo_root,
+        query=query,
+        parameters={"user_agent": user_agent},
     )
     records = [json.loads(line) for line in output.splitlines() if line]
     return tuple(
         datetime.fromtimestamp(int(record["ts_us"]) / 1_000_000, tz=UTC) for record in records
     )
+
+
+def _clickhouse_query(
+    *,
+    repo_root: Path,
+    query: str,
+    parameters: dict[str, str] | None = None,
+) -> str:
+    """Query directly when the runner is inside the stack, otherwise via compose.
+
+    The demo runner is intentionally not given the host Docker socket. Its
+    ClickHouse endpoint is already on the private compose network, so granting
+    host-daemon control merely to run SELECTs would be a much wider capability
+    than the scenario needs.
+    """
+    url = os.environ.get("CLICKHOUSE_URL")
+    if url:
+        params = {"database": os.environ.get("CLICKHOUSE_DB", "sentinel")}
+        params.update({f"param_{key}": value for key, value in (parameters or {}).items()})
+        try:
+            response = httpx.post(
+                url,
+                params=params,
+                content=query,
+                auth=(
+                    os.environ.get("CLICKHOUSE_USER", "sentinel"),
+                    os.environ.get("CLICKHOUSE_PASSWORD", "sentinel"),
+                ),
+                timeout=30.0,
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise RuntimeError(f"ClickHouse query failed: {error}") from error
+        return response.text
+
+    command = [
+        "docker",
+        "compose",
+        "--project-name",
+        "sentinel",
+        "--project-directory",
+        str(repo_root),
+        "-f",
+        str(repo_root / "deploy" / "docker-compose.yml"),
+        "exec",
+        "-T",
+        "clickhouse",
+        "clickhouse-client",
+    ]
+    for key, value in (parameters or {}).items():
+        command.append(f"--param_{key}={value}")
+    command.extend(["--query", query])
+    return _run(command)
+
+
+def live_preflight(repo_root: Path) -> tuple[bool, str]:
+    """Whether this runner can start a live scenario now, with a safe reason."""
+    try:
+        _preflight(repo_root)
+    except (OSError, RuntimeError) as error:
+        return False, f"Live testbed unavailable: {error}"
+    return True, "Live testbed and telemetry store are reachable."
 
 
 def _delete_owned(name: str, *, runner: CommandRunner | None = None) -> None:

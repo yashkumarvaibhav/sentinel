@@ -305,6 +305,7 @@ score-decisions: ## Score decisions against the scenario answer key (CAPTURE_ROO
 
 .PHONY: demo-runner
 demo-runner: ## Claim and execute queued /demo scenario runs (repo mounted; Ctrl-C to stop)
+	./lab/runner/prepare-kubeconfig.sh
 	$(COMPOSE) --profile demo run --rm --build --no-deps \
 		--user "$(shell id -u):$(shell id -g)" demo-runner
 

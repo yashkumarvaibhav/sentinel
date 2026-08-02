@@ -1,10 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { LabCredentialRequiredError, fetchLabFeed, fireScenario } from '@/api/lab';
-import type { LabRunFeed, LabRunMode, LabRunSnapshot, LabScenarioOption } from '@/contracts/types';
+import {
+  LabCredentialRequiredError,
+  controlScenario,
+  fetchLabFeed,
+  fireScenario,
+} from '@/api/lab';
+import type {
+  LabRunControl,
+  LabRunFeed,
+  LabRunMode,
+  LabRunSnapshot,
+  LabScenarioOption,
+} from '@/contracts/types';
 import { OperatorCredentialPrompt } from '@/shell/OperatorCredential';
 import { useOperatorCredential } from '@/shell/useOperatorCredential';
 import { useSnapshotInvalidation } from '@/shell/useSnapshotStream';
+import { Button } from '@/ui/Button';
+import { Pause, Play, Square } from '@/ui/icons';
 
 const LAB_RESOURCES = ['lab'] as const;
 
@@ -23,7 +36,7 @@ function StateChip({ run }: { run: LabRunSnapshot }) {
   const tone =
     run.state === 'SUCCEEDED'
       ? 'bg-good-soft text-good'
-      : run.state === 'RUNNING' || run.state === 'QUEUED'
+      : run.state === 'RUNNING' || run.state === 'QUEUED' || run.state === 'PAUSED'
         ? 'bg-accent-soft text-ink'
         : 'bg-bad-soft text-bad';
   return (
@@ -37,12 +50,9 @@ const UNCLAIMED_GRACE_MS = 45_000;
 /**
  * Why a queued run appears to do nothing.
  *
- * `SENTINEL_LAB_RUNNER_ATTACHED` is *declared*, not probed — the runner is a
- * separate process with the repo mounted, so the gateway cannot see it. Set it
- * true with no runner beside the stack and every fired scenario queues against
- * nothing, which is precisely the outcome the setting's own comment warns
- * about. The lease's staleness bound eventually reports it, but fifteen minutes
- * of an unexplained "QUEUED" is fifteen minutes of looking broken.
+ * A current runner heartbeat gates new work. A claimed runner can still become
+ * unhealthy immediately afterwards, though, so a queued run that does not move
+ * deserves an explicit operator-facing explanation rather than silent waiting.
  *
  * So the wait itself is named as soon as it is longer than a claim should take,
  * along with the one command that fixes it.
@@ -63,14 +73,23 @@ function UnclaimedNotice({ run }: { run: LabRunSnapshot }) {
 
   return (
     <p className="text-warn mt-1 text-xs" role="status">
-      No runner has claimed this in {Math.max(Math.round(waited / 1000), 1)}s. The gateway is
-      told a runner is attached rather than checking for one, so this queues against nothing
-      until a runner is started beside the stack with <code className="font-mono">make demo-runner</code>.
+      No runner has claimed this in {Math.max(Math.round(waited / 1000), 1)}s. Check the measured
+      runner status below; if it has stopped, restart it beside the stack with{' '}
+      <code className="font-mono">make demo-runner</code>.
     </p>
   );
 }
 
-function Run({ run }: { run: LabRunSnapshot }) {
+function Run({
+  run,
+  pending,
+  onControl,
+}: {
+  run: LabRunSnapshot;
+  pending: LabRunControl | null;
+  onControl: (runId: string, control: LabRunControl) => void;
+}) {
+  const controllable = ['QUEUED', 'RUNNING', 'PAUSED'].includes(run.state);
   return (
     <li className="border-line border-t py-3 first:border-t-0">
       <div className="flex flex-wrap items-center gap-2">
@@ -90,6 +109,36 @@ function Run({ run }: { run: LabRunSnapshot }) {
         >
           Open the incident it produced
         </a>
+      )}
+      {controllable && (
+        <div className="mt-2 flex flex-wrap gap-2" role="group" aria-label={`Control ${run.scenario_id}`}>
+          {run.state === 'PAUSED' ? (
+            <Button
+              disabled={pending !== null}
+              icon={Play}
+              onClick={() => onControl(run.run_id, 'RESUME')}
+              variant="primary"
+            >
+              {pending === 'RESUME' ? 'Resuming…' : 'Resume from start'}
+            </Button>
+          ) : (
+            <Button
+              disabled={pending !== null || run.control_requested !== null}
+              icon={Pause}
+              onClick={() => onControl(run.run_id, 'PAUSE')}
+            >
+              {pending === 'PAUSE' || run.control_requested === 'PAUSE' ? 'Pausing…' : 'Pause'}
+            </Button>
+          )}
+          <Button
+            disabled={pending !== null || run.control_requested !== null}
+            icon={Square}
+            onClick={() => onControl(run.run_id, 'STOP')}
+            variant="danger"
+          >
+            {pending === 'STOP' || run.control_requested === 'STOP' ? 'Stopping…' : 'Stop'}
+          </Button>
+        </div>
       )}
       <dl className="text-muted mt-2 grid gap-x-4 gap-y-0.5 text-[0.7rem] sm:grid-cols-3">
         <div>
@@ -112,11 +161,13 @@ function Run({ run }: { run: LabRunSnapshot }) {
 function Scenario({
   scenario,
   disabled,
+  liveReady,
   pending,
   onFire,
 }: {
   scenario: LabScenarioOption;
   disabled: boolean;
+  liveReady: boolean;
   pending: LabRunMode | null;
   onFire: (scenario: string, mode: LabRunMode) => void;
 }) {
@@ -128,9 +179,11 @@ function Scenario({
         {scenario.modes.map((mode) => (
           <button
             className="border-line text-ink hover:bg-accent-soft disabled:text-muted min-h-11 rounded-md border px-3 text-xs font-medium disabled:cursor-not-allowed sm:min-h-9"
-            disabled={disabled}
+            disabled={disabled || (mode === 'LIVE' && !liveReady)}
             key={mode}
-            onClick={() => onFire(scenario.scenario_id, mode)}
+            onClick={() => {
+              if (mode !== 'LIVE' || liveReady) onFire(scenario.scenario_id, mode);
+            }}
             type="button"
           >
             {pending === mode ? 'Queueing…' : mode === 'REPLAY' ? 'Replay a capture' : 'Run live'}
@@ -157,6 +210,10 @@ export function DemoLauncher() {
   const { credential } = useOperatorCredential();
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   const [pending, setPending] = useState<{ scenario: string; mode: LabRunMode } | null>(null);
+  const [pendingControl, setPendingControl] = useState<{
+    runId: string;
+    control: LabRunControl;
+  } | null>(null);
   const inFlight = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async () => {
@@ -189,6 +246,12 @@ export function DemoLauncher() {
     return () => inFlight.current?.abort();
   }, [refresh]);
 
+  useEffect(() => {
+    if (load.state !== 'ready') return;
+    const timer = window.setInterval(() => void refresh(), 5_000);
+    return () => window.clearInterval(timer);
+  }, [load.state, refresh]);
+
   // The runner commits its progress and then notifies, so a page told to
   // refetch is always told about state that is already durable.
   useSnapshotInvalidation(LAB_RESOURCES, refresh);
@@ -213,6 +276,24 @@ export function DemoLauncher() {
         }
       } finally {
         setPending(null);
+      }
+    },
+    [credential],
+  );
+
+  const control = useCallback(
+    async (runId: string, requested: LabRunControl) => {
+      setPendingControl({ runId, control: requested });
+      try {
+        setLoad({ state: 'ready', feed: await controlScenario(credential, runId, requested) });
+      } catch (error) {
+        if (error instanceof LabCredentialRequiredError) {
+          setLoad({ state: 'locked', detail: 'That credential was refused, so the run was not changed.' });
+        } else {
+          setLoad({ state: 'error', detail: (error as Error).message });
+        }
+      } finally {
+        setPendingControl(null);
       }
     },
     [credential],
@@ -270,6 +351,7 @@ export function DemoLauncher() {
         {feed.scenarios.map((scenario) => (
           <Scenario
             disabled={busy || pending !== null}
+            liveReady={feed.live_ready}
             key={scenario.scenario_id}
             onFire={(id, mode) => void fire(id, mode)}
             pending={pending?.scenario === scenario.scenario_id ? pending.mode : null}
@@ -289,7 +371,12 @@ export function DemoLauncher() {
         ) : (
           <ul className="mt-2">
             {feed.runs.map((run) => (
-              <Run key={run.run_id} run={run} />
+              <Run
+                key={run.run_id}
+                run={run}
+                pending={pendingControl?.runId === run.run_id ? pendingControl.control : null}
+                onControl={(runId, requested) => void control(runId, requested)}
+              />
             ))}
           </ul>
         )}

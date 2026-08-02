@@ -22,10 +22,13 @@ from typing import Protocol
 from pydantic import BaseModel, ValidationError
 
 from contracts import (
+    LabRunControl,
+    LabRunControlRequest,
     LabRunFeed,
     LabRunFeedStatus,
     LabRunHonesty,
     LabRunMode,
+    LabRunnerHeartbeat,
     LabRunSnapshot,
     LabRunState,
     LabScenarioOption,
@@ -55,6 +58,7 @@ MAX_LAB_RUNS = 20
 # profile states; being slow must never be mistaken for being dead.
 UNCLAIMED_AFTER = timedelta(minutes=15)
 RUNNING_AFTER = timedelta(hours=2)
+RUNNER_STALE_AFTER = timedelta(seconds=20)
 
 
 def _abandoned(run: LabRunSnapshot, *, now: datetime) -> bool:
@@ -102,6 +106,16 @@ class LabRunStore(Protocol):
     async def enqueue_lab_run(self, run: LabRunSnapshot) -> bool: ...
 
     async def list_lab_runs(self, *, limit: int) -> tuple[LabRunSnapshot, ...]: ...
+
+    async def control_lab_run(
+        self,
+        *,
+        run_id: str,
+        control: LabRunControl,
+        ts: datetime,
+    ) -> LabRunSnapshot | None: ...
+
+    async def latest_lab_runner_heartbeat(self) -> LabRunnerHeartbeat | None: ...
 
 
 class LabRunRefusedError(ValueError):
@@ -183,7 +197,7 @@ def build_lab_run(request: LabScenarioRequest, *, ts: datetime) -> LabRunSnapsho
 
 
 class ScenarioActivity(BaseModel):
-    """Whether a scenario is being executed right now, for the public console.
+    """Current execution or latest replay window, for the public console.
 
     The rest of ``/api/lab`` is gated because firing is mutating and the
     catalogue is close to scenario ground truth. *That a run is in flight* is
@@ -193,14 +207,20 @@ class ScenarioActivity(BaseModel):
     minutes and gives an operator no reason to believe anything is happening.
 
     Deliberately narrow: no scenario list, no seeds, no detail that would let a
-    reader infer what was injected. An id, a mode, a state and a start time.
+    reader infer what was injected. The completed replay coordinates are kept
+    so the chart remains on the evidence the operator just asked to see.
     """
 
     in_flight: bool
+    run_id: str | None = None
     scenario_id: str | None = None
     mode: str | None = None
     state: str | None = None
     started_at: datetime | None = None
+    evidence_start_at: datetime | None = None
+    evidence_end_at: datetime | None = None
+    evidence_cursor_at: datetime | None = None
+    progress: float | None = None
     note: str
 
 
@@ -209,24 +229,53 @@ def scenario_activity(
     *,
     now: datetime | None = None,
 ) -> ScenarioActivity:
-    """The in-flight run, if one is genuinely in flight."""
+    """The active run, or the latest completed replay evidence window."""
     moment = now if now is not None else datetime.now(UTC)
     live = [
         run
         for run in runs
-        if run.state in {LabRunState.QUEUED, LabRunState.RUNNING}
+        if run.state in {LabRunState.QUEUED, LabRunState.RUNNING, LabRunState.PAUSED}
         and not _abandoned(run, now=moment)
     ]
     if not live:
+        latest_replay = next(
+            (
+                run
+                for run in runs
+                if run.mode is LabRunMode.REPLAY
+                and run.state is LabRunState.SUCCEEDED
+                and run.evidence_start_at is not None
+            ),
+            None,
+        )
+        if latest_replay is not None:
+            return ScenarioActivity(
+                in_flight=False,
+                run_id=latest_replay.run_id,
+                scenario_id=latest_replay.scenario_id,
+                mode=latest_replay.mode.value,
+                state=latest_replay.state.value,
+                started_at=latest_replay.started_at,
+                evidence_start_at=latest_replay.evidence_start_at,
+                evidence_end_at=latest_replay.evidence_end_at,
+                evidence_cursor_at=latest_replay.evidence_cursor_at,
+                progress=latest_replay.progress,
+                note="Showing the most recently completed replay evidence.",
+            )
         return ScenarioActivity(in_flight=False, note="No scenario is running.")
     run = live[0]
     started = run.started_at if run.started_at is not None else run.requested_at
     return ScenarioActivity(
         in_flight=True,
+        run_id=run.run_id,
         scenario_id=run.scenario_id,
         mode=run.mode.value,
         state=run.state.value,
         started_at=started,
+        evidence_start_at=run.evidence_start_at,
+        evidence_end_at=run.evidence_end_at,
+        evidence_cursor_at=run.evidence_cursor_at,
+        progress=run.progress,
         note=(f"{run.scenario_id} is {run.state.value.lower()} in {run.mode.value.lower()} mode."),
     )
 
@@ -235,11 +284,21 @@ def lab_run_feed(
     runs: tuple[LabRunSnapshot, ...],
     *,
     runner_attached: bool,
+    live_ready: bool | None = None,
+    runner_detail: str | None = None,
     now: datetime | None = None,
 ) -> LabRunFeed:
     """The launcher's whole view, including why it may not be usable."""
     moment = now if now is not None else datetime.now(UTC)
-    non_terminal = [run for run in runs if run.state in {LabRunState.QUEUED, LabRunState.RUNNING}]
+    can_run_live = runner_attached if live_ready is None else live_ready
+    capability_detail = runner_detail or (
+        "Runner heartbeat is current." if runner_attached else "No current runner heartbeat."
+    )
+    non_terminal = [
+        run
+        for run in runs
+        if run.state in {LabRunState.QUEUED, LabRunState.RUNNING, LabRunState.PAUSED}
+    ]
     abandoned = [run for run in non_terminal if _abandoned(run, now=moment)]
     in_flight = [run for run in non_terminal if run not in abandoned]
 
@@ -266,6 +325,8 @@ def lab_run_feed(
             scenarios=SCENARIOS,
             runs=runs,
             runner_attached=runner_attached,
+            live_ready=can_run_live,
+            runner_detail=capability_detail,
             note=(
                 f"{stalest.scenario_id} {verb} and has been {stalest.state.value.lower()} "
                 f"for {age}, so it is treated as abandoned rather than running. "
@@ -281,10 +342,22 @@ def lab_run_feed(
         )
     elif in_flight:
         status = LabRunFeedStatus.BUSY
+        if in_flight[0].state is LabRunState.PAUSED:
+            note = (
+                f"{in_flight[0].scenario_id} is paused and still owns the scenario slot. "
+                "Resume it from the beginning or stop it before firing another scenario."
+            )
+        else:
+            note = (
+                f"{in_flight[0].scenario_id} is already running. A second scenario would put "
+                "two sets of injected faults into one stretch of telemetry, and neither "
+                "run's evidence would mean anything afterwards."
+            )
+    elif not can_run_live:
+        status = LabRunFeedStatus.READY
         note = (
-            f"{in_flight[0].scenario_id} is already running. A second scenario would put "
-            "two sets of injected faults into one stretch of telemetry, and neither "
-            "run's evidence would mean anything afterwards."
+            "Recorded replay is ready. Live mode is unavailable and will not be queued: "
+            f"{capability_detail}"
         )
     else:
         status = LabRunFeedStatus.READY
@@ -297,6 +370,8 @@ def lab_run_feed(
         scenarios=SCENARIOS,
         runs=runs,
         runner_attached=runner_attached,
+        live_ready=can_run_live,
+        runner_detail=capability_detail,
         note=note,
     )
 
@@ -308,8 +383,38 @@ def unavailable_lab_feed(*, detail: str) -> LabRunFeed:
         scenarios=SCENARIOS,
         runs=(),
         runner_attached=False,
+        live_ready=False,
+        runner_detail=detail,
         note=detail,
     )
+
+
+def lab_runner_readiness(
+    heartbeat: LabRunnerHeartbeat | None,
+    *,
+    declared_attached: bool,
+    now: datetime,
+) -> tuple[bool, bool, str]:
+    """Prefer a current measured heartbeat over the legacy declaration."""
+    if heartbeat is None:
+        if declared_attached:
+            return (
+                False,
+                False,
+                "The deployment declares a runner, but no runner heartbeat has arrived.",
+            )
+        return False, False, "No lab runner is configured for this deployment."
+    seen_at = heartbeat.seen_at
+    if seen_at.tzinfo is None:
+        seen_at = seen_at.replace(tzinfo=UTC)
+    age = now - seen_at
+    if age > RUNNER_STALE_AFTER:
+        return (
+            False,
+            False,
+            f"The last runner heartbeat is {_describe_age(age)} old.",
+        )
+    return True, heartbeat.live_ready, heartbeat.detail
 
 
 def parse_lab_request(body: object) -> LabScenarioRequest:
@@ -320,6 +425,91 @@ def parse_lab_request(body: object) -> LabScenarioRequest:
         raise LabRunRefusedError(
             f"the request names no scenario this launcher can fire: {error}"
         ) from (error)
+
+
+def parse_lab_control_request(body: object) -> LabRunControlRequest:
+    """Validate one operator control without accepting server-owned fields."""
+    try:
+        return LabRunControlRequest.model_validate(body)
+    except ValidationError as error:
+        raise LabRunRefusedError(f"the run control request is invalid: {error}") from error
+
+
+def control_lab_run(
+    run: LabRunSnapshot,
+    *,
+    control: LabRunControl,
+    ts: datetime,
+) -> LabRunSnapshot:
+    """Apply the synchronous part of a control transition.
+
+    A running pause/stop is an intent until the runner has unwound its owned
+    resources. A queued or already-paused run has nothing active to clean, so
+    the gateway-side store can settle it atomically.
+    """
+    if control is LabRunControl.PAUSE:
+        if run.state is LabRunState.QUEUED:
+            return run.model_copy(
+                update={
+                    "state": LabRunState.PAUSED,
+                    "started_at": ts,
+                    "detail": (
+                        "Paused before a runner started it. Resume restarts the "
+                        "schedule from the beginning."
+                    ),
+                }
+            )
+        if run.state is LabRunState.RUNNING:
+            return run.model_copy(
+                update={
+                    "control_requested": control,
+                    "detail": (
+                        "Pause requested. The runner is safely unwinding the active stimulus."
+                    ),
+                }
+            )
+        if run.state is LabRunState.PAUSED:
+            return run
+        raise LabRunRefusedError(f"a {run.state.value.lower()} run cannot be paused")
+
+    if control is LabRunControl.RESUME:
+        if run.state is not LabRunState.PAUSED:
+            raise LabRunRefusedError(f"a {run.state.value.lower()} run cannot be resumed")
+        return run.model_copy(
+            update={
+                "state": LabRunState.QUEUED,
+                "started_at": None,
+                "control_requested": None,
+                "evidence_start_at": None,
+                "evidence_end_at": None,
+                "evidence_cursor_at": None,
+                "progress": None,
+                "detail": (
+                    "Queued to restart from the beginning; authored evidence windows are "
+                    "never resumed halfway through."
+                ),
+            }
+        )
+
+    if run.state in {LabRunState.QUEUED, LabRunState.PAUSED}:
+        return run.model_copy(
+            update={
+                "state": LabRunState.STOPPED,
+                "finished_at": max(ts, run.started_at or run.requested_at),
+                "control_requested": None,
+                "detail": "Stopped by the operator; no scenario stimulus remains active.",
+            }
+        )
+    if run.state is LabRunState.RUNNING:
+        return run.model_copy(
+            update={
+                "control_requested": control,
+                "detail": "Stop requested. The runner is safely unwinding the active stimulus.",
+            }
+        )
+    if run.state is LabRunState.STOPPED:
+        return run
+    raise LabRunRefusedError(f"a {run.state.value.lower()} run cannot be stopped")
 
 
 def run_payload(run: LabRunSnapshot) -> dict[str, object]:

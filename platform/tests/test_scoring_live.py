@@ -665,6 +665,55 @@ def test_span_wait_survives_a_transient_query_failure(monkeypatch: pytest.Monkey
     assert responses == []
 
 
+def test_container_clickhouse_query_uses_private_http_without_docker_socket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _Response:
+        text = "1\n"
+
+        def raise_for_status(self) -> None:
+            return None
+
+    def post(url: str, **kwargs: object) -> _Response:
+        captured.update({"url": url, **kwargs})
+        return _Response()
+
+    monkeypatch.setenv("CLICKHOUSE_URL", "http://clickhouse:8123")
+    monkeypatch.setenv("CLICKHOUSE_USER", "runner")
+    monkeypatch.setenv("CLICKHOUSE_PASSWORD", "credential")
+    monkeypatch.setattr("lab.scoring.live.httpx.post", post)
+
+    output = live_module._clickhouse_query(
+        repo_root=SCENARIO_ROOT.parents[1],
+        query="SELECT {user_agent:String}",
+        parameters={"user_agent": "sentinel-score/run-test"},
+    )
+
+    assert output == "1\n"
+    assert captured["url"] == "http://clickhouse:8123"
+    assert captured["auth"] == ("runner", "credential")
+    assert captured["params"] == {
+        "database": "sentinel",
+        "param_user_agent": "sentinel-score/run-test",
+    }
+
+
+def test_live_preflight_turns_a_missing_kubectl_into_measured_unavailability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def missing(_repo_root: Path) -> None:
+        raise FileNotFoundError("kubectl")
+
+    monkeypatch.setattr(live_module, "_preflight", missing)
+
+    ready, detail = live_module.live_preflight(SCENARIO_ROOT.parents[1])
+
+    assert not ready
+    assert "kubectl" in detail
+
+
 def test_span_wait_fails_closed_when_queries_never_succeed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

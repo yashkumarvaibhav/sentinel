@@ -23,7 +23,7 @@ Three properties are the point of this module:
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from itertools import groupby
 from typing import Literal, Protocol
@@ -108,6 +108,7 @@ class LiveDecisionRuntime:
         envelope: DecompositionEnvelope | None = None,
         planner: ActionPlanner | None = None,
         frames: DecompositionSink | None = None,
+        frame_invalidation: Callable[[], object] | None = None,
     ) -> None:
         self._config = config
         self._publisher = publisher
@@ -119,6 +120,7 @@ class LiveDecisionRuntime:
         # identical to the one the decision was taken against; computing them a
         # second time somewhere else would not.
         self._frames = frames
+        self._frame_invalidation = frame_invalidation
         self._checkpoints = checkpoints
         self._producer_id = producer_id
         # An honesty label is an operator statement about the world, not
@@ -200,6 +202,8 @@ class LiveDecisionRuntime:
         if self._frames is not None and measured.frames:
             try:
                 await self._frames.write_decomp_frames(measured.frames)
+                if self._frame_invalidation is not None:
+                    self._frame_invalidation()
             except Exception:
                 # A frame that cannot be stored is a lost picture. An incident
                 # that goes unjudged because a chart's store was unreachable

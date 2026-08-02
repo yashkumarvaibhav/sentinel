@@ -24,6 +24,11 @@ export function useSnapshotInvalidation(
   resources: readonly SnapshotResource[],
   refetch: SnapshotRefetch,
 ): void {
-  const { subscribe } = useSnapshotStream();
-  useEffect(() => subscribe(resources, refetch), [refetch, resources, subscribe]);
+  const value = useContext(SnapshotStreamContext);
+  useEffect(() => {
+    if (value === null) {
+      return undefined;
+    }
+    return value.subscribe(resources, refetch);
+  }, [refetch, resources, value]);
 }

@@ -43,6 +43,7 @@ def test_postgres_migration_separates_runtime_and_dev_label_schemas() -> None:
         "0010",
         "0011",
         "0012",
+        "0013",
     ]
     sql = render_migration(
         migrations[0],

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from lab.runner import LabRunner, RunOutcome
 
-from contracts import LabRunHonesty, LabRunMode, LabRunSnapshot, LabRunState
+from contracts import LabRunControl, LabRunHonesty, LabRunMode, LabRunSnapshot, LabRunState
 
 TS = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
 
@@ -115,6 +115,68 @@ def test_a_crashing_run_still_frees_the_slot_and_says_what_happened() -> None:
     assert "the testbed was unreachable" in finished.detail
     assert finished.finished_at is not None
     assert queue.completed == [finished]
+
+
+def test_a_pause_settles_without_claiming_failure_or_completion() -> None:
+    queue = _Queue(_queued())
+
+    async def execute(run: LabRunSnapshot) -> RunOutcome:
+        return RunOutcome.paused("Paused safely; resume restarts from the beginning.")
+
+    settled = asyncio.run(_runner(queue, execute).run_once())
+
+    assert settled is not None
+    assert settled.state is LabRunState.PAUSED
+    assert settled.finished_at is None
+    assert settled.incident_id is None
+
+
+def test_a_stop_is_terminal_and_names_no_incident() -> None:
+    queue = _Queue(_queued())
+
+    async def execute(run: LabRunSnapshot) -> RunOutcome:
+        return RunOutcome.stopped("Stopped by the operator after safe cleanup.")
+
+    settled = asyncio.run(_runner(queue, execute).run_once())
+
+    assert settled is not None
+    assert settled.state is LabRunState.STOPPED
+    assert settled.finished_at is not None
+    assert settled.incident_id is None
+
+
+def test_a_pending_pause_cancels_execution_before_settling_paused() -> None:
+    queue = _Queue(_queued())
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def execute(run: LabRunSnapshot) -> RunOutcome:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        raise AssertionError("the controlled execution unexpectedly returned")
+
+    async def control(run_id: str) -> LabRunControl:
+        assert run_id == "run-under-test"
+        await started.wait()
+        return LabRunControl.PAUSE
+
+    runner = LabRunner(
+        queue=queue,
+        execute=execute,
+        worker_id="runner-under-test",
+        control=control,
+        control_poll_seconds=0.01,
+        clock=lambda: TS + timedelta(seconds=5),
+    )
+    settled = asyncio.run(runner.run_once())
+
+    assert cancelled.is_set()
+    assert settled is not None and settled.state is LabRunState.PAUSED
+    assert "restart" in settled.detail.lower()
 
 
 def test_a_failed_run_names_no_incident() -> None:

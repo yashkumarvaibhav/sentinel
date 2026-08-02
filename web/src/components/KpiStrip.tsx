@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { fetchKpis } from '@/api/kpis';
 import type { KpiKey, KpiMetric, KpiResponse, ScoreHeadline } from '@/contracts/types';
@@ -6,6 +6,7 @@ import { useAudience } from '@/shell/useAudience';
 import { Chip, HonestyChip } from '@/ui/Chip';
 import { InfoPopover } from '@/ui/InfoPopover';
 import { SkeletonText } from '@/ui/Skeleton';
+import { useSnapshotInvalidation } from '@/shell/useSnapshotStream';
 
 type Load =
   | { state: 'loading' }
@@ -141,16 +142,20 @@ export function KpiStrip() {
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   const { audience } = useAudience();
 
-  useEffect(() => {
+  const refetch = useCallback((): Promise<void> => {
     const controller = new AbortController();
-    fetchKpis(controller.signal)
+    return fetchKpis(controller.signal)
       .then((response) => setLoad({ state: 'ok', response }))
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
         setLoad({ state: 'error', detail: error instanceof Error ? error.message : String(error) });
       });
-    return () => controller.abort();
   }, []);
+
+  useSnapshotInvalidation(['incidents', 'actions'], refetch);
+  useEffect(() => {
+    void refetch();
+  }, [refetch]);
 
   return (
     <section className="flex flex-col gap-4" aria-labelledby="reliability-kpis">

@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { fetchHealth, fetchVersion } from '@/api/platform';
 import type { HealthReport, VersionInfo } from '@/api/platform';
 import { HonestyChip } from '@/ui/Chip';
 import { SkeletonText } from '@/ui/Skeleton';
 import { CircleCheck, CircleX } from '@/ui/icons';
+import { useSnapshotInvalidation } from '@/shell/useSnapshotStream';
 
 type Load<T> = { state: 'loading' } | { state: 'ok'; data: T } | { state: 'error'; error: string };
 
@@ -12,20 +13,28 @@ function useMeta() {
   const [health, setHealth] = useState<Load<HealthReport>>({ state: 'loading' });
   const [version, setVersion] = useState<Load<VersionInfo>>({ state: 'loading' });
 
-  useEffect(() => {
+  const readHealth = useCallback((): Promise<void> => {
     const controller = new AbortController();
-    const { signal } = controller;
-
-    fetchHealth(signal)
+    return fetchHealth(controller.signal)
       .then((data) => setHealth({ state: 'ok', data }))
       .catch((error: unknown) => {
-        if (!signal.aborted) setHealth({ state: 'error', error: describe(error) });
+        if (!controller.signal.aborted) setHealth({ state: 'error', error: describe(error) });
       });
+  }, []);
 
-    fetchVersion(signal)
+  useSnapshotInvalidation(['health'], readHealth);
+
+  useEffect(() => {
+    void readHealth();
+  }, [readHealth]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    fetchVersion(controller.signal)
       .then((data) => setVersion({ state: 'ok', data }))
       .catch((error: unknown) => {
-        if (!signal.aborted) setVersion({ state: 'error', error: describe(error) });
+        if (!controller.signal.aborted) setVersion({ state: 'error', error: describe(error) });
       });
 
     return () => {

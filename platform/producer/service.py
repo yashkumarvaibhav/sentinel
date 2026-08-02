@@ -207,7 +207,11 @@ class LiveProducerService:
             )
             self._judged += 1
             self._published += len(published)
-            if published and self._notify is not None:
+            # The runtime may have queued a decomposition invalidation even
+            # when no incident changed. Drain after every judged tick; an
+            # empty broker is a no-op, and a moving hero chart is not coupled
+            # to whether that tick happened to open an incident.
+            if self._notify is not None:
                 await self._notify()
 
     async def _contexts_at(self, ts: datetime) -> tuple[ContextWindow, ...]:

@@ -27,6 +27,8 @@ function feed(overrides: Record<string, unknown> = {}) {
     scenarios: [SCENARIO],
     runs: [],
     runner_attached: true,
+    live_ready: true,
+    runner_detail: 'Live testbed and telemetry store are reachable.',
     note: 'Pick a scenario.',
     ...overrides,
   };
@@ -67,6 +69,7 @@ describe('the demo launcher', () => {
         feed({
           status: 'UNAVAILABLE',
           runner_attached: false,
+          live_ready: false,
           note: 'No lab runner is attached, so a request would queue work nothing will ever claim.',
         }),
       ),
@@ -76,6 +79,23 @@ describe('the demo launcher', () => {
 
     expect(await screen.findByText(/no lab runner is attached/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Replay a capture/ })).toBeDisabled();
+  });
+
+  it('keeps replay available but disables live when the measured preflight failed', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      answer(
+        feed({
+          live_ready: false,
+          runner_detail: 'Live testbed unavailable: namespace missing.',
+          note: 'Recorded replay is ready. Live mode is unavailable.',
+        }),
+      ),
+    );
+
+    render(ui());
+
+    expect(await screen.findByRole('button', { name: /Replay a capture/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Run live/ })).toBeDisabled();
   });
 
   it('refuses a second scenario while one is running, and says why', async () => {
@@ -147,6 +167,49 @@ describe('the demo launcher', () => {
       mode: 'REPLAY',
     });
     expect(screen.getByText(/never executes one/)).toBeInTheDocument();
+  });
+
+  it('offers pause and stop on a running scenario and records the pause intent', async () => {
+    const running = feed({
+      status: 'BUSY',
+      runs: [
+        {
+          run_id: 'run-control',
+          scenario_id: 'combo_night',
+          mode: 'REPLAY',
+          state: 'RUNNING',
+          requested_at: '2026-08-01T12:00:00Z',
+          started_at: '2026-08-01T12:00:01Z',
+          finished_at: null,
+          incident_id: null,
+          control_requested: null,
+          detail: 'Replaying recorded evidence.',
+          honesty: HONESTY,
+        },
+      ],
+    });
+    const pausing = feed({
+      status: 'BUSY',
+      runs: [
+        {
+          ...(running.runs as Record<string, unknown>[])[0],
+          control_requested: 'PAUSE',
+          detail: 'Pause requested. The runner is safely unwinding the active stimulus.',
+        },
+      ],
+    });
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(answer(running))
+      .mockResolvedValueOnce(answer(pausing));
+
+    render(ui());
+    await userEvent.click(await screen.findByRole('button', { name: 'Pause' }));
+
+    expect(await screen.findByRole('button', { name: 'Pausing…' })).toBeDisabled();
+    const [url, request] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe('/api/lab/runs/run-control/control');
+    expect(JSON.parse(request.body as string)).toEqual({ control: 'PAUSE' });
   });
 
   it('asks for the credential rather than reporting a failure', async () => {

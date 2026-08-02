@@ -58,6 +58,12 @@ from contracts import (
     ContextWindow,
     DecompFrame,
     EpisodeStatus,
+    LabRunControl,
+    LabRunHonesty,
+    LabRunMode,
+    LabRunnerHeartbeat,
+    LabRunSnapshot,
+    LabRunState,
     Observation,
     RollbackVerificationStatus,
     SnapshotResource,
@@ -115,6 +121,7 @@ async def _exercise_real_storage() -> None:
             await _round_trip_incident_memory(config, pool, suffix)
             await _exercise_audit_ledger(config, pool)
             await _round_trip_live_producer_checkpoint(config, pool)
+            await _round_trip_lab_runs(config, pool, suffix)
             await _cross_process_invalidation(config, pool)
         finally:
             await _drop_test_storage(config, client, pool)
@@ -1140,6 +1147,103 @@ async def _round_trip_live_producer_checkpoint(config: Settings, pool: PostgresP
     other = advanced.model_copy(update={"producer_id": "second-producer"})
     assert await repository.put_live_producer_checkpoint(other) is True
     assert await repository.get_live_producer_checkpoint("live-producer") == advanced
+
+
+async def _round_trip_lab_runs(config: Settings, pool: PostgresPool, suffix: str) -> None:
+    """Controls, heartbeat and replay progress survive separate writers."""
+    repository = PostgresRepository(pool=pool, schema=config.postgres_schema)
+    ts = datetime(2026, 8, 2, 12, 0, tzinfo=UTC)
+    honesty = LabRunHonesty(
+        telemetry="REAL recorded testbed telemetry.",
+        stimulus="SIMULATED contained stimulus.",
+        reproducibility="Bit-exact replay.",
+    )
+    queued = LabRunSnapshot(
+        run_id=f"run-storage-{suffix}",
+        scenario_id="combo_night",
+        mode=LabRunMode.REPLAY,
+        state=LabRunState.QUEUED,
+        requested_at=ts,
+        detail="Queued for storage verification.",
+        honesty=honesty,
+    )
+    assert await repository.enqueue_lab_run(queued) is True
+    claimed = await repository.claim_lab_run(
+        worker_id="storage-runner",
+        ts=ts + timedelta(seconds=1),
+        lease_seconds=60,
+    )
+    assert claimed is not None
+
+    evidence_end = ts + timedelta(minutes=10)
+    advanced = await repository.update_lab_run_progress(
+        run_id=queued.run_id,
+        progress=1.0,
+        detail="All recorded frames are visible.",
+        evidence_start_at=ts,
+        evidence_end_at=evidence_end,
+        evidence_cursor_at=evidence_end,
+    )
+    assert advanced is not None and advanced.progress == 1.0
+    completed = claimed.model_copy(
+        update={
+            "state": LabRunState.SUCCEEDED,
+            "finished_at": ts + timedelta(seconds=2),
+            "incident_id": f"incident-storage-{suffix}",
+            "detail": "Replay verified.",
+        }
+    )
+    assert await repository.complete_lab_run(completed) is True
+    stored = await repository.get_lab_run(queued.run_id)
+    assert stored is not None
+    assert stored.state is LabRunState.SUCCEEDED
+    assert stored.evidence_cursor_at == evidence_end
+    assert stored.progress == 1.0
+
+    heartbeat = LabRunnerHeartbeat(
+        worker_id="storage-runner",
+        seen_at=ts,
+        live_ready=True,
+        detail="Testbed and telemetry store are reachable.",
+    )
+    await repository.put_lab_runner_heartbeat(heartbeat)
+    assert await repository.latest_lab_runner_heartbeat() == heartbeat
+
+    second = queued.model_copy(
+        update={
+            "run_id": f"run-control-{suffix}",
+            "requested_at": ts + timedelta(seconds=3),
+        }
+    )
+    assert await repository.enqueue_lab_run(second) is True
+    second_claim = await repository.claim_lab_run(
+        worker_id="storage-runner",
+        ts=ts + timedelta(seconds=4),
+        lease_seconds=60,
+    )
+    assert second_claim is not None
+    pausing = await repository.control_lab_run(
+        run_id=second.run_id,
+        control=LabRunControl.PAUSE,
+        ts=ts + timedelta(seconds=5),
+    )
+    assert pausing is not None and pausing.control_requested is LabRunControl.PAUSE
+    paused = second_claim.model_copy(
+        update={"state": LabRunState.PAUSED, "detail": "Paused after cleanup."}
+    )
+    assert await repository.complete_lab_run(paused) is True
+    resumed = await repository.control_lab_run(
+        run_id=second.run_id,
+        control=LabRunControl.RESUME,
+        ts=ts + timedelta(seconds=6),
+    )
+    assert resumed is not None and resumed.state is LabRunState.QUEUED
+    stopped = await repository.control_lab_run(
+        run_id=second.run_id,
+        control=LabRunControl.STOP,
+        ts=ts + timedelta(seconds=7),
+    )
+    assert stopped is not None and stopped.state is LabRunState.STOPPED
 
 
 async def _cross_process_invalidation(config: Settings, pool: PostgresPool) -> None:

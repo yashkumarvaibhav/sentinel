@@ -1,18 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 
+import { fetchScenarioActivity } from '@/api/activity';
+import type { ScenarioActivity } from '@/api/activity';
 import { useSnapshotInvalidation } from '@/shell/useSnapshotStream';
 import { LoaderCircle } from '@/ui/icons';
 
 const LAB_RESOURCES = ['lab'] as const;
-
-interface Activity {
-  in_flight: boolean;
-  scenario_id: string | null;
-  mode: string | null;
-  state: string | null;
-  started_at: string | null;
-  note: string;
-}
 
 function elapsed(startedAt: string, now: number): string {
   const seconds = Math.max(Math.floor((now - new Date(startedAt).getTime()) / 1000), 0);
@@ -23,9 +16,9 @@ function elapsed(startedAt: string, now: number): string {
 /**
  * The console saying that something is being done to it right now.
  *
- * A replay writes nothing until it ends, so for the several minutes it runs
- * there is genuinely nothing new to render — and a screen that cannot see the
- * run has no way to distinguish that from a platform doing nothing at all.
+ * A replay advances a durable event-time cursor while its deterministic
+ * verifier works. The bar makes that progress visible without pretending the
+ * recorded timestamps happened now.
  * That is most of why this reads as a static page while a scenario is in play.
  *
  * So the run itself becomes the thing on screen: named, with its mode, and a
@@ -37,15 +30,14 @@ function elapsed(startedAt: string, now: number): string {
  * and between them the clock still has to move.
  */
 export function ScenarioActivityBar() {
-  const [activity, setActivity] = useState<Activity | null>(null);
+  const [activity, setActivity] = useState<ScenarioActivity | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   const read = useCallback((): Promise<void> => {
     const controller = new AbortController();
-    return fetch('/api/activity', { signal: controller.signal })
-      .then((response) => (response.ok ? (response.json() as Promise<Activity>) : null))
+    return fetchScenarioActivity(controller.signal)
       .then((next) => {
-        if (next !== null) setActivity(next);
+        setActivity(next);
       })
       .catch(() => {
         // The connection banner already reports an unreachable gateway.
@@ -94,8 +86,25 @@ export function ScenarioActivityBar() {
       <span className="text-muted text-xs">
         {activity.state === 'QUEUED'
           ? 'Waiting for a runner to claim it.'
-          : 'Running. A replay publishes its incident when it finishes, so the feed below stays as it was until then.'}
+          : activity.state === 'PAUSED'
+            ? 'Paused safely. No scenario stimulus remains active.'
+            : activity.mode === 'REPLAY'
+              ? 'Playing recorded evidence through the live command-centre panels.'
+              : 'Driving real contained load and faults through the testbed.'}
       </span>
+      {activity.progress !== null && (
+        <div className="border-line bg-raised h-1.5 min-w-32 flex-1 overflow-hidden rounded-full border" aria-label={`Replay progress ${Math.round(activity.progress * 100)}%`}>
+          <div
+            className="bg-accent h-full transition-[width] motion-reduce:transition-none"
+            style={{ width: `${Math.round(activity.progress * 100)}%` }}
+          />
+        </div>
+      )}
+      {activity.progress !== null && (
+        <span className="text-accent text-xs font-bold tabular-nums">
+          {Math.round(activity.progress * 100)}%
+        </span>
+      )}
     </div>
   );
 }

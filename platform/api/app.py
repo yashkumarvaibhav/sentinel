@@ -69,6 +69,8 @@ from api.lab import (
     ScenarioActivity,
     build_lab_run,
     lab_run_feed,
+    lab_runner_readiness,
+    parse_lab_control_request,
     parse_lab_request,
     scenario_activity,
     unavailable_lab_feed,
@@ -619,7 +621,7 @@ def create_app(
 
     @app.get("/api/activity", tags=["meta"], response_model=ScenarioActivity)
     async def scenario_activity_endpoint() -> ScenarioActivity:
-        """Whether a scenario is executing, for the public command centre.
+        """Current scenario activity and the latest replay evidence window.
 
         Outside ``/api/lab`` on purpose: this is the platform reporting its own
         state, not the launcher. Without it the console cannot tell a quiet
@@ -644,11 +646,27 @@ def create_app(
             return unavailable_lab_feed(detail="no lab run queue is attached to this gateway")
         try:
             runs = await store.list_lab_runs(limit=MAX_LAB_RUNS)
+            heartbeat_reader = getattr(store, "latest_lab_runner_heartbeat", None)
+            if heartbeat_reader is None:
+                attached = live_ready = config.lab_runner_attached
+                runner_detail = "Runner capability is supplied by the injected store."
+            else:
+                heartbeat = await heartbeat_reader()
+                attached, live_ready, runner_detail = lab_runner_readiness(
+                    heartbeat,
+                    declared_attached=config.lab_runner_attached,
+                    now=datetime.now(UTC),
+                )
         except Exception:
             LOGGER.exception("lab run feed read failed")
             response.status_code = 503
             return unavailable_lab_feed(detail="the lab run queue could not be read")
-        return lab_run_feed(runs, runner_attached=config.lab_runner_attached)
+        return lab_run_feed(
+            runs,
+            runner_attached=attached,
+            live_ready=live_ready,
+            runner_detail=runner_detail,
+        )
 
     @app.post("/api/lab/scenario", tags=["lab"], response_model=LabRunFeed)
     async def fire_scenario(body: dict[str, Any], response: Response) -> LabRunFeed:
@@ -662,17 +680,38 @@ def create_app(
         if store is None:
             response.status_code = 503
             return unavailable_lab_feed(detail="no lab run queue is attached to this gateway")
-        if not config.lab_runner_attached:
+        heartbeat_reader = getattr(store, "latest_lab_runner_heartbeat", None)
+        if heartbeat_reader is None:
+            attached = live_ready = config.lab_runner_attached
+            runner_detail = "Runner capability is supplied by the injected store."
+        else:
+            heartbeat = await heartbeat_reader()
+            attached, live_ready, runner_detail = lab_runner_readiness(
+                heartbeat,
+                declared_attached=config.lab_runner_attached,
+                now=datetime.now(UTC),
+            )
+        if not attached:
             response.status_code = 409
             return lab_run_feed(
                 await store.list_lab_runs(limit=MAX_LAB_RUNS),
                 runner_attached=False,
+                live_ready=False,
+                runner_detail=runner_detail,
             )
         try:
             requested = build_lab_run(parse_lab_request(body), ts=datetime.now(UTC))
         except LabRunRefusedError as refusal:
             response.status_code = 400
             return unavailable_lab_feed(detail=str(refusal))
+        if requested.mode.value == "LIVE" and not live_ready:
+            response.status_code = 409
+            return lab_run_feed(
+                await store.list_lab_runs(limit=MAX_LAB_RUNS),
+                runner_attached=True,
+                live_ready=False,
+                runner_detail=runner_detail,
+            )
         try:
             queued = await store.enqueue_lab_run(requested)
         except Exception:
@@ -688,6 +727,55 @@ def create_app(
         return lab_run_feed(
             await store.list_lab_runs(limit=MAX_LAB_RUNS),
             runner_attached=True,
+            live_ready=live_ready,
+            runner_detail=runner_detail,
+        )
+
+    @app.post("/api/lab/runs/{run_id}/control", tags=["lab"], response_model=LabRunFeed)
+    async def control_scenario_run(
+        run_id: str,
+        body: dict[str, Any],
+        response: Response,
+    ) -> LabRunFeed:
+        """Record pause/resume/stop intent; execution remains lab-side."""
+        store: LabRunStore | None = getattr(app.state, "lab_run_store", None)
+        if store is None:
+            response.status_code = 503
+            return unavailable_lab_feed(detail="no lab run queue is attached to this gateway")
+        try:
+            request = parse_lab_control_request(body)
+            controlled = await store.control_lab_run(
+                run_id=run_id,
+                control=request.control,
+                ts=datetime.now(UTC),
+            )
+        except LabRunRefusedError as refusal:
+            response.status_code = 409
+            return unavailable_lab_feed(detail=str(refusal))
+        except Exception:
+            LOGGER.exception("controlling a lab run failed")
+            response.status_code = 503
+            return unavailable_lab_feed(detail="the lab run queue could not record the control")
+        if controlled is None:
+            response.status_code = 404
+            return unavailable_lab_feed(detail=f"lab run {run_id} does not exist")
+        app.state.stream_broker.publish(snapshot_invalidation(SnapshotResource.LAB))
+        heartbeat_reader = getattr(store, "latest_lab_runner_heartbeat", None)
+        if heartbeat_reader is None:
+            attached = live_ready = config.lab_runner_attached
+            runner_detail = "Runner capability is supplied by the injected store."
+        else:
+            heartbeat = await heartbeat_reader()
+            attached, live_ready, runner_detail = lab_runner_readiness(
+                heartbeat,
+                declared_attached=config.lab_runner_attached,
+                now=datetime.now(UTC),
+            )
+        return lab_run_feed(
+            await store.list_lab_runs(limit=MAX_LAB_RUNS),
+            runner_attached=attached,
+            live_ready=live_ready,
+            runner_detail=runner_detail,
         )
 
     @app.get(

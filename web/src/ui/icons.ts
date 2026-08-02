@@ -49,6 +49,9 @@ export {
   Monitor,
   Briefcase,
   Terminal,
+  Pause,
+  Play,
+  Square,
 } from 'lucide-react';
 
 export type { LucideIcon } from 'lucide-react';

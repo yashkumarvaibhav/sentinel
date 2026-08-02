@@ -20,14 +20,19 @@ from api.lab import (
     SCENARIOS,
     LabRunRefusedError,
     build_lab_run,
+    control_lab_run,
     lab_run_feed,
+    parse_lab_control_request,
     parse_lab_request,
     scenario_activity,
 )
 from common.settings import Settings
 from contracts import (
+    LabRunControl,
+    LabRunControlRequest,
     LabRunFeedStatus,
     LabRunMode,
+    LabRunnerHeartbeat,
     LabRunSnapshot,
     LabRunState,
     LabScenarioRequest,
@@ -43,10 +48,12 @@ class _Queue:
 
     def __init__(self, runs: list[LabRunSnapshot] | None = None) -> None:
         self.runs = runs or []
+        self.heartbeat: LabRunnerHeartbeat | None = None
 
     async def enqueue_lab_run(self, run: LabRunSnapshot) -> bool:
         if any(
-            existing.state in {LabRunState.QUEUED, LabRunState.RUNNING} for existing in self.runs
+            existing.state in {LabRunState.QUEUED, LabRunState.RUNNING, LabRunState.PAUSED}
+            for existing in self.runs
         ):
             return False
         self.runs.insert(0, run)
@@ -55,15 +62,41 @@ class _Queue:
     async def list_lab_runs(self, *, limit: int) -> tuple[LabRunSnapshot, ...]:
         return tuple(self.runs[:limit])
 
+    async def latest_lab_runner_heartbeat(self) -> LabRunnerHeartbeat | None:
+        return self.heartbeat
+
+    async def control_lab_run(
+        self,
+        *,
+        run_id: str,
+        control: LabRunControl,
+        ts: datetime,
+    ) -> LabRunSnapshot | None:
+        for index, run in enumerate(self.runs):
+            if run.run_id != run_id:
+                continue
+            controlled = control_lab_run(run, control=control, ts=ts)
+            self.runs[index] = controlled
+            return controlled
+        return None
+
 
 def _client(*, queue: _Queue | None = None, runner: bool = True) -> TestClient:
     settings = Settings().model_copy(
         update={"config_dir": REPO_ROOT / "config", "lab_runner_attached": runner}
     )
+    store = queue if queue is not None else _Queue()
+    if runner:
+        store.heartbeat = LabRunnerHeartbeat(
+            worker_id="runner-under-test",
+            seen_at=datetime.now(UTC),
+            live_ready=True,
+            detail="Testbed and telemetry store are reachable.",
+        )
     app = create_app(
         settings,
         probes={},
-        lab_run_store=queue if queue is not None else _Queue(),
+        lab_run_store=store,
     )
     return TestClient(app)
 
@@ -115,6 +148,14 @@ def test_a_mode_the_scenario_does_not_offer_is_refused() -> None:
 def test_a_body_naming_fields_a_client_may_not_set_is_refused() -> None:
     with pytest.raises(LabRunRefusedError):
         parse_lab_request({"scenario_id": "combo_night", "mode": "LIVE", "state": "SUCCEEDED"})
+
+
+def test_a_control_body_names_exactly_one_operator_intent() -> None:
+    assert parse_lab_control_request({"control": "PAUSE"}) == LabRunControlRequest(
+        control=LabRunControl.PAUSE
+    )
+    with pytest.raises(LabRunRefusedError):
+        parse_lab_control_request({"control": "STOP", "state": "SUCCEEDED"})
 
 
 def test_a_queued_run_says_plainly_that_this_endpoint_executed_nothing() -> None:
@@ -352,13 +393,50 @@ def test_a_finished_run_cannot_claim_to_still_be_going() -> None:
         )
 
 
-def test_activity_reports_a_run_in_flight_so_the_console_is_not_blind_to_it() -> None:
-    """A replay writes nothing until it ends.
+def test_pause_resume_and_stop_are_coherent_durable_transitions() -> None:
+    running = build_lab_run(
+        LabScenarioRequest(scenario_id="combo_night", mode=LabRunMode.LIVE), ts=TS
+    ).model_copy(update={"state": LabRunState.RUNNING, "started_at": TS})
 
-    For the minutes it runs there is genuinely nothing new to render, and a
-    console that cannot see the run cannot tell that from a platform doing
-    nothing — which is most of why it reads as a static page mid-scenario.
-    """
+    requested = control_lab_run(running, control=LabRunControl.PAUSE, ts=TS)
+    assert requested.state is LabRunState.RUNNING
+    assert requested.control_requested is LabRunControl.PAUSE
+
+    paused = requested.model_copy(
+        update={
+            "state": LabRunState.PAUSED,
+            "control_requested": None,
+            "detail": "Paused safely.",
+        }
+    )
+    resumed = control_lab_run(paused, control=LabRunControl.RESUME, ts=TS + timedelta(minutes=1))
+    assert resumed.state is LabRunState.QUEUED
+    assert resumed.started_at is None
+
+    stopped = control_lab_run(paused, control=LabRunControl.STOP, ts=TS + timedelta(minutes=1))
+    assert stopped.state is LabRunState.STOPPED
+    assert stopped.finished_at == TS + timedelta(minutes=1)
+
+
+def test_the_control_endpoint_pauses_the_active_run() -> None:
+    running = build_lab_run(
+        LabScenarioRequest(scenario_id="combo_night", mode=LabRunMode.REPLAY), ts=TS
+    ).model_copy(update={"state": LabRunState.RUNNING, "started_at": TS})
+    queue = _Queue([running])
+
+    with _client(queue=queue) as client:
+        answer = client.post(
+            f"/api/lab/runs/{running.run_id}/control",
+            json={"control": "PAUSE"},
+        )
+
+    assert answer.status_code == 200
+    assert queue.runs[0].control_requested is LabRunControl.PAUSE
+    assert "pause" in queue.runs[0].detail.lower()
+
+
+def test_activity_reports_a_run_in_flight_so_the_console_is_not_blind_to_it() -> None:
+    """The public console follows the durable run and event-time cursor."""
     running = build_lab_run(
         LabScenarioRequest(scenario_id="combo_night", mode=LabRunMode.REPLAY), ts=TS
     ).model_copy(update={"state": LabRunState.RUNNING, "started_at": TS})
@@ -369,6 +447,31 @@ def test_activity_reports_a_run_in_flight_so_the_console_is_not_blind_to_it() ->
     assert activity.scenario_id == "combo_night"
     assert activity.mode == "REPLAY"
     assert activity.started_at == TS
+
+
+def test_activity_keeps_the_latest_completed_replay_window_visible() -> None:
+    end = TS + timedelta(minutes=10)
+    replay = build_lab_run(
+        LabScenarioRequest(scenario_id="combo_night", mode=LabRunMode.REPLAY), ts=TS
+    ).model_copy(
+        update={
+            "state": LabRunState.SUCCEEDED,
+            "started_at": TS,
+            "finished_at": end,
+            "evidence_start_at": TS,
+            "evidence_end_at": end,
+            "evidence_cursor_at": end,
+            "progress": 1.0,
+        }
+    )
+
+    activity = scenario_activity((replay,), now=end)
+
+    assert not activity.in_flight
+    assert activity.state == "SUCCEEDED"
+    assert activity.evidence_start_at == TS
+    assert activity.evidence_cursor_at == end
+    assert activity.progress == 1.0
 
 
 def test_activity_says_nothing_is_running_when_nothing_is() -> None:
@@ -393,4 +496,16 @@ def test_activity_never_leaks_the_scenario_catalogue() -> None:
 
     fields = set(scenario_activity((running,), now=TS).model_dump().keys())
 
-    assert fields == {"in_flight", "scenario_id", "mode", "state", "started_at", "note"}
+    assert fields == {
+        "in_flight",
+        "run_id",
+        "scenario_id",
+        "mode",
+        "state",
+        "started_at",
+        "evidence_start_at",
+        "evidence_end_at",
+        "evidence_cursor_at",
+        "progress",
+        "note",
+    }

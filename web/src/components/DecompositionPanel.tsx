@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { DecompositionUnavailableError, fetchDecomposition } from '@/api/decomposition';
 import type { DecompositionWindow } from '@/api/decomposition';
+import { fetchScenarioActivity } from '@/api/activity';
+import type { ScenarioActivity } from '@/api/activity';
 import { DecompositionChart } from '@/components/DecompositionChart';
 import { HonestyChip } from '@/ui/Chip';
+import { useSnapshotInvalidation } from '@/shell/useSnapshotStream';
 import { Skeleton, SkeletonText } from '@/ui/Skeleton';
 
 const LEGEND = [
@@ -17,6 +20,8 @@ type Load =
   | { state: 'ok'; window: DecompositionWindow }
   | { state: 'unavailable'; detail: string }
   | { state: 'error'; detail: string };
+
+const DECOMPOSITION_RESOURCES = ['decomposition'] as const;
 
 export interface DecompositionPanelProps {
   service?: string;
@@ -47,23 +52,55 @@ export function DecompositionPanel({
   className = '',
 }: DecompositionPanelProps) {
   const [load, setLoad] = useState<Load>({ state: 'loading' });
+  const [activity, setActivity] = useState<ScenarioActivity | null>(null);
+  const controller = useRef<AbortController | null>(null);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    fetchDecomposition({ service, signal }, controller.signal)
+  const refetch = useCallback((): Promise<void> => {
+    controller.current?.abort();
+    const requestController = new AbortController();
+    controller.current = requestController;
+    const replayWindow =
+      activity?.mode === 'REPLAY' &&
+      activity.evidence_start_at !== null &&
+      activity.evidence_cursor_at !== null
+        ? {
+            start: new Date(activity.evidence_start_at),
+            end: new Date(activity.evidence_cursor_at),
+          }
+        : {};
+    return fetchDecomposition({ service, signal, ...replayWindow }, requestController.signal)
       .then((window) => setLoad({ state: 'ok', window }))
       .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
+        if (requestController.signal.aborted) return;
         if (error instanceof DecompositionUnavailableError) {
           setLoad({ state: 'unavailable', detail: error.message });
           return;
         }
         setLoad({ state: 'error', detail: error instanceof Error ? error.message : String(error) });
       });
+  }, [activity, service, signal]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const read = () =>
+      fetchScenarioActivity(controller.signal)
+        .then(setActivity)
+        .catch(() => undefined);
+    void read();
+    const timer = window.setInterval(() => void read(), activity?.in_flight === true ? 2_000 : 15_000);
     return () => {
       controller.abort();
+      window.clearInterval(timer);
     };
-  }, [service, signal]);
+  }, [activity?.in_flight]);
+
+  useSnapshotInvalidation(DECOMPOSITION_RESOURCES, refetch);
+  useEffect(() => {
+    void refetch();
+    return () => {
+      controller.current?.abort();
+    };
+  }, [refetch]);
 
   const empty = load.state === 'ok' && load.window.count === 0;
 
@@ -109,6 +146,30 @@ export function DecompositionPanel({
 
       {load.state === 'ok' && load.window.count > 0 && (
         <>
+          {(() => {
+            const latest = load.window.frames.at(-1);
+            if (latest === undefined) return null;
+            return (
+            <dl
+              className="grid grid-cols-2 gap-2 sm:grid-cols-4"
+              aria-label="Latest decomposition values"
+            >
+                {[
+                  ['Observed', latest.observed],
+                  ['Expected base', latest.explained_base],
+                  ['Event lift', latest.explained_event],
+                  ['Residual', latest.residual],
+                ].map(([label, value]) => (
+                  <div className="border-line bg-sidebar rounded-md border px-3 py-2" key={String(label)}>
+                    <dt className="text-faint text-[10px] tracking-wide uppercase">{label}</dt>
+                    <dd className="text-ink mt-1 text-lg font-bold tabular-nums">
+                      {(value as number).toFixed(2)}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            );
+          })()}
           <DecompositionChart frames={load.window.frames} />
 
           {load.window.truncated && (

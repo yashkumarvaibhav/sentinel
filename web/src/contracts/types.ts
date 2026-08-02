@@ -352,15 +352,21 @@ export type Contracts__Base__FiniteFloat__3 = number;
  */
 export type ObservationStatus = "WATCHING" | "STALE" | "NEVER";
 export type Status2 = "ready" | "degraded";
+export type LiveReady = boolean;
 export type RunnerAttached = boolean;
+/**
+ * The three operator intents accepted for an authored run.
+ */
+export type LabRunControl = "PAUSE" | "RESUME" | "STOP";
 /**
  * How a scenario is put in front of the platform.
  */
 export type LabRunMode = "REPLAY" | "LIVE";
+export type Progress = number | null;
 /**
  * Durable progress of one requested scenario run.
  */
-export type LabRunState = "QUEUED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "REFUSED";
+export type LabRunState = "QUEUED" | "RUNNING" | "PAUSED" | "SUCCEEDED" | "FAILED" | "STOPPED" | "REFUSED";
 export type Runs = LabRunSnapshot[];
 export type LiveDurationSeconds = number | null;
 /**
@@ -1124,8 +1130,10 @@ export interface ObservationFreshness {
  * The launcher's whole view: what may be fired, and what has been.
  */
 export interface LabRunFeed {
+  live_ready: LiveReady;
   note: HumanText;
   runner_attached: RunnerAttached;
+  runner_detail: HumanText;
   runs: Runs;
   scenarios: Scenarios;
   status: LabRunFeedStatus;
@@ -1134,11 +1142,16 @@ export interface LabRunFeed {
  * The authoritative state of one requested run.
  */
 export interface LabRunSnapshot {
+  control_requested?: LabRunControl | null;
   detail: HumanText;
+  evidence_cursor_at?: UtcDatetime | null;
+  evidence_end_at?: UtcDatetime | null;
+  evidence_start_at?: UtcDatetime | null;
   finished_at?: UtcDatetime | null;
   honesty: LabRunHonesty;
   incident_id?: Identifier | null;
   mode: LabRunMode;
+  progress?: Progress;
   requested_at: UtcDatetime;
   run_id: Identifier;
   scenario_id: Identifier;

@@ -2624,16 +2624,33 @@
       "title": "KpiWindow",
       "type": "object"
     },
+    "LabRunControl": {
+      "description": "The three operator intents accepted for an authored run.",
+      "enum": [
+        "PAUSE",
+        "RESUME",
+        "STOP"
+      ],
+      "title": "LabRunControl",
+      "type": "string"
+    },
     "LabRunFeed": {
       "additionalProperties": false,
       "description": "The launcher's whole view: what may be fired, and what has been.",
       "properties": {
+        "live_ready": {
+          "title": "Live Ready",
+          "type": "boolean"
+        },
         "note": {
           "$ref": "#/$defs/HumanText"
         },
         "runner_attached": {
           "title": "Runner Attached",
           "type": "boolean"
+        },
+        "runner_detail": {
+          "$ref": "#/$defs/HumanText"
         },
         "runs": {
           "items": {
@@ -2658,6 +2675,8 @@
         "scenarios",
         "runs",
         "runner_attached",
+        "live_ready",
+        "runner_detail",
         "note"
       ],
       "title": "LabRunFeed",
@@ -2708,8 +2727,52 @@
       "additionalProperties": false,
       "description": "The authoritative state of one requested run.",
       "properties": {
+        "control_requested": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LabRunControl"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "detail": {
           "$ref": "#/$defs/HumanText"
+        },
+        "evidence_cursor_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcDatetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "evidence_end_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcDatetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "evidence_start_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcDatetime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "finished_at": {
           "anyOf": [
@@ -2738,6 +2801,20 @@
         },
         "mode": {
           "$ref": "#/$defs/LabRunMode"
+        },
+        "progress": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Progress"
         },
         "requested_at": {
           "$ref": "#/$defs/UtcDatetime"
@@ -2780,8 +2857,10 @@
       "enum": [
         "QUEUED",
         "RUNNING",
+        "PAUSED",
         "SUCCEEDED",
         "FAILED",
+        "STOPPED",
         "REFUSED"
       ],
       "title": "LabRunState",

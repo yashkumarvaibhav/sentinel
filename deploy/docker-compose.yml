@@ -136,7 +136,7 @@ services:
     profiles: [demo]
     build:
       context: .
-      dockerfile: deploy/producer.Dockerfile
+      dockerfile: deploy/demo-runner.Dockerfile
     networks: [sentinel_net]
     entrypoint: []
     command: ["python", "-m", "lab.runner", "--repo-root", "/app"]
@@ -158,11 +158,19 @@ services:
       STORAGE_POOL_MAX_SIZE: ${STORAGE_POOL_MAX_SIZE:-4}
       STORAGE_TIMEOUT_SECONDS: ${STORAGE_TIMEOUT_SECONDS:-10}
       REDPANDA_BROKERS: redpanda:9092
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-sentinel}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-sentinel}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-sentinel}
+      KUBECONFIG: /tmp/sentinel-kubeconfig
     volumes:
       - ./lab:/app/lab:ro
       - ./var:/app/var
+      - ./var/demo-runner-kubeconfig:/tmp/sentinel-kubeconfig:ro
     depends_on:
       postgres:
+        condition: service_healthy
+      clickhouse:
         condition: service_healthy
     deploy:
       resources:

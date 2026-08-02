@@ -13,6 +13,7 @@ from lab.scoring.decisions import load_decision_configs
 from action.actuators import SimulatedActuator
 from action.planner import LiveActionPlanner
 from api.incidents import IncidentFeedPublisher, IncidentPublishResult
+from api.invalidation import snapshot_invalidation
 from common.config import SentinelConfig, load_config
 from common.storage import (
     IncidentDetailRecord,
@@ -25,9 +26,11 @@ from contracts import (
     ActionControlSnapshot,
     Decision,
     DecisionAction,
+    DecompFrame,
     IncidentSeverity,
     Observation,
     SnapshotInvalidation,
+    SnapshotResource,
     SymptomKind,
     VerdictClass,
 )
@@ -133,6 +136,36 @@ class _Broker:
     def publish(self, event: SnapshotInvalidation) -> int:
         self.events.append(event)
         return len(self.events)
+
+
+@dataclass
+class _Frames:
+    writes: list[DecompFrame] = field(default_factory=list)
+
+    async def write_decomp_frames(self, records: tuple[DecompFrame, ...]) -> None:
+        self.writes.extend(records)
+
+
+def test_each_persisted_decomposition_tick_invalidates_the_live_chart() -> None:
+    store = _Store()
+    broker = _Broker()
+    frames = _Frames()
+    runtime = _runtime(
+        store,
+        broker,
+        frames=frames,
+        frame_invalidation=lambda: broker.publish(
+            snapshot_invalidation(SnapshotResource.DECOMPOSITION)
+        ),
+    )
+
+    _drive(runtime, quiet_ticks=40, surge_ticks=0)
+
+    assert frames.writes
+    decomposition_events = [
+        event for event in broker.events if event.resources == (SnapshotResource.DECOMPOSITION,)
+    ]
+    assert decomposition_events, "a stored frame must make the mounted chart refetch"
 
 
 def test_a_live_surge_reaches_storage_as_an_evidence_backed_incident() -> None:
@@ -266,6 +299,8 @@ def _runtime(
     broker: _Broker,
     *,
     planner: object | None = None,
+    frames: object | None = None,
+    frame_invalidation: object | None = None,
 ) -> LiveDecisionRuntime:
     config = _config()
     return LiveDecisionRuntime(
@@ -277,6 +312,8 @@ def _runtime(
         anchor_ts=START,
         stimulus_honesty="SIMULATED",
         planner=planner,  # type: ignore[arg-type]
+        frames=frames,  # type: ignore[arg-type]
+        frame_invalidation=frame_invalidation,  # type: ignore[arg-type]
     )
 
 

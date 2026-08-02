@@ -22,6 +22,7 @@ from action.actuators.base import Actuator
 from action.config import load_action_config
 from action.planner import LiveActionPlanner
 from api.incidents import IncidentFeedPublisher
+from api.invalidation import snapshot_invalidation
 from api.notify import PostgresInvalidationBroker
 from common.config import SentinelConfig, load_config
 from common.settings import settings
@@ -31,7 +32,7 @@ from common.storage import (
     create_postgres_pool,
 )
 from context.service import open_context_service
-from contracts import ActuatorKind
+from contracts import ActuatorKind, SnapshotResource
 from decision.config import (
     load_action_policy,
     load_evidence_agents,
@@ -170,6 +171,9 @@ async def run() -> None:
                 published_baseline=plan.published_baseline,
                 planner=planner,
                 frames=ClickHouseRepository(client=clickhouse, database=config.clickhouse_database),
+                frame_invalidation=lambda: broker.publish(
+                    snapshot_invalidation(SnapshotResource.DECOMPOSITION)
+                ),
             )
             service = LiveProducerService(
                 runtime=runtime,

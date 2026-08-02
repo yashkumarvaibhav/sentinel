@@ -45,11 +45,40 @@ class LabRunState(StrEnum):
 
     QUEUED = "QUEUED"
     RUNNING = "RUNNING"
+    # No stimulus remains active while paused. Resume deliberately starts the
+    # authored schedule again from its beginning so its evidence windows stay
+    # valid; it never guesses where a half-applied fault should continue.
+    PAUSED = "PAUSED"
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
+    STOPPED = "STOPPED"
     # The request was well-formed but this deployment will not carry it out -
     # no runner is attached, or the scenario is not one it may fire.
     REFUSED = "REFUSED"
+
+
+class LabRunControl(StrEnum):
+    """The three operator intents accepted for an authored run."""
+
+    PAUSE = "PAUSE"
+    RESUME = "RESUME"
+    STOP = "STOP"
+
+
+class LabRunControlRequest(ContractModel):
+    """Everything a browser may say when controlling one server-owned run."""
+
+    control: LabRunControl
+
+    @field_validator("control", mode="before")
+    @classmethod
+    def parse_wire_control(cls, value: object) -> object:
+        if isinstance(value, str):
+            try:
+                return LabRunControl(value)
+            except ValueError:
+                return value
+        return value
 
 
 class LabRunHonesty(ContractModel):
@@ -64,6 +93,15 @@ class LabRunHonesty(ContractModel):
     telemetry: HumanText
     stimulus: HumanText
     reproducibility: HumanText
+
+
+class LabRunnerHeartbeat(ContractModel):
+    """Recent proof that the separate lab-side process is actually present."""
+
+    worker_id: Identifier
+    seen_at: UtcDatetime
+    live_ready: bool
+    detail: HumanText
 
 
 class LabScenarioRequest(ContractModel):
@@ -98,6 +136,16 @@ class LabRunSnapshot(ContractModel):
     # pointing at. Absent is a first-class answer: a live run can be perfectly
     # successful and produce several, or none.
     incident_id: Identifier | None = None
+    # Durable intent, consumed by the lab-side runner. The gateway records it
+    # and cannot execute it, preserving the same boundary as scenario firing.
+    control_requested: LabRunControl | None = None
+    # Replay presentation stays in the capture's event-time coordinates. The
+    # browser reveals only through the durable cursor; it never retimestamps a
+    # recording to make old telemetry look live.
+    evidence_start_at: UtcDatetime | None = None
+    evidence_end_at: UtcDatetime | None = None
+    evidence_cursor_at: UtcDatetime | None = None
+    progress: float | None = Field(default=None, ge=0.0, le=1.0)
     detail: HumanText
     honesty: LabRunHonesty
 
@@ -106,6 +154,7 @@ class LabRunSnapshot(ContractModel):
         terminal = self.state in {
             LabRunState.SUCCEEDED,
             LabRunState.FAILED,
+            LabRunState.STOPPED,
             LabRunState.REFUSED,
         }
         if (self.finished_at is not None) != terminal:
@@ -114,6 +163,31 @@ class LabRunSnapshot(ContractModel):
             raise ValueError("a queued run has not started")
         if self.state is LabRunState.RUNNING and self.started_at is None:
             raise ValueError("a running run must say when it started")
+        if self.state is LabRunState.PAUSED and self.started_at is None:
+            raise ValueError("a paused run must say when it first started")
+        if self.control_requested is not None and (
+            self.state is not LabRunState.RUNNING
+            or self.control_requested not in {LabRunControl.PAUSE, LabRunControl.STOP}
+        ):
+            raise ValueError("only a running run may carry a pending pause or stop")
+        evidence = (self.evidence_start_at, self.evidence_end_at, self.evidence_cursor_at)
+        if any(item is not None for item in evidence):
+            if any(item is None for item in evidence):
+                raise ValueError("replay evidence bounds and cursor travel together")
+            if self.mode is not LabRunMode.REPLAY:
+                raise ValueError("only a replay may carry capture event-time progress")
+            start = self.evidence_start_at
+            end = self.evidence_end_at
+            cursor = self.evidence_cursor_at
+            assert start is not None and end is not None and cursor is not None
+            if not start <= cursor <= end:
+                raise ValueError("replay evidence cursor must stay within its capture bounds")
+        if self.progress is not None and self.state not in {
+            LabRunState.RUNNING,
+            LabRunState.PAUSED,
+            LabRunState.SUCCEEDED,
+        }:
+            raise ValueError("only an executing, paused or succeeded run carries progress")
         if self.started_at is not None and self.started_at < self.requested_at:
             raise ValueError("a run cannot start before it was requested")
         if self.finished_at is not None:
@@ -164,4 +238,12 @@ class LabRunFeed(ContractModel):
     # A launcher whose runner is not attached must say so rather than queueing
     # work nothing will ever claim.
     runner_attached: bool
+    live_ready: bool
+    runner_detail: HumanText
     note: HumanText
+
+    @model_validator(mode="after")
+    def validate_runner_readiness(self) -> Self:
+        if self.live_ready and not self.runner_attached:
+            raise ValueError("a missing runner cannot be live-ready")
+        return self

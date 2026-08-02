@@ -48,7 +48,10 @@ from contracts import (
     ActionStatus,
     AuditEntry,
     AuditEventKind,
+    LabRunControl,
+    LabRunnerHeartbeat,
     LabRunSnapshot,
+    LabRunState,
     SymptomEpisode,
 )
 
@@ -74,6 +77,7 @@ class PostgresRepository:
         self._symptom_episodes = sql.Identifier(schema, "symptom_episodes")
         self._live_producer_checkpoints = sql.Identifier(schema, "live_producer_checkpoints")
         self._lab_scenario_runs = sql.Identifier(schema, "lab_scenario_runs")
+        self._lab_runner_heartbeats = sql.Identifier(schema, "lab_runner_heartbeats")
 
     async def enqueue_lab_run(self, run: LabRunSnapshot) -> bool:
         """Record the intent to fire a scenario, if nothing else is in flight.
@@ -147,31 +151,103 @@ class PostgresRepository:
         return LabRunSnapshot.model_validate_json(cast(str, row[0]))
 
     async def complete_lab_run(self, run: LabRunSnapshot) -> bool:
-        """Write a terminal run state, releasing the one in-flight slot."""
-        if run.finished_at is None:
+        """Write a paused or terminal run state after owned resources settle."""
+        if run.state is LabRunState.PAUSED:
+            if run.finished_at is not None:
+                raise ValueError("a paused lab run has not finished")
+        elif run.finished_at is None:
             raise ValueError("a completed lab run must say when it finished")
-        query = sql.SQL(
+        select = sql.SQL("SELECT payload::text FROM {table} WHERE run_id = %s FOR UPDATE").format(
+            table=self._lab_scenario_runs
+        )
+        update = sql.SQL(
             """
             UPDATE {table}
             SET state = %s,
                 finished_at = %s,
                 claimed_by = NULL,
                 claim_expires_at = NULL,
+                control_requested = NULL,
                 payload = %s
             WHERE run_id = %s AND state = 'RUNNING'
             """
         ).format(table=self._lab_scenario_runs)
-        async with self._pool.connection() as connection:
+        async with self._pool.connection() as connection, connection.transaction():
+            cursor = await connection.execute(select, (run.run_id,))
+            row = await cursor.fetchone()
+            if row is None:
+                return False
+            current = LabRunSnapshot.model_validate_json(cast(str, row[0]))
+            # Progress is written by the isolated child while the parent owns
+            # the terminal transition. Preserve the child's capture window so
+            # a completed replay remains visible instead of snapping back to
+            # an empty wall-clock window as soon as it succeeds.
+            completed = run.model_copy(
+                update={
+                    "evidence_start_at": current.evidence_start_at,
+                    "evidence_end_at": current.evidence_end_at,
+                    "evidence_cursor_at": current.evidence_cursor_at,
+                    "progress": current.progress,
+                }
+            )
             cursor = await connection.execute(
-                query,
+                update,
                 (
-                    run.state.value,
-                    run.finished_at,
-                    Jsonb(run.model_dump(mode="json")),
-                    run.run_id,
+                    completed.state.value,
+                    completed.finished_at,
+                    Jsonb(completed.model_dump(mode="json")),
+                    completed.run_id,
                 ),
             )
             return cursor.rowcount == 1
+
+    async def control_lab_run(
+        self,
+        *,
+        run_id: str,
+        control: LabRunControl,
+        ts: datetime,
+    ) -> LabRunSnapshot | None:
+        """Atomically record an operator intent against the current revision."""
+        from api.lab import control_lab_run
+
+        select = sql.SQL("SELECT payload::text FROM {table} WHERE run_id = %s FOR UPDATE").format(
+            table=self._lab_scenario_runs
+        )
+        update = sql.SQL(
+            """
+            UPDATE {table}
+            SET state = %s,
+                started_at = %s,
+                finished_at = %s,
+                control_requested = %s,
+                payload = %s
+            WHERE run_id = %s
+            """
+        ).format(table=self._lab_scenario_runs)
+        async with self._pool.connection() as connection, connection.transaction():
+            cursor = await connection.execute(select, (run_id,))
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            current = LabRunSnapshot.model_validate_json(cast(str, row[0]))
+            controlled = control_lab_run(current, control=control, ts=ts)
+            await connection.execute(
+                update,
+                (
+                    controlled.state.value,
+                    controlled.started_at,
+                    controlled.finished_at,
+                    (
+                        None
+                        if controlled.control_requested is None
+                        else controlled.control_requested.value
+                    ),
+                    Jsonb(controlled.model_dump(mode="json")),
+                    run_id,
+                ),
+            )
+            return controlled
 
     async def list_lab_runs(self, *, limit: int) -> tuple[LabRunSnapshot, ...]:
         """The most recently requested runs, newest first."""
@@ -184,6 +260,94 @@ class PostgresRepository:
             cursor = await connection.execute(query, (limit,))
             rows = await cursor.fetchall()
         return tuple(LabRunSnapshot.model_validate_json(cast(str, row[0])) for row in rows)
+
+    async def get_lab_run(self, run_id: str) -> LabRunSnapshot | None:
+        """Read one authored run for the lab-side executor and control loop."""
+        query = sql.SQL("SELECT payload::text FROM {table} WHERE run_id = %s").format(
+            table=self._lab_scenario_runs
+        )
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(query, (run_id,))
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return LabRunSnapshot.model_validate_json(cast(str, row[0]))
+
+    async def update_lab_run_progress(
+        self,
+        *,
+        run_id: str,
+        progress: float,
+        detail: str,
+        evidence_start_at: datetime,
+        evidence_end_at: datetime,
+        evidence_cursor_at: datetime,
+    ) -> LabRunSnapshot | None:
+        """Advance replay presentation without consuming pending controls."""
+        select = sql.SQL("SELECT payload::text FROM {table} WHERE run_id = %s FOR UPDATE").format(
+            table=self._lab_scenario_runs
+        )
+        update = sql.SQL("UPDATE {table} SET payload = %s WHERE run_id = %s").format(
+            table=self._lab_scenario_runs
+        )
+        async with self._pool.connection() as connection, connection.transaction():
+            cursor = await connection.execute(select, (run_id,))
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            current = LabRunSnapshot.model_validate_json(cast(str, row[0]))
+            if current.state is not LabRunState.RUNNING:
+                return current
+            advanced = current.model_copy(
+                update={
+                    "progress": progress,
+                    "detail": detail,
+                    "evidence_start_at": evidence_start_at,
+                    "evidence_end_at": evidence_end_at,
+                    "evidence_cursor_at": evidence_cursor_at,
+                }
+            )
+            await connection.execute(
+                update,
+                (Jsonb(advanced.model_dump(mode="json")), run_id),
+            )
+            return advanced
+
+    async def put_lab_runner_heartbeat(self, heartbeat: LabRunnerHeartbeat) -> None:
+        """Upsert one worker's current measured capability."""
+        query = sql.SQL(
+            """
+            INSERT INTO {table} (worker_id, seen_at, live_ready, payload)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (worker_id) DO UPDATE SET
+                seen_at = EXCLUDED.seen_at,
+                live_ready = EXCLUDED.live_ready,
+                payload = EXCLUDED.payload
+            WHERE {table}.seen_at <= EXCLUDED.seen_at
+            """
+        ).format(table=self._lab_runner_heartbeats)
+        async with self._pool.connection() as connection:
+            await connection.execute(
+                query,
+                (
+                    heartbeat.worker_id,
+                    heartbeat.seen_at,
+                    heartbeat.live_ready,
+                    Jsonb(heartbeat.model_dump(mode="json")),
+                ),
+            )
+
+    async def latest_lab_runner_heartbeat(self) -> LabRunnerHeartbeat | None:
+        """The most recently seen runner, regardless of declared configuration."""
+        query = sql.SQL("SELECT payload::text FROM {table} ORDER BY seen_at DESC LIMIT 1").format(
+            table=self._lab_runner_heartbeats
+        )
+        async with self._pool.connection() as connection:
+            cursor = await connection.execute(query)
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return LabRunnerHeartbeat.model_validate_json(cast(str, row[0]))
 
     async def put_incident(self, record: IncidentRecord) -> bool:
         """Create or advance an incident; return whether durable state changed."""

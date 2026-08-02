@@ -1,4 +1,10 @@
-import type { LabRunFeed, LabRunMode, LabRunSnapshot, LabScenarioOption } from '@/contracts/types';
+import type {
+  LabRunControl,
+  LabRunFeed,
+  LabRunMode,
+  LabRunSnapshot,
+  LabScenarioOption,
+} from '@/contracts/types';
 
 /**
  * The launcher is a sensitive surface, so a missing credential is a distinct
@@ -16,8 +22,10 @@ const MODES = new Set<LabRunMode>(['REPLAY', 'LIVE']);
 const STATES = new Set<LabRunSnapshot['state']>([
   'QUEUED',
   'RUNNING',
+  'PAUSED',
   'SUCCEEDED',
   'FAILED',
+  'STOPPED',
   'REFUSED',
 ]);
 const FEED_STATUSES = new Set<LabRunFeed['status']>(['READY', 'BUSY', 'UNAVAILABLE']);
@@ -49,7 +57,8 @@ function parseRun(value: unknown): LabRunSnapshot {
   const body = record(value, 'lab run');
   const state = member(body.state, STATES, 'lab run state');
   const finishedAt = nullableText(body.finished_at, 'lab run finished_at');
-  const terminal = state === 'SUCCEEDED' || state === 'FAILED' || state === 'REFUSED';
+  const terminal =
+    state === 'SUCCEEDED' || state === 'FAILED' || state === 'STOPPED' || state === 'REFUSED';
   // The same coherence the server contract enforces, checked again here. A
   // payload claiming a run is still going while stating when it ended is
   // precisely the confusion these fields exist to prevent.
@@ -66,6 +75,14 @@ function parseRun(value: unknown): LabRunSnapshot {
     started_at: nullableText(body.started_at, 'lab run started_at'),
     finished_at: finishedAt,
     incident_id: nullableText(body.incident_id, 'lab run incident'),
+    control_requested:
+      body.control_requested === null || body.control_requested === undefined
+        ? null
+        : member(
+            body.control_requested,
+            new Set<LabRunControl>(['PAUSE', 'STOP']),
+            'lab run pending control',
+          ),
     detail: text(body.detail, 'lab run detail'),
     honesty: {
       telemetry: text(honesty.telemetry, 'lab run telemetry honesty'),
@@ -105,13 +122,39 @@ export function parseLabFeed(value: unknown): LabRunFeed {
   if (status === 'READY' && !runnerAttached) {
     throw new Error('a launcher with no runner attached cannot be ready');
   }
+  const liveReady = body.live_ready;
+  if (typeof liveReady !== 'boolean') throw new Error('the launcher must say whether live is ready');
+  if (liveReady && !runnerAttached) throw new Error('a missing runner cannot be live-ready');
   return {
     status,
     scenarios: (Array.isArray(body.scenarios) ? body.scenarios : []).map(parseScenario),
     runs: (Array.isArray(body.runs) ? body.runs : []).map(parseRun),
     runner_attached: runnerAttached,
+    live_ready: liveReady,
+    runner_detail: text(body.runner_detail, 'lab runner detail'),
     note: text(body.note, 'lab feed note'),
   };
+}
+
+export async function controlScenario(
+  credential: string | null,
+  runId: string,
+  control: LabRunControl,
+  signal?: AbortSignal,
+): Promise<LabRunFeed> {
+  const auth = headers(credential);
+  const init: RequestInit = {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...(auth ?? {}) },
+    body: JSON.stringify({ control }),
+  };
+  if (signal !== undefined) init.signal = signal;
+  const response = await fetch(`/api/lab/runs/${encodeURIComponent(runId)}/control`, init);
+  if (response.status === 401) throw new LabCredentialRequiredError();
+  if (![200, 404, 409, 503].includes(response.status)) {
+    throw new Error(`Controlling a scenario failed (${response.status})`);
+  }
+  return parseLabFeed(await response.json());
 }
 
 function headers(credential: string | null): HeadersInit | undefined {
