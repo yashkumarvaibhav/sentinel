@@ -1,0 +1,36 @@
+{
+  "gate_status": "pass",
+  "metrics": [
+    {
+      "evidence_end": "2026-08-02T09:14:46.498303Z",
+      "evidence_kind": "contained_real_testbed_action",
+      "evidence_start": "2026-08-02T09:14:29.731769Z",
+      "key": "autonomous_mttr",
+      "provenance": "phase-6-contained-action-recovery \u00b7 docs/reports/phase-6-reliability-proof.md",
+      "sample_count": 1,
+      "source_ids": [
+        "contained-payment-scale-1785662069"
+      ],
+      "telemetry_honesty": "REAL",
+      "unit": "seconds",
+      "value": 16.766534
+    },
+    {
+      "evidence_end": "2026-07-21T13:18:09.298278Z",
+      "evidence_kind": "held_out_decision_replay",
+      "evidence_start": "2026-07-21T13:14:39.125493Z",
+      "key": "quiet_day_false_acts",
+      "provenance": "phase-6-held-out-quiet-actions \u00b7 docs/reports/phase-6-reliability-proof.md",
+      "sample_count": 2,
+      "source_ids": [
+        "phase1-quiet-7901-v2",
+        "phase1-quiet-7919-v2"
+      ],
+      "telemetry_honesty": "REAL",
+      "unit": "actions",
+      "value": 0.0
+    }
+  ],
+  "proof_id": "phase-6-reliability-readers",
+  "version": 1
+}

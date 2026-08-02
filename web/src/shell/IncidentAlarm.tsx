@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 
 import { fetchIncidents } from '@/api/incidents';
-import type { IncidentFeedItem } from '@/contracts/types';
+import type { IncidentFeedItem, ObservationFreshness } from '@/contracts/types';
 import { playHooter } from '@/shell/hooter';
 import { useSnapshotInvalidation } from '@/shell/useSnapshotStream';
 import { useSound } from '@/shell/useSound';
@@ -21,8 +21,33 @@ const INCIDENT_RESOURCES = ['incidents'] as const;
  */
 function isAlarming(item: IncidentFeedItem): boolean {
   if (item.state === 'RESOLVED' || item.muted) return false;
-  return item.verdict_class === 'ATTACK' || item.severity === 'CRITICAL' || item.severity === 'HIGH';
+  if (
+    item.verdict_class === 'ATTACK' ||
+    item.verdict_class === 'COMBINATION' ||
+    item.severity === 'CRITICAL' ||
+    item.severity === 'HIGH'
+  )
+    return true;
+  return (
+    (item.verdict_class === 'OPERATIONAL_FAULT' ||
+      item.verdict_class === 'CODE_CONFIG_FAULT') &&
+    (item.action.decision_action === 'ACT' ||
+      item.action.decision_action === 'ESCALATE_TO_HUMAN' ||
+      item.action.decision_action === 'AUTO_CONTAIN_THEN_ESCALATE')
+  );
 }
+
+function alarmSignature(item: IncidentFeedItem): string | null {
+  if (!isAlarming(item)) return null;
+  // The incident store publishes a new revision whenever live evidence moves.
+  // Audio belongs to a newly alarming conclusion, not every measured update
+  // while the same conclusion remains active.
+  return [item.verdict_class, item.severity, item.action.decision_action].join(':');
+}
+
+type AlarmEvent =
+  | { kind: 'incident'; incident: IncidentFeedItem }
+  | { kind: 'observation'; observation: ObservationFreshness };
 
 /**
  * The interrupt: a banner and a siren when the platform confirms something that
@@ -34,8 +59,9 @@ function isAlarming(item: IncidentFeedItem): boolean {
  */
 export function IncidentAlarm() {
   const { enabled } = useSound();
-  const [alarm, setAlarm] = useState<IncidentFeedItem | null>(null);
-  const seen = useRef<Set<string> | null>(null);
+  const [alarm, setAlarm] = useState<AlarmEvent | null>(null);
+  const seen = useRef<Map<string, string | null> | null>(null);
+  const observation = useRef<ObservationFreshness['status'] | null>(null);
   const soundEnabled = useRef(enabled);
   soundEnabled.current = enabled;
 
@@ -45,18 +71,41 @@ export function IncidentAlarm() {
       .then((response) => {
         if (response.status !== 'ready') return;
         const alarming = response.incidents.filter(isAlarming);
+        const conclusions = new Map(
+          response.incidents.map((item) => [item.incident_id, alarmSignature(item)]),
+        );
 
         if (seen.current === null) {
           // First read of the session: remember, do not announce.
-          seen.current = new Set(response.incidents.map((item) => item.incident_id));
+          seen.current = conclusions;
+          observation.current = response.observation.status;
+          // Historical incidents stay silent, but a producer that is not
+          // watching *now* is current platform state and must remain visible.
+          if (response.observation.status !== 'WATCHING') {
+            setAlarm({ kind: 'observation', observation: response.observation });
+          }
           return;
         }
 
-        const fresh = alarming.find((item) => !seen.current?.has(item.incident_id));
-        for (const item of response.incidents) seen.current.add(item.incident_id);
+        const previousObservation = observation.current;
+        observation.current = response.observation.status;
+        if (
+          previousObservation === 'WATCHING' &&
+          response.observation.status !== 'WATCHING'
+        ) {
+          setAlarm({ kind: 'observation', observation: response.observation });
+          if (soundEnabled.current) playHooter();
+        }
+
+        const fresh = alarming.find(
+          (item) => seen.current?.get(item.incident_id) !== alarmSignature(item),
+        );
+        for (const [incidentId, conclusion] of conclusions) {
+          seen.current.set(incidentId, conclusion);
+        }
         if (fresh === undefined) return;
 
-        setAlarm(fresh);
+        setAlarm({ kind: 'incident', incident: fresh });
         if (soundEnabled.current) playHooter();
       })
       .catch(() => {
@@ -68,11 +117,18 @@ export function IncidentAlarm() {
   useSnapshotInvalidation(INCIDENT_RESOURCES, check);
   useEffect(() => {
     void check();
+    // A dead producer emits no invalidation announcing its own death. Polling
+    // the freshness snapshot is therefore the only way to turn silence into
+    // an interrupt while the SSE connection itself remains healthy.
+    const timer = window.setInterval(() => void check(), 10_000);
+    return () => window.clearInterval(timer);
   }, [check]);
 
   if (alarm === null) return null;
 
-  const verdict = alarm.verdict_class ?? 'UNCLASSIFIED';
+  const incident = alarm.kind === 'incident' ? alarm.incident : null;
+  const staleObservation = alarm.kind === 'observation' ? alarm.observation : null;
+  const verdict = incident?.verdict_class ?? 'UNCLASSIFIED';
   const VerdictIcon = verdict === 'ATTACK' ? ShieldAlert : verdictIcon(verdict);
 
   return (
@@ -89,12 +145,28 @@ export function IncidentAlarm() {
         strokeWidth={2.25}
       />
       <p className="text-danger min-w-0 flex-1 text-sm font-bold">
-        <VerdictIcon aria-hidden="true" className="mr-1.5 inline size-4" strokeWidth={2.25} />
-        {alarm.verdict_class === null
-          ? 'Unclassified incident'
-          : alarm.verdict_class.replaceAll('_', ' ').toLowerCase()}
-        {alarm.origin_service !== null && ` on ${alarm.origin_service}`}
-        <span className="text-body ml-2 font-normal">{alarm.reason}</span>
+        {incident === null ? (
+          <>
+            Live judgement stopped
+            <span className="text-body ml-2 font-normal">
+              {staleObservation?.note} Everything on the command screen is the last measured
+              state until the producer resumes.
+            </span>
+          </>
+        ) : (
+          <>
+            <VerdictIcon
+              aria-hidden="true"
+              className="mr-1.5 inline size-4"
+              strokeWidth={2.25}
+            />
+            {incident.verdict_class === null
+              ? 'Unclassified incident'
+              : incident.verdict_class.replaceAll('_', ' ').toLowerCase()}
+            {incident.origin_service !== null && ` on ${incident.origin_service}`}
+            <span className="text-body ml-2 font-normal">{incident.reason}</span>
+          </>
+        )}
       </p>
       {/* Audio is opt-in because a browser will not play it before a user
           gesture, so an alarm that defaulted on would be silently disarmed.
@@ -106,13 +178,15 @@ export function IncidentAlarm() {
           Sound is muted — arm the alarm in the header to hear the next one.
         </span>
       )}
-      <Link
-        to={`/incidents/${encodeURIComponent(alarm.incident_id)}`}
-        onClick={() => setAlarm(null)}
-        className="text-accent shrink-0 text-xs font-bold underline decoration-transparent underline-offset-4 hover:decoration-current"
-      >
-        Open evidence proof
-      </Link>
+      {incident !== null && (
+        <Link
+          to={`/incidents/${encodeURIComponent(incident.incident_id)}`}
+          onClick={() => setAlarm(null)}
+          className="text-accent shrink-0 text-xs font-bold underline decoration-transparent underline-offset-4 hover:decoration-current"
+        >
+          Open evidence proof
+        </Link>
+      )}
       <button
         type="button"
         onClick={() => setAlarm(null)}

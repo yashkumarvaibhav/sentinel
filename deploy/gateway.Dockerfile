@@ -17,6 +17,7 @@ RUN uv sync --extra api --extra storage --no-dev --no-install-project
 COPY platform/ ./
 COPY config/ ./config/
 COPY docs/reports/latest-score-proof.json ./reports/latest-score-proof.json
+COPY docs/reports/latest-reliability-proof.json ./reports/latest-reliability-proof.json
 RUN uv sync --extra api --extra storage --no-dev
 
 # Stamped at build time so /api/version can name the commit that is running.

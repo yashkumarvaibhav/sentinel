@@ -17,6 +17,8 @@ from contracts import (
     KpiMetric,
     KpiStatus,
     KpiWindow,
+    ReliabilityMetricEvidence,
+    ReliabilityProof,
     ScoreHeadline,
     ScoreProof,
 )
@@ -58,6 +60,44 @@ def _proof() -> ScoreProof:
                 value=181.6,
                 unit="seconds",
                 sample_count=20,
+            ),
+        ),
+    )
+
+
+def _reliability() -> ReliabilityProof:
+    return ReliabilityProof(
+        version=1,
+        proof_id="phase-6-reliability-readers",
+        gate_status="pass",
+        metrics=(
+            ReliabilityMetricEvidence(
+                key=KpiKey.AUTONOMOUS_MTTR,
+                value=18.4,
+                unit="seconds",
+                evidence_start=START + timedelta(hours=1),
+                evidence_end=START + timedelta(hours=1, seconds=18, milliseconds=400),
+                sample_count=1,
+                evidence_kind="contained_real_testbed_action",
+                source_ids=("contained-payment-scale-1",),
+                telemetry_honesty="REAL",
+                provenance=(
+                    "phase-6-contained-action-recovery · docs/reports/phase-6-reliability-proof.md"
+                ),
+            ),
+            ReliabilityMetricEvidence(
+                key=KpiKey.QUIET_DAY_FALSE_ACTS,
+                value=0.0,
+                unit="actions",
+                evidence_start=START + timedelta(hours=2),
+                evidence_end=START + timedelta(hours=2, minutes=4),
+                sample_count=2,
+                evidence_kind="held_out_decision_replay",
+                source_ids=("phase1-quiet-7901-v2", "phase1-quiet-7919-v2"),
+                telemetry_honesty="REAL",
+                provenance=(
+                    "phase-6-held-out-quiet-actions · docs/reports/phase-6-reliability-proof.md"
+                ),
             ),
         ),
     )
@@ -118,8 +158,31 @@ def test_only_detection_latency_is_currently_measured() -> None:
     assert all(metric.value is None for metric in unavailable)
 
 
+def test_the_two_new_readers_measure_mttr_and_a_real_quiet_day_zero() -> None:
+    response = build_kpi_response(_proof(), _reliability())
+
+    measured = [metric for metric in response.metrics if metric.status is KpiStatus.OK]
+    assert [(metric.key, metric.value, metric.sample_count) for metric in measured] == [
+        (KpiKey.DETECTION_LATENCY, 181.6, 20),
+        (KpiKey.AUTONOMOUS_MTTR, 18.4, 1),
+        (KpiKey.QUIET_DAY_FALSE_ACTS, 0.0, 2),
+    ]
+    assert response.metrics[2].window.description == (
+        "held-out quiet-day decision replay across 2 captures"
+    )
+    assert response.metrics[3].status is KpiStatus.INSUFFICIENT
+    assert response.metrics[3].value is None
+
+
 def test_the_endpoint_returns_the_validated_proof_and_four_kpis() -> None:
-    with TestClient(create_app(config=Settings(), probes={}, score_proof=_proof())) as client:
+    with TestClient(
+        create_app(
+            config=Settings(),
+            probes={},
+            score_proof=_proof(),
+            reliability_proof=_reliability(),
+        )
+    ) as client:
         response = client.get("/api/kpis")
 
     assert response.status_code == 200
@@ -131,6 +194,12 @@ def test_the_endpoint_returns_the_validated_proof_and_four_kpis() -> None:
         "phase2-cascade-9421-v1",
         "phase2-combo-9439-v1",
         "phase2-combo-9457-v1",
+    ]
+    assert [metric["status"] for metric in body["metrics"]] == [
+        "ok",
+        "ok",
+        "ok",
+        "insufficient",
     ]
 
 

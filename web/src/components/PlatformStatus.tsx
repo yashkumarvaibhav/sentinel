@@ -26,6 +26,8 @@ function useMeta() {
 
   useEffect(() => {
     void readHealth();
+    const timer = window.setInterval(() => void readHealth(), 10_000);
+    return () => window.clearInterval(timer);
   }, [readHealth]);
 
   useEffect(() => {

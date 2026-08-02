@@ -105,6 +105,8 @@ from contracts.kpi import (
     KpiResponse,
     KpiStatus,
     KpiWindow,
+    ReliabilityMetricEvidence,
+    ReliabilityProof,
     ScoreHeadline,
     ScoreProof,
 )
@@ -227,6 +229,8 @@ __all__ = [
     "ObservationStatus",
     "ReasonSubtype",
     "RejectedAlternative",
+    "ReliabilityMetricEvidence",
+    "ReliabilityProof",
     "RollbackVerificationStatus",
     "ScoreHeadline",
     "ScoreProof",

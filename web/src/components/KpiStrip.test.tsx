@@ -28,31 +28,31 @@ const RESPONSE = {
       key: 'autonomous_mttr',
       label: 'Autonomous MTTR',
       definition: 'Time from an autonomous action to verified SLO recovery.',
-      status: 'insufficient',
-      value: null,
+      status: 'ok',
+      value: 16.766534,
       unit: 'seconds',
       window: {
-        start: null,
-        end: null,
-        description: 'No production SLO reader verifies recovery windows.',
+        start: '2026-08-02T09:14:29Z',
+        end: '2026-08-02T09:14:46Z',
+        description: 'contained real-testbed action recovery across 1 run',
       },
-      sample_count: 0,
-      provenance: 'No production SLO reader verifies recovery windows.',
+      sample_count: 1,
+      provenance: 'phase-6-contained-action-recovery · report',
     },
     {
       key: 'quiet_day_false_acts',
       label: 'Quiet-day false acts',
       definition: 'Autonomous actions on held-out quiet-day evidence.',
-      status: 'insufficient',
-      value: null,
+      status: 'ok',
+      value: 0,
       unit: 'actions',
       window: {
-        start: null,
-        end: null,
-        description: 'No held-out action scorer exists yet.',
+        start: '2026-07-21T13:14:39Z',
+        end: '2026-07-21T13:18:09Z',
+        description: 'held-out quiet-day decision replay across 2 captures',
       },
-      sample_count: 0,
-      provenance: 'No held-out action scorer exists yet.',
+      sample_count: 2,
+      provenance: 'phase-6-held-out-quiet-actions · report',
     },
     {
       key: 'protected_cohort_integrity',
@@ -126,16 +126,18 @@ afterEach(() => {
 });
 
 describe('KpiStrip', () => {
-  it('shows the one measured value and never renders unavailable metrics as zero', async () => {
+  it('shows three measured values and keeps the one unavailable metric distinct', async () => {
     serve();
 
     render(<KpiStrip />);
 
     expect(await screen.findByText('181.6s')).toBeInTheDocument();
-    expect(screen.getAllByText('Insufficient evidence')).toHaveLength(3);
+    expect(screen.getByText('16.8s')).toBeInTheDocument();
+    expect(screen.getByText('0 actions')).toBeInTheDocument();
+    expect(screen.getAllByText('Insufficient evidence')).toHaveLength(1);
     expect(screen.queryByText('0s')).not.toBeInTheDocument();
-    expect(screen.queryByText('0 actions')).not.toBeInTheDocument();
     expect(screen.getByText(/20 samples/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 samples · held-out quiet-day/i)).toBeInTheDocument();
   });
 
   it('shows the generated held-out proof with honesty and capture provenance', async () => {

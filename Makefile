@@ -324,6 +324,13 @@ score-live-run: ## Score what the live producer STORED during one authored run (
 		$(if $(SPEND_HELD_OUT_SEED),--spend-held-out-seed) \
 		--report "/sentinel-docs/reports/$(or $(LIVE_RUN_REPORT),phase-6-live-run-score.md)"
 
+.PHONY: prove-reliability-kpis
+prove-reliability-kpis: ## Generate held-out quiet + contained real-action KPI proof
+	$(PY) python -m lab.scoring.reliability_proof \
+		--repo-root .. \
+		--proof ../docs/reports/latest-reliability-proof.json \
+		--report ../docs/reports/phase-6-reliability-proof.md
+
 .PHONY: score-negative-control
 score-negative-control: ## Assert no-fault captures emit zero fault-kind episodes (CAPTURE_ROOTS=)
 	@test -n "$(CAPTURE_ROOTS)" || { echo "CAPTURE_ROOTS is required" >&2; exit 2; }

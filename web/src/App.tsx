@@ -1,5 +1,6 @@
 import { DecompositionPanel } from '@/components/DecompositionPanel';
 import { KpiStrip } from '@/components/KpiStrip';
+import { LiveOperationsTape } from '@/components/LiveOperationsTape';
 import { IncidentFeed } from '@/components/IncidentFeed';
 import { CausalGraphPanel } from '@/components/CausalGraph';
 import { PlatformStatus } from '@/components/PlatformStatus';
@@ -38,6 +39,8 @@ export function App() {
           explains and what it cannot. The part nothing explains is the product.
         </InfoPopover>
       </header>
+
+      <LiveOperationsTape />
 
       <KpiStrip />
 

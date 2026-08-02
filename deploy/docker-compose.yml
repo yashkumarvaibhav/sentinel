@@ -190,6 +190,7 @@ services:
       SENTINEL_ENV: ${SENTINEL_ENV:-dev}
       SENTINEL_CONFIG_DIR: /app/config
       SENTINEL_SCORE_PROOF_PATH: /app/reports/latest-score-proof.json
+      SENTINEL_RELIABILITY_PROOF_PATH: /app/reports/latest-reliability-proof.json
       SENTINEL_SHARED_SECRET: ${SENTINEL_SHARED_SECRET:-}
       # Declared, not probed. The lab runner is a separate process with the repo
       # mounted (`make demo-runner`), and a launcher that queued work nothing

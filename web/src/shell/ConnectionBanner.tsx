@@ -1,4 +1,8 @@
+import { useEffect, useRef } from 'react';
+
+import { playHooter } from '@/shell/hooter';
 import { useLiveness } from '@/shell/useLiveness';
+import { useSound } from '@/shell/useSound';
 import { TriangleAlert, WifiOff } from '@/ui/icons';
 
 /**
@@ -18,6 +22,21 @@ import { TriangleAlert, WifiOff } from '@/ui/icons';
  */
 export function ConnectionBanner() {
   const liveness = useLiveness();
+  const { enabled } = useSound();
+  const previous = useRef(liveness.status);
+  const soundEnabled = useRef(enabled);
+  soundEnabled.current = enabled;
+
+  useEffect(() => {
+    const prior = previous.current;
+    previous.current = liveness.status;
+    const newlyBroken =
+      (liveness.status === 'down' || liveness.status === 'degraded') &&
+      prior !== 'down' &&
+      prior !== 'degraded';
+    if (newlyBroken && soundEnabled.current) playHooter();
+  }, [liveness.status]);
+
   if (
     liveness.status !== 'down' &&
     liveness.status !== 'reconnecting' &&

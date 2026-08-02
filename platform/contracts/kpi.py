@@ -121,6 +121,57 @@ class ScoreProof(ContractModel):
         return self
 
 
+class ReliabilityMetricEvidence(ContractModel):
+    """One measured KPI claim from an executable evidence reader.
+
+    This artifact is deliberately narrower than ``KpiMetric``: it carries only
+    measurements. Missing readers stay absent and the API turns their absence
+    into the typed insufficient state; a proof file cannot smuggle in a zero by
+    calling it unavailable.
+    """
+
+    key: Literal[KpiKey.AUTONOMOUS_MTTR, KpiKey.QUIET_DAY_FALSE_ACTS]
+    value: FiniteFloat = Field(ge=0.0)
+    unit: UnitName
+    evidence_start: UtcDatetime
+    evidence_end: UtcDatetime
+    sample_count: int = Field(ge=1)
+    evidence_kind: Literal["held_out_decision_replay", "contained_real_testbed_action"]
+    source_ids: tuple[Identifier, ...] = Field(min_length=1)
+    telemetry_honesty: Literal["REAL"]
+    provenance: HumanText
+
+    @model_validator(mode="after")
+    def coherent_evidence(self) -> Self:
+        if self.evidence_end < self.evidence_start:
+            raise ValueError("reliability evidence end must be at or after its start")
+        ensure_unique(self.source_ids, field_name="reliability evidence source IDs")
+        expected_unit = {
+            KpiKey.AUTONOMOUS_MTTR: "seconds",
+            KpiKey.QUIET_DAY_FALSE_ACTS: "actions",
+        }[KpiKey(self.key)]
+        if self.unit != expected_unit:
+            raise ValueError(f"{self.key} reliability evidence must use {expected_unit}")
+        return self
+
+
+class ReliabilityProof(ContractModel):
+    """Versioned proof for KPI readers that landed after the symptom score."""
+
+    version: Literal[1]
+    proof_id: Identifier
+    gate_status: Literal["pass", "fail"]
+    metrics: tuple[ReliabilityMetricEvidence, ...] = Field(min_length=1, max_length=2)
+
+    @model_validator(mode="after")
+    def unique_supported_metrics(self) -> Self:
+        ensure_unique(
+            tuple(str(metric.key) for metric in self.metrics),
+            field_name="reliability proof metric keys",
+        )
+        return self
+
+
 class KpiResponse(ContractModel):
     """The command centre's one typed reliability snapshot."""
 

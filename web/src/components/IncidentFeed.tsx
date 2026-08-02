@@ -150,7 +150,7 @@ const FRESH_FOR_MS = 12_000;
 export function IncidentFeed({ className = '' }: { className?: string } = {}) {
   const [load, setLoad] = useState<Load>({ state: 'loading' });
   const [fresh, setFresh] = useState<Set<string>>(() => new Set());
-  const seen = useRef<Set<string> | null>(null);
+  const seen = useRef<Map<string, string> | null>(null);
   const inFlight = useRef<Promise<void> | null>(null);
   const controller = useRef<AbortController | null>(null);
   const refetchQueued = useRef(false);
@@ -171,18 +171,27 @@ export function IncidentFeed({ className = '' }: { className?: string } = {}) {
           if (response.status === 'ready') {
             // The first read of a session is history, not news, so it seeds
             // without highlighting - the same rule the alarm follows.
-            const ids = response.incidents.map((incident) => incident.incident_id);
+            const revisions = new Map(
+              response.incidents.map((incident) => [incident.incident_id, incident.updated_at]),
+            );
             if (seen.current === null) {
-              seen.current = new Set(ids);
+              seen.current = revisions;
             } else {
-              const arrived = ids.filter((id) => !seen.current?.has(id));
-              for (const id of ids) seen.current.add(id);
-              if (arrived.length > 0) {
-                setFresh((current) => new Set([...current, ...arrived]));
+              // An incident changing verdict/action/state matters just as much
+              // as a new ID arriving. Ring both so an operator can see what
+              // moved without memorising the prior card.
+              const changed = response.incidents
+                .filter(
+                  (incident) => seen.current?.get(incident.incident_id) !== incident.updated_at,
+                )
+                .map((incident) => incident.incident_id);
+              seen.current = revisions;
+              if (changed.length > 0) {
+                setFresh((current) => new Set([...current, ...changed]));
                 window.setTimeout(() => {
                   setFresh((current) => {
                     const next = new Set(current);
-                    for (const id of arrived) next.delete(id);
+                    for (const id of changed) next.delete(id);
                     return next;
                   });
                 }, FRESH_FOR_MS);

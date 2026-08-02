@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -130,7 +130,7 @@ describe('IncidentAlarm', () => {
     await waitFor(() => expect(fetch).toHaveBeenCalled());
 
     body = snapshot([incident('incident-2'), incident('incident-1')]);
-    FakeEventSource.instances[0]?.emit();
+    act(() => FakeEventSource.instances[0]?.emit());
 
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
     expect(playHooter).toHaveBeenCalledTimes(1);
@@ -146,13 +146,116 @@ describe('IncidentAlarm', () => {
       incident('quiet-1', { severity: 'LOW', verdict_class: 'OPERATIONAL_FAULT', state: 'RESOLVED' }),
       incident('incident-1'),
     ]);
-    FakeEventSource.instances[0]?.emit();
+    act(() => FakeEventSource.instances[0]?.emit());
 
     // An alarm that fires for everything teaches an operator to ignore alarms,
     // which costs more than the alarm was worth.
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
     expect(playHooter).not.toHaveBeenCalled();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('sounds for a new active code or operational fault handed to a person', async () => {
+    body = snapshot([incident('incident-1')]);
+    renderAlarm();
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+
+    body = snapshot([
+      incident('code-1', {
+        severity: 'LOW',
+        verdict_class: 'CODE_CONFIG_FAULT',
+        action: {
+          decision_action: 'ESCALATE_TO_HUMAN',
+          effect_status: null,
+          detail: 'The broken change needs an operator.',
+        },
+      }),
+      incident('incident-1'),
+    ]);
+    act(() => FakeEventSource.instances[0]?.emit());
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/code config fault/i));
+    expect(playHooter).toHaveBeenCalledTimes(1);
+  });
+
+  it('sounds when an existing incident becomes actionable', async () => {
+    body = snapshot([
+      incident('changing-1', {
+        severity: 'LOW',
+        verdict_class: null,
+        action: { decision_action: 'ALERT', effect_status: null, detail: 'Watching.' },
+      }),
+    ]);
+    renderAlarm();
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+
+    body = snapshot([
+      incident('changing-1', {
+        severity: 'LOW',
+        verdict_class: 'OPERATIONAL_FAULT',
+        updated_at: '2026-08-02T03:00:10Z',
+        action: {
+          decision_action: 'ESCALATE_TO_HUMAN',
+          effect_status: null,
+          detail: 'Operator action is required.',
+        },
+      }),
+    ]);
+    act(() => FakeEventSource.instances[0]?.emit());
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/operational fault/i));
+    expect(playHooter).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not repeat the alarm for evidence-only revisions of the same conclusion', async () => {
+    body = snapshot([incident('incident-1')]);
+    renderAlarm();
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+
+    body = snapshot([incident('incident-1', { updated_at: '2026-08-02T03:00:10Z' })]);
+    act(() => FakeEventSource.instances[0]?.emit());
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(playHooter).not.toHaveBeenCalled();
+  });
+
+  it('interrupts visibly but silently when the producer is already stale on page load', async () => {
+    body = {
+      ...snapshot([incident('incident-1')]),
+      observation: {
+        status: 'STALE' as const,
+        last_judged_at: '2026-08-02T02:00:00Z',
+        age_seconds: 3600,
+        expected_within_seconds: 120,
+        note: 'Nothing has been judged recently.',
+      },
+    };
+    renderAlarm();
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/live judgement stopped/i));
+    expect(playHooter).not.toHaveBeenCalled();
+  });
+
+  it('sounds when live judgement transitions from watching to stale', async () => {
+    body = snapshot([incident('incident-1')]);
+    renderAlarm();
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+
+    body = {
+      ...snapshot([incident('incident-1')]),
+      observation: {
+        status: 'STALE' as const,
+        last_judged_at: '2026-08-02T02:00:00Z',
+        age_seconds: 3600,
+        expected_within_seconds: 120,
+        note: 'Nothing has been judged recently.',
+      },
+    };
+    act(() => FakeEventSource.instances[0]?.emit());
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/live judgement stopped/i));
+    expect(playHooter).toHaveBeenCalledTimes(1);
   });
 
   it('shows the banner but stays quiet when the alarm is muted', async () => {
@@ -162,7 +265,7 @@ describe('IncidentAlarm', () => {
     await waitFor(() => expect(fetch).toHaveBeenCalled());
 
     body = snapshot([incident('incident-2'), incident('incident-1')]);
-    FakeEventSource.instances[0]?.emit();
+    act(() => FakeEventSource.instances[0]?.emit());
 
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
     expect(playHooter).not.toHaveBeenCalled();

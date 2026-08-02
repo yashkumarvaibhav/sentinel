@@ -13,6 +13,8 @@ from contracts import (
     KpiResponse,
     KpiStatus,
     KpiWindow,
+    ReliabilityMetricEvidence,
+    ReliabilityProof,
     ScoreHeadline,
     ScoreProof,
 )
@@ -20,6 +22,10 @@ from contracts import (
 
 class ScoreProofUnavailableError(ValueError):
     """The configured proof cannot support measured KPI claims."""
+
+
+class ReliabilityProofUnavailableError(ValueError):
+    """The post-score reliability proof is missing or malformed."""
 
 
 def load_score_proof(path: Path) -> ScoreProof:
@@ -30,7 +36,18 @@ def load_score_proof(path: Path) -> ScoreProof:
         raise ScoreProofUnavailableError(f"score proof unavailable: {exc}") from exc
 
 
-def build_kpi_response(proof: ScoreProof) -> KpiResponse:
+def load_reliability_proof(path: Path) -> ReliabilityProof:
+    """Read the separately generated action-safety evidence artifact."""
+    try:
+        return ReliabilityProof.model_validate_json(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValidationError) as exc:
+        raise ReliabilityProofUnavailableError(f"reliability proof unavailable: {exc}") from exc
+
+
+def build_kpi_response(
+    proof: ScoreProof,
+    reliability: ReliabilityProof | None = None,
+) -> KpiResponse:
     """Map the latest score evidence to the four reliability questions."""
     latency = _headline(proof, DETECTION_LATENCY_HEADLINE_KEY)
     measured_latency = latency is not None and latency.status is KpiStatus.OK
@@ -52,11 +69,15 @@ def build_kpi_response(proof: ScoreProof) -> KpiResponse:
         sample_count=latency.sample_count if latency is not None else 0,
         provenance=f"{proof.proof_id} · {proof.report_path}",
     )
+    measured = {} if reliability is None else {metric.key: metric for metric in reliability.metrics}
+    mttr = measured.get(KpiKey.AUTONOMOUS_MTTR)
+    quiet = measured.get(KpiKey.QUIET_DAY_FALSE_ACTS)
     return KpiResponse(
         status="ready",
         metrics=(
             latency_metric,
-            _insufficient_metric(
+            _measured_or_insufficient(
+                evidence=mttr,
                 key=KpiKey.AUTONOMOUS_MTTR,
                 label="Autonomous MTTR",
                 definition=(
@@ -64,9 +85,10 @@ def build_kpi_response(proof: ScoreProof) -> KpiResponse:
                     "affected service-level objective."
                 ),
                 unit="seconds",
-                reason="No production SLO reader currently verifies action-to-recovery windows.",
+                reason="No real action-to-SLO-recovery proof is attached.",
             ),
-            _insufficient_metric(
+            _measured_or_insufficient(
+                evidence=quiet,
                 key=KpiKey.QUIET_DAY_FALSE_ACTS,
                 label="Quiet-day false acts",
                 definition=(
@@ -74,10 +96,7 @@ def build_kpi_response(proof: ScoreProof) -> KpiResponse:
                     "fault requiring action."
                 ),
                 unit="actions",
-                reason=(
-                    "No held-out action scorer exists yet; zero residual false positives is "
-                    "not evidence of zero autonomous actions."
-                ),
+                reason="No held-out quiet-day decision proof is attached.",
             ),
             _insufficient_metric(
                 key=KpiKey.PROTECTED_COHORT_INTEGRITY,
@@ -169,4 +188,46 @@ def _insufficient_metric(
         window=KpiWindow(start=None, end=None, description=reason),
         sample_count=0,
         provenance=reason,
+    )
+
+
+def _measured_or_insufficient(
+    *,
+    evidence: ReliabilityMetricEvidence | None,
+    key: KpiKey,
+    label: str,
+    definition: str,
+    unit: str,
+    reason: str,
+) -> KpiMetric:
+    if evidence is None:
+        return _insufficient_metric(
+            key=key,
+            label=label,
+            definition=definition,
+            unit=unit,
+            reason=reason,
+        )
+    return KpiMetric(
+        key=key,
+        label=label,
+        definition=definition,
+        status=KpiStatus.OK,
+        value=evidence.value,
+        unit=unit,
+        window=KpiWindow(
+            start=evidence.evidence_start,
+            end=evidence.evidence_end,
+            description={
+                "held_out_decision_replay": (
+                    f"held-out quiet-day decision replay across {evidence.sample_count} captures"
+                ),
+                "contained_real_testbed_action": (
+                    f"contained real-testbed action recovery across {evidence.sample_count} run"
+                    f"{'s' if evidence.sample_count != 1 else ''}"
+                ),
+            }[evidence.evidence_kind],
+        ),
+        sample_count=evidence.sample_count,
+        provenance=evidence.provenance,
     )

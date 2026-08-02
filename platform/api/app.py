@@ -57,8 +57,10 @@ from api.incidents import (
     unavailable_incident_snapshot,
 )
 from api.kpis import (
+    ReliabilityProofUnavailableError,
     ScoreProofUnavailableError,
     build_kpi_response,
+    load_reliability_proof,
     load_score_proof,
     unavailable_kpi_response,
 )
@@ -103,6 +105,7 @@ from contracts import (
     IncidentFeedResponse,
     KpiResponse,
     LabRunFeed,
+    ReliabilityProof,
     ScoreProof,
     SecurityResponse,
     SnapshotResource,
@@ -141,6 +144,7 @@ def create_app(
     decomposition_reader: DecompositionReader | None = None,
     stream_broker: StreamBroker | None = None,
     score_proof: ScoreProof | None = None,
+    reliability_proof: ReliabilityProof | None = None,
     incident_reader: IncidentFeedReader | None = None,
     causal_graph_reader: CausalGraphReader | None = None,
     incident_detail_reader: IncidentDetailReader | None = None,
@@ -239,6 +243,19 @@ def create_app(
         except ScoreProofUnavailableError as exc:
             app.state.score_proof = None
             app.state.score_proof_error = str(exc)
+        try:
+            app.state.reliability_proof = (
+                reliability_proof
+                if reliability_proof is not None
+                else load_reliability_proof(config.reliability_proof_path)
+            )
+            app.state.reliability_proof_error = None
+        except ReliabilityProofUnavailableError as exc:
+            # The original score proof still supports detection latency. A
+            # missing later reader degrades only its own KPI; it must not turn
+            # the entire four-metric response into a 503.
+            app.state.reliability_proof = None
+            app.state.reliability_proof_error = str(exc)
         # Same rule as the ledger: unset answers 503 rather than pretending the
         # store is empty. "No store attached" and "nothing happened" must not
         # look the same.
@@ -411,7 +428,7 @@ def create_app(
             return unavailable_kpi_response(
                 app.state.score_proof_error or "score proof unavailable"
             )
-        return build_kpi_response(proof)
+        return build_kpi_response(proof, app.state.reliability_proof)
 
     @app.get("/api/incidents", tags=["incidents"], response_model=IncidentFeedResponse)
     async def incidents(

@@ -20,6 +20,9 @@ _DEFAULT_CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 _DEFAULT_SCORE_PROOF_PATH = (
     Path(__file__).resolve().parents[2] / "docs" / "reports" / "latest-score-proof.json"
 )
+_DEFAULT_RELIABILITY_PROOF_PATH = (
+    Path(__file__).resolve().parents[2] / "docs" / "reports" / "latest-reliability-proof.json"
+)
 
 
 class Settings(BaseSettings):
@@ -33,6 +36,10 @@ class Settings(BaseSettings):
     score_proof_path: Path = Field(
         default=_DEFAULT_SCORE_PROOF_PATH,
         alias="SENTINEL_SCORE_PROOF_PATH",
+    )
+    reliability_proof_path: Path = Field(
+        default=_DEFAULT_RELIABILITY_PROOF_PATH,
+        alias="SENTINEL_RELIABILITY_PROOF_PATH",
     )
 
     postgres_host: str = Field(default="postgres", alias="POSTGRES_HOST")
