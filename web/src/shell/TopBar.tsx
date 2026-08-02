@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type RefObject } from 'react';
 
 import { fetchVersion } from '@/api/platform';
 import type { VersionInfo } from '@/api/platform';
@@ -103,31 +103,60 @@ function useBuildStamp(): VersionInfo | null {
  * "is what I am looking at the commit I just pushed?", and that question is
  * asked while looking at the top of the page.
  */
-export function TopBar() {
+export function TopBar({
+  onOpenNav,
+  navOpen = false,
+  openNavRef,
+}: {
+  onOpenNav?: () => void;
+  navOpen?: boolean;
+  openNavRef?: RefObject<HTMLButtonElement | null>;
+} = {}) {
   const liveness = useLiveness();
   const version = useBuildStamp();
   const { audience, setAudience } = useAudience();
 
   return (
-    <header className="border-line bg-raised sticky top-0 z-10 border-b">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3 sm:px-6">
-        {/* The wordmark lockup, at the proportions the other products in this
-            family ship: a 36px marked box, a 28px mark inside it, and the name
-            in Newsreader at weight 500. The kit calls this pairing the most
-            recognisable piece of the identity — Sentinel previously rendered
-            its name in the same sans as its buttons, with no mark at all. */}
-        <a href="/command" className="flex min-w-0 items-center gap-2.5">
+    <header className="border-line bg-page sticky top-0 z-30 border-b">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 sm:gap-x-4 sm:px-6 lg:px-8">
+        {onOpenNav && (
+          <button
+            ref={openNavRef}
+            type="button"
+            onClick={onOpenNav}
+            aria-label="Open navigation"
+            aria-expanded={navOpen}
+            className="border-line text-ink hover:bg-hover flex size-11 shrink-0 items-center justify-center rounded-md border lg:hidden"
+          >
+            <svg
+              aria-hidden="true"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            >
+              <path d="M4 6.5h16M4 12h16M4 17.5h16" />
+            </svg>
+          </button>
+        )}
+
+        {/* The wordmark rides in the rail on desktop; here it is the mobile
+            fallback, at the same proportions the family ships everywhere. */}
+        <a href="/command" className="flex min-w-0 items-center gap-2.5 lg:hidden">
           <span className="border-line bg-raised flex size-9 shrink-0 items-center justify-center rounded-sm border">
             <BrandMark className="size-7" />
           </span>
-          <span className="text-ink truncate font-serif text-xl font-medium tracking-tight">
+          <span className="text-ink hidden truncate font-serif text-xl font-medium tracking-tight sm:inline">
             Sentinel
           </span>
         </a>
 
         <ConnectionDot liveness={liveness} />
 
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex items-center gap-2 sm:gap-3">
           {/* Both options visible, the current one marked, and the group named.
               A single button captioned with the audience you are already in
               reads as "click for this", which is the opposite of what it did. */}

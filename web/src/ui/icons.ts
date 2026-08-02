@@ -36,6 +36,8 @@ export {
   Wrench,
   FileCode2,
   Layers,
+  // Navigation
+  LayoutGrid,
   // Controls
   Sun,
   Moon,

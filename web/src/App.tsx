@@ -3,16 +3,21 @@ import { KpiStrip } from '@/components/KpiStrip';
 import { IncidentFeed } from '@/components/IncidentFeed';
 import { CausalGraphPanel } from '@/components/CausalGraph';
 import { PlatformStatus } from '@/components/PlatformStatus';
+import { InfoPopover } from '@/ui/InfoPopover';
 
 export function App() {
   return (
-    <div className="flex flex-col gap-10">
-      <header className="flex flex-col gap-3">
-        <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Command center</h1>
-        <p className="text-body max-w-xl text-balance">
+    <div className="flex flex-col gap-8">
+      {/* The thesis used to be two lines of prose under the title, so the first
+          paint of a command center was mostly explanation. It is not deleted —
+          it is the reason every number below means anything — it just stops
+          being the first thing an operator has to read past on every visit. */}
+      <header className="flex items-center gap-2">
+        <h1 className="font-serif">Command center</h1>
+        <InfoPopover label="What this screen is showing">
           An event explains volume, not behavior — so every surge is split into what the world
           explains and what it cannot. The part nothing explains is the product.
-        </p>
+        </InfoPopover>
       </header>
 
       <DecompositionPanel />
@@ -24,11 +29,6 @@ export function App() {
       <CausalGraphPanel />
 
       <PlatformStatus />
-
-      <footer className="text-muted text-xs">
-        The decomposition hero, reliability proof, incident feed, and causal graph read the
-        platform's own evidence.
-      </footer>
     </div>
   );
 }

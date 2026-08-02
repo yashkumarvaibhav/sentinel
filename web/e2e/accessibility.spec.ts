@@ -16,7 +16,7 @@ import { expect, test } from '@playwright/test';
  * separately, so a pairing can be legal in one and illegal in the other.
  */
 
-const ROUTES = ['/command', '/security', '/demo'] as const;
+const ROUTES = ['/command', '/incidents', '/security', '/demo'] as const;
 const THEMES = ['light', 'dark'] as const;
 
 for (const theme of THEMES) {

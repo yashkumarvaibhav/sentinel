@@ -1,75 +1,155 @@
-import { NavLink, Outlet } from 'react-router';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { Link, Outlet } from 'react-router';
 
+import { CommandNav } from '@/shell/CommandNav';
 import { TopBar } from '@/shell/TopBar';
 import { SnapshotStreamProvider } from '@/shell/SnapshotStream';
+import { BrandMark } from '@/ui/BrandMark';
+
+function BrandBlock() {
+  return (
+    <Link to="/command" className="flex min-w-0 items-center gap-2.5">
+      <span className="border-line bg-raised flex size-9 shrink-0 items-center justify-center rounded-sm border">
+        <BrandMark className="size-7" />
+      </span>
+      <span className="text-ink truncate font-serif text-xl font-medium tracking-tight">
+        Sentinel
+      </span>
+    </Link>
+  );
+}
 
 /**
- * The frame every screen is rendered inside.
+ * The frame every screen renders inside.
  *
- * The router landed with the incident proof screen, the first second URL.
- * Navigation is intentionally limited to screens that exist now; future
- * information-architecture labels do not become misleading dead links.
+ * A persistent rail rather than a centred column. The content used to be pinned
+ * to 1152px, which is a 55% gutter on a wide monitor — an editorial width worn
+ * by a dashboard. A command center is the kit's compact-density case: the rail
+ * carries the navigation so the working area keeps the full width, and the
+ * screen stops looking like an article about a control room.
+ *
+ * The rail collapses to a drawer below `lg` rather than disappearing, because
+ * the routes it lists are the only way to reach three of the four screens.
  */
 export function CommandShell() {
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const openButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (drawerOpen) closeButtonRef.current?.focus();
+  }, [drawerOpen]);
+
+  function closeDrawer() {
+    setDrawerOpen(false);
+    openButtonRef.current?.focus();
+  }
+
+  // A drawer that can be tabbed out of behind its own backdrop is a trap of the
+  // other kind: focus lands on controls the user cannot see.
+  function onDrawerKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      closeDrawer();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusables = drawerRef.current?.querySelectorAll<HTMLElement>(
+      "a[href], button:not([tabindex='-1'])",
+    );
+    if (focusables === undefined || focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (first === undefined || last === undefined) return;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
   return (
     <SnapshotStreamProvider>
-      <div className="flex min-h-screen flex-col">
+      <div className="bg-page flex min-h-screen">
         {/* First stop on the tab order: a keyboard user should not have to walk
             the header to reach the incident that woke them up. */}
         <a
           href="#main"
-          className="bg-accent text-accent-contrast sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-20 focus:rounded focus:px-3 focus:py-2"
+          className="border-line bg-raised text-accent sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50 focus:rounded-md focus:border focus:px-4 focus:py-2.5 focus:text-sm focus:font-bold"
         >
           Skip to content
         </a>
 
-        <TopBar />
-
-        <nav aria-label="Primary" className="border-line bg-sidebar border-b">
-          <div className="mx-auto flex max-w-6xl gap-1 px-4 py-2 sm:px-6">
-            <NavLink
-              className={({ isActive }) =>
-                `min-h-11 rounded-md px-3 py-3 text-xs font-medium sm:min-h-0 sm:py-2 ${
-                  isActive ? 'bg-accent-soft text-accent-hover' : 'text-muted hover:text-ink'
-                }`
-              }
-              end
-              to="/command"
-            >
-              Command
-            </NavLink>
-            <NavLink
-              className="text-muted hover:text-ink min-h-11 rounded-md px-3 py-3 text-xs font-medium sm:min-h-0 sm:py-2"
-              to="/command#live-incidents"
-            >
-              Incidents
-            </NavLink>
-            <NavLink
-              className={({ isActive }) =>
-                `min-h-11 rounded-md px-3 py-3 text-xs font-medium sm:min-h-0 sm:py-2 ${
-                  isActive ? 'bg-accent-soft text-accent-hover' : 'text-muted hover:text-ink'
-                }`
-              }
-              to="/security"
-            >
-              Security
-            </NavLink>
-            <NavLink
-              className={({ isActive }) =>
-                `min-h-11 rounded-md px-3 py-3 text-xs font-medium sm:min-h-0 sm:py-2 ${
-                  isActive ? 'bg-accent-soft text-accent-hover' : 'text-muted hover:text-ink'
-                }`
-              }
-              to="/demo"
-            >
-              Demo
-            </NavLink>
+        <aside className="border-line bg-sidebar sticky top-0 hidden h-screen w-60 shrink-0 overflow-y-auto border-r lg:block">
+          <div className="border-line border-b px-4 py-4">
+            <BrandBlock />
+            <p className="text-muted mt-2 text-xs">Context-aware observability console</p>
           </div>
-        </nav>
+          <CommandNav />
+        </aside>
 
-        <main id="main" className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6">
-          <Outlet />
-        </main>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <TopBar onOpenNav={() => setDrawerOpen(true)} navOpen={drawerOpen} openNavRef={openButtonRef} />
+
+          {/* `overflow-x-clip` rather than `hidden`: sticky positioning inside
+              still works, and the page body stops scrolling sideways when a
+              graph or an unbreakable identifier is wider than a phone. */}
+          <main
+            id="main"
+            tabIndex={-1}
+            className="min-w-0 flex-1 overflow-x-clip px-4 py-6 focus:outline-none sm:px-6 lg:px-8"
+          >
+            <Outlet />
+          </main>
+        </div>
+
+        {drawerOpen && (
+          <div className="fixed inset-0 z-40 lg:hidden">
+            <button
+              type="button"
+              aria-label="Close navigation"
+              tabIndex={-1}
+              onClick={closeDrawer}
+              className="absolute inset-0 bg-black/40"
+            />
+            <div
+              ref={drawerRef}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Navigation"
+              onKeyDown={onDrawerKeyDown}
+              className="border-line bg-sidebar absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col overflow-y-auto border-r"
+            >
+              <div className="border-line flex items-center justify-between gap-2 border-b px-4 py-3">
+                <BrandBlock />
+                <button
+                  ref={closeButtonRef}
+                  type="button"
+                  onClick={closeDrawer}
+                  aria-label="Close navigation"
+                  className="border-line text-ink hover:bg-hover flex size-11 shrink-0 items-center justify-center rounded-md border"
+                >
+                  <svg
+                    aria-hidden="true"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  >
+                    <path d="M6 6l12 12M18 6L6 18" />
+                  </svg>
+                </button>
+              </div>
+              <CommandNav onNavigate={closeDrawer} />
+            </div>
+          </div>
+        )}
       </div>
     </SnapshotStreamProvider>
   );

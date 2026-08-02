@@ -124,3 +124,48 @@ test.describe('the platform under the page', () => {
     expect(answer.status()).toBe(401);
   });
 });
+
+test.describe('the information architecture', () => {
+  test('Command and Incidents are different screens, not the same one twice', async ({ page }) => {
+    await page.goto('/command');
+    const command = await page.getByRole('heading', { level: 1 }).innerText();
+
+    // The nav item used to point at `/command#live-incidents`, so following it
+    // left you exactly where you were. This is the assertion that it stopped:
+    // a distinct URL, a distinct heading, and a control the other screen has
+    // no reason to own.
+    await page.getByRole('link', { name: /^Incidents/ }).click();
+    await expect(page).toHaveURL(/\/incidents$/);
+
+    const incidents = await page.getByRole('heading', { level: 1 }).innerText();
+    expect(incidents).not.toBe(command);
+    await expect(page.getByRole('searchbox', { name: 'Search' })).toBeVisible();
+  });
+
+  test('every primary nav item resolves to its own route and says it is current', async ({
+    page,
+  }) => {
+    const routes = [
+      { name: /^Command/, url: /\/command$/ },
+      { name: /^Incidents/, url: /\/incidents$/ },
+      { name: /^Security/, url: /\/security$/ },
+      { name: /^Demo/, url: /\/demo$/ },
+    ];
+
+    await page.goto('/command');
+    const seen = new Set<string>();
+
+    for (const route of routes) {
+      await page.getByRole('link', { name: route.name }).click();
+      await expect(page).toHaveURL(route.url);
+      // An active state that never renders is why the nav read as dead.
+      await expect(page.getByRole('link', { name: route.name })).toHaveAttribute(
+        'aria-current',
+        'page',
+      );
+      seen.add(page.url());
+    }
+
+    expect(seen.size).toBe(routes.length);
+  });
+});

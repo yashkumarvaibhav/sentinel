@@ -55,14 +55,18 @@ describe('App', () => {
     expect(
       screen.getByRole('heading', { level: 1, name: 'Command center' }),
     ).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Sentinel' })).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: /Sentinel/ }).length).toBeGreaterThan(0);
     expect(screen.getByRole('navigation', { name: 'Primary' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Command' })).toHaveAttribute('href', '/command');
-    expect(screen.getByRole('link', { name: 'Incidents' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /^Command/ })).toHaveAttribute('href', '/command');
+    // This asserted `/command#live-incidents` - an anchor into the screen you
+    // were already on. That was the bug, not the assertion's fault: the route
+    // did not exist, so the nav pointed at the nearest thing that did. Now it
+    // is its own screen, and this is the assertion that it stopped lying.
+    expect(screen.getByRole('link', { name: /^Incidents/ })).toHaveAttribute(
       'href',
-      '/command#live-incidents',
+      '/incidents',
     );
-    expect(screen.getByRole('link', { name: 'Security' })).toHaveAttribute('href', '/security');
+    expect(screen.getByRole('link', { name: /^Security/ })).toHaveAttribute('href', '/security');
   });
 
   it('labels the decomposition as real, because it now reads the real store', () => {

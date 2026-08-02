@@ -285,8 +285,12 @@ export function parseIncidentFeedResponse(value: unknown): IncidentFeedResponse 
   };
 }
 
-export async function fetchIncidents(signal?: AbortSignal): Promise<IncidentFeedResponse> {
-  const response = await fetch('/api/incidents?limit=20', signal ? { signal } : {});
+export async function fetchIncidents(
+  signal?: AbortSignal,
+  /** The feed shows the latest few; the log wants the window it can filter. */
+  limit = 20,
+): Promise<IncidentFeedResponse> {
+  const response = await fetch(`/api/incidents?limit=${limit}`, signal ? { signal } : {});
   if (response.status !== 200 && response.status !== 503) {
     throw new Error(`incident request failed: ${response.status}`);
   }
