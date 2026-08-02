@@ -96,6 +96,16 @@ export function IncidentAlarm() {
         {alarm.origin_service !== null && ` on ${alarm.origin_service}`}
         <span className="text-body ml-2 font-normal">{alarm.reason}</span>
       </p>
+      {/* Audio is opt-in because a browser will not play it before a user
+          gesture, so an alarm that defaulted on would be silently disarmed.
+          But an operator who has never armed it should be told that here,
+          where they are already looking, rather than discovering it the next
+          time something happens and nothing sounds. */}
+      {!enabled && (
+        <span className="text-muted shrink-0 text-xs">
+          Sound is muted — arm the alarm in the header to hear the next one.
+        </span>
+      )}
       <Link
         to={`/incidents/${encodeURIComponent(alarm.incident_id)}`}
         onClick={() => setAlarm(null)}
