@@ -170,7 +170,18 @@ class LiveProducerService:
         processors windows from before their own origin. That is a wiring
         mistake, and it refuses loudly rather than limping.
         """
-        checkpoint = await self._runtime.resume()
+        await self.start_from(await self._runtime.resume())
+
+    async def start_from(self, checkpoint: LiveProducerCheckpoint | None) -> None:
+        """Start from the checkpoint an already-made resume plan selected.
+
+        A long outage deliberately discards the old stream position because
+        replaying thousands of empty ticks would fabricate a SILENCE incident.
+        The process entrypoint has already made that evidence decision via
+        ``plan_resume``; reading the store again here used to resurrect the
+        discarded checkpoint and crash every stale restart on an anchor
+        mismatch.
+        """
         if checkpoint is None:
             self._buffer.start_from(self._runtime.anchor_ts)
             return

@@ -295,6 +295,31 @@ def test_downtime_longer_than_the_silence_horizon_starts_a_fresh_stream() -> Non
     assert plan.published_baseline == 7
 
 
+def test_a_fresh_stream_does_not_resurrect_the_discarded_stale_checkpoint() -> None:
+    runtime = _Runtime(
+        checkpoint=LiveProducerCheckpoint(
+            producer_id="test-producer",
+            published_incidents=7,
+            anchor_ts=START - timedelta(hours=8),
+            tick_ts=START - timedelta(hours=7),
+        )
+    )
+    service = _service(runtime, _Committer())
+
+    # ``None`` is the explicit result of a discontinuity plan. The runtime's
+    # store still contains the old row until the first new tick is durable.
+    asyncio.run(service.start_from(None))
+    asyncio.run(
+        _feed(
+            service,
+            [(0, START + timedelta(seconds=1)), (1, START + timedelta(seconds=15))],
+            resume=False,
+        )
+    )
+
+    assert runtime.ticks[0] == START + timedelta(seconds=2)
+
+
 def test_a_short_restart_resumes_exactly_where_it_left_off() -> None:
     now = START + timedelta(seconds=40)
     checkpoint = LiveProducerCheckpoint(

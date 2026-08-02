@@ -187,7 +187,10 @@ async def run() -> None:
                 contexts=contexts,
                 context_refresh_seconds=config.live_producer_context_refresh_seconds,
             )
-            await service.resume()
+            # Use the checkpoint the discontinuity plan selected. Reading the
+            # store again here would resurrect a deliberately discarded stale
+            # checkpoint and make every long-outage restart fail on its anchor.
+            await service.start_from(plan.checkpoint)
             await consumer.start()  # type: ignore[no-untyped-call]
             try:
                 _LOG.info(
