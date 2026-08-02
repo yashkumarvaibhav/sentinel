@@ -120,14 +120,48 @@ def test_a_resumed_producer_never_rejudges_a_window_it_already_judged() -> None:
     assert [item.observation_id for item in closed[0].observations] == ["fresh"]
 
 
-def test_the_buffer_bounds_its_memory_by_closing_the_oldest_window() -> None:
+def test_the_buffer_bounds_evidence_memory_without_skipping_detector_ticks() -> None:
     buffer = _buffer(capacity=4)
+    buffer.start_from(START)
 
     for index in range(10):
         buffer.offer(_observation(f"o{index}", START + timedelta(seconds=1 + 2 * index)))
 
     assert buffer.buffered <= 4
     assert buffer.stats().late > 0
+    closed = buffer.drain(flush=True)
+    assert [item.tick_ts for item in closed] == [
+        START + timedelta(seconds=2 * index) for index in range(1, 11)
+    ]
+
+
+def test_a_peeked_tick_repeats_until_downstream_acknowledges_it() -> None:
+    buffer = _buffer()
+    buffer.start_from(START)
+    buffer.offer(_observation("window", START + timedelta(seconds=1)))
+    buffer.offer(_observation("head", START + timedelta(seconds=15)))
+
+    first = buffer.next_closed()
+
+    assert first is not None
+    assert first.tick_ts == START + timedelta(seconds=2)
+    assert buffer.next_closed() == first
+    assert buffer.stats().closed_ticks == 0
+
+    buffer.acknowledge(first.tick_ts)
+
+    assert buffer.stats().closed_ticks == 1
+    second = buffer.next_closed()
+    assert second is not None
+    assert second.tick_ts == START + timedelta(seconds=4)
+
+
+def test_acknowledgements_cannot_jump_over_an_unjudged_tick() -> None:
+    buffer = _buffer()
+    buffer.start_from(START)
+
+    with pytest.raises(ValueError, match="must be consecutive"):
+        buffer.acknowledge(START + timedelta(seconds=4))
 
 
 def test_an_anchor_must_be_a_tick_boundary_and_is_set_once() -> None:

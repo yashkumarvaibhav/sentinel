@@ -199,7 +199,7 @@ class LiveProducerService:
         await self._drain(flush=True)
 
     async def _drain(self, *, flush: bool = False) -> None:
-        for closed in self._buffer.drain(flush=flush):
+        while (closed := self._buffer.next_closed(flush=flush)) is not None:
             published = await self._runtime.advance(
                 observations=closed.observations,
                 tick_ts=closed.tick_ts,
@@ -213,6 +213,9 @@ class LiveProducerService:
             # to whether that tick happened to open an incident.
             if self._notify is not None:
                 await self._notify()
+            # Last, after every consequence of this tick is durable. If any
+            # call above fails, the same tick is returned on the record retry.
+            self._buffer.acknowledge(closed.tick_ts)
 
     async def _contexts_at(self, ts: datetime) -> tuple[ContextWindow, ...]:
         if self._contexts is None:

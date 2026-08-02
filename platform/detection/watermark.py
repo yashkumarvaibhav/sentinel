@@ -131,9 +131,28 @@ class WatermarkBuffer:
         Ticks with no evidence are still closed and still handed over: an empty
         window is what silence looks like, and the detector that judges it must
         see it rather than have it skipped.
+
+        This eager helper is for bounded/offline callers. The live consumer uses
+        :meth:`next_closed` + :meth:`acknowledge` so a failed downstream write
+        does not move this buffer past a tick that was never durably judged.
+        """
+        closed: list[ClosedTick] = []
+        while (item := self.next_closed(flush=flush)) is not None:
+            closed.append(item)
+            self.acknowledge(item.tick_ts)
+        return tuple(closed)
+
+    def next_closed(self, *, flush: bool = False) -> ClosedTick | None:
+        """Peek at the next closable tick without advancing durable position.
+
+        A bus record is committed only after the detector and incident writes
+        finish. Advancing ``_closed_through`` while merely *returning* work
+        broke that guarantee: one storage failure made a retry see no work,
+        commit the record anyway, and leave the detector permanently one tick
+        behind. The next tick then failed as non-consecutive forever.
         """
         if self._anchor is None or self._high_water is None:
-            return ()
+            return None
         limit = _floor(
             self._high_water - self._lateness,
             self._tick_seconds,
@@ -142,32 +161,47 @@ class WatermarkBuffer:
         if flush:
             limit = _floor(self._high_water, self._tick_seconds, origin=self._anchor) + self._tick
         start = self._closed_through if self._closed_through is not None else self._anchor
-        closed: list[ClosedTick] = []
         tick = start + self._tick
-        while tick <= limit:
-            bucket = self._pending.pop(tick, {})
-            closed.append(
-                ClosedTick(
-                    tick_ts=tick,
-                    observations=tuple(
-                        sorted(bucket.values(), key=lambda item: (item.ts, item.observation_id))
-                    ),
-                )
+        if tick > limit:
+            return None
+        bucket = self._pending.get(tick, {})
+        return ClosedTick(
+            tick_ts=tick,
+            observations=tuple(
+                sorted(bucket.values(), key=lambda item: (item.ts, item.observation_id))
+            ),
+        )
+
+    def acknowledge(self, tick_ts: datetime) -> None:
+        """Advance past exactly the tick a downstream consumer committed."""
+        if self._anchor is None:
+            raise ValueError("a watermark tick cannot be acknowledged before its anchor")
+        tick = _utc(tick_ts, name="tick_ts")
+        previous = self._closed_through if self._closed_through is not None else self._anchor
+        expected = previous + self._tick
+        if tick != expected:
+            raise ValueError(
+                f"watermark acknowledgement must be consecutive: expected "
+                f"{expected.isoformat()}, got {tick.isoformat()}"
             )
-            tick += self._tick
-        if closed:
-            self._closed_through = closed[-1].tick_ts
-            self._closed += len(closed)
-        return tuple(closed)
+        self._pending.pop(tick, None)
+        self._closed_through = tick
+        self._closed += 1
 
     def _evict(self) -> None:
-        """Bound memory by closing the oldest window rather than growing without limit."""
+        """Bound evidence memory without pretending an unjudged tick was closed.
+
+        Dropping observations is an explicit loss counted in ``late``. Dropping
+        the *tick* as well used to jump ``closed_through`` ahead of the detector,
+        which turned one high-volume window into a permanent retry loop. The
+        watermark will still emit that tick in order, empty if necessary, so
+        every processor's clock stays consecutive and the missing evidence is
+        never confused with a successful measurement.
+        """
         while self.buffered > self._capacity and self._pending:
             oldest = min(self._pending)
             dropped = self._pending.pop(oldest)
             self._late += len(dropped)
-            if self._closed_through is None or oldest > self._closed_through:
-                self._closed_through = oldest
 
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)

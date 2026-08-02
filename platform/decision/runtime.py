@@ -23,9 +23,8 @@ Three properties are the point of this module:
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from itertools import groupby
 from typing import Literal, Protocol
 
 from api.incidents import IncidentFeedPublisher, IncidentPublishResult
@@ -210,8 +209,17 @@ class LiveDecisionRuntime:
                 # would be a lost decision, and those are not the same loss.
                 LOGGER.exception("decomposition frames could not be persisted")
         published: list[IncidentPublishResult] = []
-        for moment, revisions in _by_event_time(measured.episodes):
-            for outcome in self._judge(moment, revisions=revisions):
+        if measured.episodes:
+            # A detector revision becomes observable to the live decision plane
+            # when this complete processing tick closes. Its own breach or close
+            # timestamp remains evidence inside the episode, but it cannot be
+            # used as the decision clock: a slower window can legitimately emit
+            # an older event after a faster detector has already been judged.
+            # Advancing once at ``measured.ts`` keeps the live clock monotonic and
+            # lets every detector revision from this tick influence one atomic
+            # judgement. Capture replay still reconstructs its historical
+            # event-time timeline in ``decision.pipeline.episode_timeline``.
+            for outcome in self._judge(measured.ts, revisions=measured.episodes):
                 result = await self._persist(outcome)
                 if result is not None:
                     published.append(result)
@@ -311,21 +319,6 @@ class LiveDecisionRuntime:
     async def resume(self) -> LiveProducerCheckpoint | None:
         """The durable position this producer reached, if it has one."""
         return await self._checkpoints.get_live_producer_checkpoint(self._producer_id)
-
-
-def _by_event_time(
-    revisions: Sequence[SymptomEpisode],
-) -> tuple[tuple[datetime, tuple[SymptomEpisode, ...]], ...]:
-    """Group one tick's revisions into the moments they each became true."""
-    ordered = sorted(
-        revisions,
-        key=lambda episode: (_effective(episode), episode.revision, episode.episode_id),
-    )
-    return tuple((moment, tuple(group)) for moment, group in groupby(ordered, key=_effective))
-
-
-def _effective(episode: SymptomEpisode) -> datetime:
-    return _utc(episode.closed_ts or episode.last_breach_ts)
 
 
 def _utc(value: datetime) -> datetime:

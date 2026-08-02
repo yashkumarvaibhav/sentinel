@@ -27,14 +27,17 @@ from contracts import (
     Decision,
     DecisionAction,
     DecompFrame,
+    EpisodeStatus,
     IncidentSeverity,
     Observation,
     SnapshotInvalidation,
     SnapshotResource,
+    SymptomEpisode,
     SymptomKind,
     VerdictClass,
 )
 from decision.runtime import LiveDecisionRuntime
+from detection.live import LiveTick
 
 START = datetime(2026, 7, 22, 12, 0, tzinfo=UTC)
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -278,6 +281,31 @@ def test_the_checkpoint_advances_only_after_the_bundle_is_durable() -> None:
     assert latest.anchor_ts == START
 
 
+def test_a_late_slow_window_revision_is_judged_at_the_current_live_tick() -> None:
+    """Older evidence may arrive later without moving the decision clock backwards."""
+    store = _Store()
+    runtime = _runtime(store, _Broker())
+    ticks = [
+        _live_tick(
+            START + timedelta(seconds=20),
+            _episode("fast-window", event_ts=START + timedelta(seconds=19)),
+        ),
+        _live_tick(
+            START + timedelta(seconds=30),
+            # A slower detector closes at :30 but describes a condition whose
+            # last breach predates the already-judged fast-window revision.
+            _episode("slow-window", event_ts=START + timedelta(seconds=5)),
+        ),
+    ]
+    runtime._processors = _ScriptedProcessors(ticks)  # type: ignore[assignment]
+
+    asyncio.run(runtime.advance(observations=(), tick_ts=ticks[0].ts))
+    asyncio.run(runtime.advance(observations=(), tick_ts=ticks[1].ts))
+
+    assert store.checkpoints[-1].tick_ts == START + timedelta(seconds=30)
+    assert store.writes[-1].updated_at == START + timedelta(seconds=30)
+
+
 def test_a_tick_that_cannot_be_stored_advances_nothing() -> None:
     class _Failing(_Store):
         async def put_incident_bundle(self, *args: object, **kwargs: object) -> bool:
@@ -314,6 +342,50 @@ def _runtime(
         planner=planner,  # type: ignore[arg-type]
         frames=frames,  # type: ignore[arg-type]
         frame_invalidation=frame_invalidation,  # type: ignore[arg-type]
+    )
+
+
+class _ScriptedProcessors:
+    """A detector script that exposes revisions in live observation order."""
+
+    def __init__(self, ticks: list[LiveTick]) -> None:
+        self._ticks = iter(ticks)
+        self.anchor_ts = START
+        self.base_tick_seconds = 2
+        self.covered_kinds = frozenset({SymptomKind.SATURATION})
+        self.covered_services = frozenset({"frontend"})
+
+    def advance(self, **_: object) -> LiveTick:
+        return next(self._ticks)
+
+
+def _live_tick(ts: datetime, *episodes: SymptomEpisode) -> LiveTick:
+    return LiveTick(
+        ts=ts,
+        episodes=episodes,
+        frames=(),
+        advanced_processors=frozenset({"resource"}),
+        covered_kinds=frozenset({SymptomKind.SATURATION}),
+        covered_services=frozenset({"frontend"}),
+    )
+
+
+def _episode(episode_id: str, *, event_ts: datetime) -> SymptomEpisode:
+    return SymptomEpisode(
+        episode_id=episode_id,
+        kind=SymptomKind.SATURATION,
+        service="frontend",
+        signal="resource.cpu.utilization",
+        status=EpisodeStatus.ACTIVE,
+        opened_ts=event_ts,
+        confirmed_ts=event_ts,
+        last_breach_ts=event_ts,
+        peak_score=0.9,
+        breach_tick_count=3,
+        revision=1,
+        opening_symptom_id=f"{episode_id}-open",
+        peak_symptom_id=f"{episode_id}-peak",
+        latest_symptom_id=f"{episode_id}-latest",
     )
 
 

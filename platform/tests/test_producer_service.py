@@ -195,6 +195,42 @@ def test_a_window_that_cannot_be_judged_leaves_the_offset_where_it_was() -> None
     assert committer.committed == [0]
 
 
+def test_a_failed_tick_is_returned_again_before_a_later_tick_can_run() -> None:
+    runtime = _Runtime(fail_on=START + timedelta(seconds=2))
+    committer = _Committer()
+    service = _service(runtime, committer)
+
+    async def drive() -> None:
+        await service.resume()
+        await service.handle(
+            BusRecord(
+                topic=NORMALIZED_TOPIC,
+                partition=0,
+                offset=0,
+                value=_observation("o0", START + timedelta(seconds=1)).model_dump_json().encode(),
+            )
+        )
+        failed = BusRecord(
+            topic=NORMALIZED_TOPIC,
+            partition=0,
+            offset=1,
+            value=_observation("o1", START + timedelta(seconds=15)).model_dump_json().encode(),
+        )
+        with pytest.raises(RuntimeError, match="storage is unavailable"):
+            await service.handle(failed)
+        runtime.fail_on = None
+        await service.handle(failed)
+
+    asyncio.run(drive())
+
+    assert runtime.ticks[0] == START + timedelta(seconds=2)
+    assert runtime.ticks == [
+        START + timedelta(seconds=2),
+        START + timedelta(seconds=4),
+    ]
+    assert committer.committed == [0, 1]
+
+
 def test_an_undecodable_record_is_counted_and_stepped_over() -> None:
     runtime = _Runtime()
     committer = _Committer()
