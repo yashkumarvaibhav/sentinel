@@ -1,85 +1,178 @@
 # Sentinel
 
-**Context-aware autonomous observability.** Sentinel separates a traffic surge into the
-part the world *explains* — a scheduled event, a launch, a match night — from the part it
-*cannot*: an attack or a self-inflicted fault hiding inside the surge. It root-causes the
-real incident and takes graded, reversible, human-gated action, with stated evidence for
-every decision.
+**A Python observability lab for decomposing traffic surges, distinguishing behavioral anomalies
+from operational faults, and verifying reversible remediation against evidence.**
 
-## The idea
+[Open the live command center](https://sentinel.yashkumarvaibhav.me)
+
+Sentinel starts from one testable idea:
 
 > **An event explains volume, not behavior.**
 
-A legitimate surge multiplies request *rates* but preserves behavioral *ratios* — IP
-entropy, auth-failure rate, SYN:ACK balance, path and conversion mix. Attacks deform those
-ratios. Internal faults deform latency and saturation instead. So Sentinel builds a
-context-aware expected band, watches the behavioral ratios independently, and treats
-whatever the band cannot explain as guilty until proven innocent — even while the
-legitimate flood roars on.
+A launch, sale, or match can multiply request rates while preserving relationships such as source-IP
+entropy, authentication-failure rate, SYN:ACK balance, path mix, and conversion. An attack deforms
+those ratios; an internal fault deforms latency, saturation, or dependency behavior. Sentinel models
+the expected event load, isolates the unexplained residual, and requires a deterministic verifier to
+confirm a proposed diagnosis before any action can run.
 
-Two patterns follow from that, and they are structural:
+The lab uses **real telemetry from an instrumented service mesh under load**. Faults and attacks are
+injected and therefore **simulated**; they are not production incidents or real-world attacks.
 
-1. **Decompose, don't threshold.** Every surge is split into
-   `observed = explained_base + explained_event + unexplained_residual`.
-   The residual is the product.
-2. **Propose, then verify.** Any reasoning step only *proposes*. A deterministic,
-   non-model verifier and a policy gate must confirm the proposal against telemetry
-   before anything is acted on. Safety-critical fields — human-approval flags, code
-   localization, action targets — are computed from evidence, never taken on trust.
+## Two design patterns
 
-## Repository layout
+1. **Decompose, do not threshold.** Each surge is represented as
+   `observed = baseline + event-explained + unexplained residual`. The residual, not the whole crowd,
+   is the anomaly signal.
+2. **Propose, then verify.** Statistical and causal components may propose an explanation. A
+   deterministic four-check verifier re-derives it from telemetry and committed topology before an
+   idempotent, leased, reversible action is eligible.
 
+Safety-critical fields such as action targets and human-approval requirements are computed from
+evidence rather than accepted from a model output.
+
+## Architecture
+
+```text
+OpenTelemetry demo workloads under k6 load and injected faults
+  └─ OpenTelemetry Collector
+       └─ Redpanda / Kafka topics
+            └─ typed normalization + DLQ + bounded deduplication
+                 ├─ ClickHouse telemetry
+                 └─ PostgreSQL incidents, decisions, actions, audit records
+
+Detection
+  ├─ event-aware decomposition and behavioral ratios
+  ├─ change points, log templates, drops, and episode lifecycle
+  ├─ LightGBM quantile envelopes + context-blind twin
+  ├─ LSTM sequence autoencoder
+  └─ split-conformal calibration + streaming drift monitors
+
+Decision
+  ├─ independent evidence axes
+  ├─ topology-aware causal collapse
+  ├─ deterministic verifier
+  └─ YAML policy gate
+
+Action
+  ├─ Kubernetes, Envoy, and feature-flag actuators
+  ├─ plan → simulate → apply → verify → revert
+  └─ leases, idempotency keys, circuit breaker, and hash-chained audit
+
+FastAPI REST/SSE gateway → React + TypeScript command center
 ```
-platform/     Python services — the seven planes
-  contracts/    Pydantic models → JSON Schema → TypeScript types (one source of truth)
-  context/      calendars, connectors, trust scoring, expected bands
-  ingest/       bus consumers, normalization, feature extraction
-  detection/    envelopes, ratios, log templates, change points, drops, episodes
-  decision/     evidence agents, fusion verdict, causal collapse, verifier, policy gate
-  rca/          trace critical path, change correlation, code localization, postmortem
-  action/       actuators (plan/simulate/apply/verify/revert), ladders, guards, breaker
-  audit/        hash-chained decision ledger
-  ml/           training pipelines, registry, calibration, drift
-  api/          FastAPI gateway — REST + SSE
-  common/       config loading, storage clients, seeded clock
-web/          React + TypeScript + Vite command center
-lab/          evaluation lab — testbed, scenarios, load, attacks, scoring harness
-config/       topology, event calendar, SLOs, cohorts, detector params, Rego policies
-deploy/       docker compose, Caddyfile, service units, dashboard provisioning
-docs/         ADRs, runbooks, port map, resource budget
+
+## Technology
+
+| Layer | Stack |
+| --- | --- |
+| Backend | Python 3.12, FastAPI, Pydantic v2, strict mypy |
+| Streaming and storage | Redpanda/Kafka, ClickHouse, PostgreSQL, OpenTelemetry |
+| Detection and ML | ruptures, drain3, LightGBM, PyTorch, statsmodels, scikit-learn, river |
+| Testbed | k3d/k3s, OpenTelemetry Demo, Chaos Mesh, k6, Envoy, flagd |
+| Frontend | React 19, TypeScript, Vite, Tailwind, ECharts |
+| Verification | pytest, Hypothesis, Vitest, Playwright, ruff, mypy, four-job GitHub Actions CI |
+
+Pydantic contracts generate JSON Schema and TypeScript types, keeping the Python and browser payloads
+on one checked interface.
+
+## What is measured
+
+Every committed report carries telemetry and stimulus honesty labels plus the underlying source IDs.
+
+| Result | Value | Evidence boundary |
+| --- | ---: | --- |
+| Minimum symptom recall | 1.000 | 7 labelled symptoms across held-out captures |
+| Detection latency p95 | 179.64 s | 20 matched symptom episodes |
+| Autonomous MTTR | 16.77 s | 1 contained real-testbed action |
+| Quiet-day false actions | 0 | 2 held-out decision replays |
+
+The harder stored-state live-run report is also committed and **fails its gate**: 0.800 decision
+accuracy, 0.400 decision-plus-reason accuracy, 0 attack recall, and 0.750 origin accuracy, while
+still taking 0 false actions. The repository preserves that failed result because a system that
+grades only its best replay is not an honest operational evaluation.
+
+- [`docs/reports/latest-score-proof.json`](docs/reports/latest-score-proof.json)
+- [`docs/reports/latest-reliability-proof.json`](docs/reports/latest-reliability-proof.json)
+- [`docs/reports/phase-6-live-run-score.md`](docs/reports/phase-6-live-run-score.md)
+
+## Repository map
+
+```text
+platform/
+  contracts/    Pydantic → JSON Schema → TypeScript contracts
+  context/      calendars, connectors, trust, expected bands
+  ingest/       Kafka consumers, normalization, windows, DLQ
+  detection/    decomposition, ratios, change points, logs, episodes
+  decision/     evidence axes, fusion, causal collapse, verifier, policy
+  action/       actuators, ladders, guards, leases, rollback, journal
+  audit/        hash-chained ledger and independent verifier
+  ml/           envelopes, forecasts, autoencoder, calibration, drift
+  api/          FastAPI REST and SSE gateway
+web/            React and TypeScript command center
+lab/            testbed, scenarios, load, attack/fault injection, scoring
+config/         topology, events, SLOs, cohorts, detectors, YAML policy
+deploy/         Docker Compose, Caddy, service units, dashboards
+docs/           ADRs, runbooks, scoring methodology, measured reports
 ```
 
-## Running it
+`platform/rca/` is currently a placeholder. Trace critical-path reconstruction, change correlation,
+code localization, and postmortem generation are **not implemented** and are not presented as shipped
+features. Policy evaluation is YAML-based; the repository does not contain OPA or Rego.
+
+## Running locally
+
+### Prerequisites
+
+- Docker with Compose
+- GNU Make
+- Enough memory and disk for the 15-service stack
 
 ```bash
-make up        # bring the stack up (docker compose, isolated network)
-make verify    # lint, typecheck and test everything
-make lab-up    # bring up the instrumented testbed that generates real telemetry
-make score     # run the scoring harness on held-out seeds
-make down      # tear the stack down
+git clone https://github.com/yashkumarvaibhav/sentinel.git
+cd sentinel
+cp .env.example .env
+make up
 ```
 
-Host ports are confined to the **8040–8049** block and bound to `127.0.0.1`; see
-`docs/ports.md`. Configuration is data — YAML and Rego under `config/` — not constants
-buried in engine code. Secrets come from the environment only; copy `.env.example` to
-`.env` to set them.
+The front door binds to loopback in the `8040–8049` port block; see
+[`docs/ports.md`](docs/ports.md). Open <http://127.0.0.1:8041> after the health checks settle.
 
-## Ground rules
+Useful commands:
 
-- **Real telemetry.** Signals come from a real instrumented service mesh under real load
-  and real fault injection, not from scripted numbers.
-- **Honesty labels.** Anything simulated is labeled `SIMULATED` in the UI and in reports;
-  measured things are labeled `REAL`. Scripted evidence is never presented as measured.
-- **The scoreboard is the definition of done.** Detection, decision and action logic are
-  written against the scoring harness, which runs on held-out seeds never used during
-  development. Ground-truth labels never reach the runtime — enforced by a runtime guard
-  and by tests over the import graph.
+```bash
+make verify       # Python and web lint, types, and tests
+make lab-up       # instrumented k3s testbed
+make score        # held-out scoring harness
+make golden       # deterministic replay contracts
+make down         # stop the application stack
+```
 
-## Status
+Secrets are read from the environment. `.env.example` contains placeholders only.
 
-Early build. The foundation phase — repository, stack, testbed, CI — is in progress; the
-decomposition core, decision plane, action plane and command center follow.
+## CI and evaluation hygiene
+
+The four CI jobs check:
+
+1. Python formatting, lint, strict typing, and tests.
+2. Web typing, lint, tests, and production build.
+3. Held-out scoring, golden replay, and whether committed reports match the current code.
+4. A complete Compose stack, migrations, storage round trips, build-stamp identity, and the
+   north-star flow through a real browser and gateway.
+
+Ground-truth scenario labels are excluded from runtime packages by an AST import-graph test. Model
+training is CPU-pinned and seeded for reproducible evaluation. `SIMULATED` and `REAL` labels travel
+with evidence into reports and the command center.
+
+## Current limits
+
+- This is a lab-scale, single-environment system with no production traffic or user population.
+- Attack and fault stimuli are injected; only the resulting telemetry path is real.
+- The public gate uses a shared-secret header for protected API actions, not user authentication or
+  RBAC.
+- The RCA package is not implemented, and there is no OPA/Rego or eBPF path.
+- The action plane is designed for safe retry and rollback, but the measured MTTR result has one
+  contained-action sample and should be read at that scope.
 
 ## License
 
-Not yet licensed for redistribution.
+No license has been granted for redistribution.
