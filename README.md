@@ -3,7 +3,7 @@
 **A Python observability lab for decomposing traffic surges, distinguishing behavioral anomalies
 from operational faults, and verifying reversible remediation against evidence.**
 
-[Open the live command center](https://sentinel.yashkumarvaibhav.me)
+Not hosted publicly at the moment; see [Running locally](#running-locally).
 
 Sentinel starts from one testable idea:
 
